@@ -26,6 +26,9 @@ use alacritty_terminal::vte::ansi;
 use log::error;
 use polling::{Event as PollingEvent, Events, PollMode, Poller};
 
+use std::sync::Mutex;
+
+use crate::blocks::{BlockRecorder, LiveState};
 use crate::marks::{MarkRecord, MarkScanner};
 use crate::session::{EngineTerm, EventProxy, SessionEvent};
 
@@ -65,6 +68,8 @@ pub(crate) struct PtyLoop {
     term: Arc<FairMutex<EngineTerm>>,
     proxy: EventProxy,
     drain_on_exit: bool,
+    recorder: BlockRecorder,
+    live: Arc<Mutex<LiveState>>,
 }
 
 #[derive(Default)]
@@ -81,6 +86,8 @@ impl PtyLoop {
         proxy: EventProxy,
         pty: tty::Pty,
         drain_on_exit: bool,
+        recorder: BlockRecorder,
+        live: Arc<Mutex<LiveState>>,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel();
         Ok(Self {
@@ -91,6 +98,8 @@ impl PtyLoop {
             term,
             proxy,
             drain_on_exit,
+            recorder,
+            live,
         })
     }
 
@@ -153,12 +162,20 @@ impl PtyLoop {
                 state.parser.advance(&mut **terminal, &chunk[..consumed]);
                 if let Some(mark) = mark {
                     let grid = terminal.grid();
-                    self.proxy.send(SessionEvent::Mark(MarkRecord {
-                        mark,
+                    let record = MarkRecord {
+                        mark: mark.clone(),
                         line: grid.cursor.point.line.0,
                         column: grid.cursor.point.column.0,
                         history_size: grid.history_size(),
-                    }));
+                    };
+                    let block = {
+                        let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
+                        self.recorder.on_mark(&mark, &mut **terminal, &mut live)
+                    };
+                    self.proxy.send(SessionEvent::Mark(record));
+                    if let Some(block) = block {
+                        self.proxy.send(SessionEvent::Block(block));
+                    }
                 }
                 chunk = &chunk[consumed..];
             }

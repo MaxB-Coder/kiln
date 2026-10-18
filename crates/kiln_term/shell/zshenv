@@ -1,0 +1,13 @@
+# Kiln: loaded as $ZDOTDIR/.zshenv. Puts ZDOTDIR back the way it was, runs the user's own
+# .zshenv, then loads Kiln's shell integration. The user's other startup files then load
+# from their usual place.
+if [[ -n "${KILN_ZDOTDIR+x}" ]]; then
+  ZDOTDIR=$KILN_ZDOTDIR
+  unset KILN_ZDOTDIR
+else
+  unset ZDOTDIR
+fi
+_kiln_integration=${${(%):-%x}:A:h}/kiln.zsh
+[[ -r "${ZDOTDIR:-$HOME}/.zshenv" ]] && source "${ZDOTDIR:-$HOME}/.zshenv"
+[[ -o interactive && -r $_kiln_integration ]] && source "$_kiln_integration"
+unset _kiln_integration

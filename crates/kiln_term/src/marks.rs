@@ -13,8 +13,9 @@ pub enum Mark {
     PromptStart,
     /// `OSC 133 ; B`: the prompt ends and the user's input starts.
     InputStart,
-    /// `OSC 133 ; C`: the command runs; its output starts.
-    OutputStart,
+    /// `OSC 133 ; C [; cmdline_url=…]`: the command runs; its output starts. The command line
+    /// comes percent-encoded when the shell sends it (kitty's extension).
+    OutputStart { command: Option<String> },
     /// `OSC 133 ; D [; exit]`: the command finished.
     CommandEnd { exit_code: Option<i32> },
     /// `OSC 7 ; file://host/path`: the shell's current folder.
@@ -69,7 +70,13 @@ fn parse_osc(params: &[&[u8]]) -> Option<Mark> {
         [b"133", kind, rest @ ..] => match *kind {
             b"A" => Some(Mark::PromptStart),
             b"B" => Some(Mark::InputStart),
-            b"C" => Some(Mark::OutputStart),
+            b"C" => {
+                let command = rest.iter().find_map(|param| {
+                    let value = param.strip_prefix(b"cmdline_url=")?;
+                    Some(percent_decode(&String::from_utf8_lossy(value)))
+                });
+                Some(Mark::OutputStart { command })
+            }
             b"D" => {
                 let exit_code = rest
                     .first()
@@ -147,7 +154,7 @@ mod tests {
             vec![
                 Mark::PromptStart,
                 Mark::InputStart,
-                Mark::OutputStart,
+                Mark::OutputStart { command: None },
                 Mark::CommandEnd { exit_code: Some(2) },
             ]
         );
@@ -162,6 +169,17 @@ mod tests {
         assert_eq!(
             scanner.scan(b"3;D\x07rest"),
             (4, Some(Mark::CommandEnd { exit_code: None }))
+        );
+    }
+
+    #[test]
+    fn output_mark_carries_the_command_line() {
+        let marks = scan_all(b"\x1b]133;C;cmdline_url=git%20log%20-1\x07");
+        assert_eq!(
+            marks[0].1,
+            Mark::OutputStart {
+                command: Some("git log -1".into())
+            }
         );
     }
 

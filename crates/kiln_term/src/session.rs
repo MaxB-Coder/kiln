@@ -13,6 +13,10 @@ use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle};
 use anyhow::{Context as _, Result};
 
+use std::sync::Mutex;
+
+use crate::blocks::{Block, BlockRecorder, LiveState};
+use crate::integration;
 use crate::marks::MarkRecord;
 use crate::pty_loop::{LoopSender, Msg, PtyLoop};
 use crate::shell::ShellCommand;
@@ -25,6 +29,8 @@ pub type EngineTerm = Term<EventProxy>;
 pub enum SessionEvent {
     Term(Event),
     Mark(MarkRecord),
+    /// A command finished.
+    Block(Block),
 }
 
 /// Forwards engine events to the UI's callback.
@@ -83,6 +89,8 @@ pub struct SessionOptions {
     pub working_directory: Option<PathBuf>,
     pub env: HashMap<String, String>,
     pub scrollback_lines: usize,
+    /// Load Kiln's shell integration (blocks need it).
+    pub shell_integration: bool,
 }
 
 impl Default for SessionOptions {
@@ -100,25 +108,41 @@ impl Default for SessionOptions {
             working_directory: home_dir(),
             env,
             scrollback_lines: 10_000,
+            shell_integration: true,
         }
     }
 }
 
 pub struct Session {
     term: Arc<FairMutex<EngineTerm>>,
+    live: Arc<Mutex<LiveState>>,
     sender: LoopSender,
     size: GridSize,
     shell: ShellCommand,
+    integrated: bool,
 }
 
 impl Session {
     /// Starts the shell and its PTY thread. `on_event` runs on the PTY thread.
     pub fn spawn(
-        options: SessionOptions,
+        mut options: SessionOptions,
         size: GridSize,
         on_event: impl Fn(SessionEvent) + Send + Sync + 'static,
     ) -> Result<Self> {
         let proxy = EventProxy(Arc::new(on_event));
+
+        let label = options.shell.clone();
+        let integrated = options.shell_integration
+            && match integration::default_dir().map(|dir| integration::install(&dir)) {
+                Some(Ok(installed)) => {
+                    integration::apply(&installed, &mut options.shell, &mut options.env)
+                }
+                Some(Err(err)) => {
+                    log::warn!("shell integration not installed: {err}");
+                    false
+                }
+                None => false,
+            };
 
         let config = term::Config {
             scrolling_history: options.scrollback_lines,
@@ -146,15 +170,19 @@ impl Session {
         let pty = tty::new(&pty_options, size.into(), 0)
             .with_context(|| format!("starting {}", options.shell.program))?;
 
-        let pty_loop = PtyLoop::new(term.clone(), proxy, pty, true)?;
+        let live = Arc::new(Mutex::new(LiveState::default()));
+        let recorder = BlockRecorder::new(options.scrollback_lines);
+        let pty_loop = PtyLoop::new(term.clone(), proxy, pty, true, recorder, live.clone())?;
         let sender = pty_loop.sender();
         pty_loop.spawn();
 
         Ok(Self {
             term,
+            live,
             sender,
             size,
-            shell: options.shell,
+            shell: label,
+            integrated,
         })
     }
 
@@ -164,6 +192,16 @@ impl Session {
 
     pub fn shell(&self) -> &ShellCommand {
         &self.shell
+    }
+
+    /// The shell's state as its integration marks report it. Lock the term first.
+    pub fn live(&self) -> LiveState {
+        self.live.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Whether Kiln's shell integration was loaded into this shell.
+    pub fn integration_loaded(&self) -> bool {
+        self.integrated
     }
 
     pub fn size(&self) -> GridSize {
