@@ -145,7 +145,8 @@ pub struct TerminalView {
     cwd: Option<String>,
     /// Dim context in the input bar ("node 22.3.0", "WSL · Ubuntu").
     context: Option<String>,
-    context_for: Option<(Option<String>, Option<String>)>,
+    context_for: Option<(Option<String>, Vec<(String, String)>)>,
+    runtimes: Vec<(String, String)>,
     _context_task: Option<Task<()>>,
     started: Instant,
     pub(crate) first_frame_logged: bool,
@@ -232,6 +233,7 @@ impl TerminalView {
             cwd: None,
             context: None,
             context_for: None,
+            runtimes: Vec::new(),
             _context_task: None,
             started,
             first_frame_logged: false,
@@ -319,37 +321,43 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// Recomputes the input bar's context when the folder or the node on PATH changed. The
-    /// version lookup may run `node --version` once, so it happens in the background.
+    /// Recomputes the project's runtimes and the input bar's context when the folder or the
+    /// tools on PATH changed. Version lookups may run a tool once, so they run in the background.
     fn refresh_context(&mut self, cx: &mut Context<Self>) {
         let live = self.session.live();
-        let key = (live.cwd.clone(), live.node_path.clone());
+        let key = (live.cwd.clone(), live.tools.clone());
         if self.context_for.as_ref() == Some(&key) {
             return;
         }
         self.context_for = Some(key.clone());
         let wsl = crate::context::wsl_label(self.session.shell());
         self._context_task = Some(cx.spawn(async move |this, cx| {
-            let node = cx
+            let runtimes = cx
                 .background_executor()
                 .spawn(async move {
-                    let (cwd, node) = key;
-                    let (cwd, node) = (cwd?, node?);
-                    if !crate::context::is_node_project(&cwd) {
-                        return None;
-                    }
-                    crate::context::node_version(&node).map(|v| format!("node {v}"))
+                    let (cwd, tools) = key;
+                    cwd.map(|cwd| crate::context::project_runtimes(&cwd, &tools))
+                        .unwrap_or_default()
                 })
                 .await;
-            let label = match (node, wsl) {
-                (Some(node), Some(wsl)) => Some(format!("{node}   {wsl}")),
-                (node, wsl) => node.or(wsl),
-            };
+            let mut parts: Vec<String> = runtimes
+                .iter()
+                .take(2)
+                .map(|(name, version)| format!("{name} {version}"))
+                .collect();
+            parts.extend(wsl);
             let _ = this.update(cx, |this, cx| {
-                this.context = label;
+                this.context = (!parts.is_empty()).then(|| parts.join("  ·  "));
+                this.runtimes = runtimes;
+                cx.emit(PaneEvent::Changed);
                 cx.notify();
             });
         }));
+    }
+
+    /// Language runtimes the current project uses, with versions.
+    pub fn runtimes(&self) -> &[(String, String)] {
+        &self.runtimes
     }
 
     /// Keeps the list's items (blocks, then the running command) in step with the session.

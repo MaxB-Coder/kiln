@@ -145,6 +145,7 @@ pub struct Session {
     size: GridSize,
     shell: ShellCommand,
     integrated: bool,
+    pid: Option<u32>,
 }
 
 impl Session {
@@ -197,6 +198,10 @@ impl Session {
         };
         let pty = tty::new(&pty_options, size.into(), 0)
             .with_context(|| format!("starting {}", options.shell.program))?;
+        #[cfg(unix)]
+        let pid = Some(pty.child().id());
+        #[cfg(windows)]
+        let pid = pty.child_watcher().pid().map(|p| p.get());
 
         let live = Arc::new(Mutex::new(LiveState::default()));
         let recorder = BlockRecorder::new(options.scrollback_lines);
@@ -213,6 +218,7 @@ impl Session {
             size,
             shell: label,
             integrated,
+            pid,
         })
     }
 
@@ -227,6 +233,11 @@ impl Session {
     /// The shell's state as its integration marks report it. Lock the term first.
     pub fn live(&self) -> LiveState {
         self.live.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The shell's process id.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
     }
 
     /// Whether Kiln's shell integration was loaded into this shell.

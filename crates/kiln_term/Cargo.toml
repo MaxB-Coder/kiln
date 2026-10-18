@@ -11,6 +11,9 @@ anyhow.workspace = true
 log.workspace = true
 # Same major version alacritty_terminal uses; the PTY registers with our Poller.
 polling = "3"
+# Processes under each shell (context rail) and the ports they listen on.
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+listeners = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

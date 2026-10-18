@@ -35,16 +35,18 @@ _kiln_prompt_command() {
   _kiln_first=
   _kiln_urlencode "$PWD"
   printf '\e]7;file://%s%s\a' "${HOSTNAME}" "$REPLY"
-  # Context for the input bar: which node is on PATH (searched in-process, no subprocess).
-  local node= dir IFS=:
-  for dir in $PATH; do
-    if [[ -x "$dir/node" && ! -d "$dir/node" ]]; then node="$dir/node"; break; fi
+  # Runtimes on PATH for the input bar and the rail (searched in-process, no subprocess).
+  local tools= tool dir IFS=:
+  for tool in node python3 ruby go rustc java deno bun; do
+    for dir in $PATH; do
+      if [[ -x "$dir/$tool" && ! -d "$dir/$tool" ]]; then tools+="$tool=$dir/$tool;"; break; fi
+    done
   done
   unset IFS
-  if [[ $node != "${_kiln_node-}" ]]; then
-    _kiln_node=$node
-    _kiln_urlencode "$node"
-    printf '\e]1337;KilnNode=%s\a' "$REPLY"
+  if [[ $tools != "${_kiln_tools-}" ]]; then
+    _kiln_tools=$tools
+    _kiln_urlencode "$tools"
+    printf '\e]1337;KilnTools=%s\a' "$REPLY"
   fi
   if [[ $PS1 != *'133;A'* ]]; then
     PS1='\[\e]133;A\a\]'"${PS1}"'\[\e]133;B\a\]'

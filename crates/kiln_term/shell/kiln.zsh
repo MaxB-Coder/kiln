@@ -32,12 +32,15 @@ _kiln_precmd() {
   fi
   _kiln_urlencode "$PWD"
   printf '\e]7;file://%s%s\a' "${HOST}" "$REPLY"
-  # Context for the input bar: which node is on PATH (a hash lookup, no subprocess).
-  local node=${commands[node]-}
-  if [[ $node != ${_kiln_node-} ]]; then
-    typeset -g _kiln_node=$node
-    _kiln_urlencode "$node"
-    printf '\e]1337;KilnNode=%s\a' "$REPLY"
+  # Runtimes on PATH for the input bar and the rail (hash lookups, no subprocess).
+  local tools= t
+  for t in node python3 ruby go rustc java deno bun; do
+    [[ -n ${commands[$t]-} ]] && tools+="$t=${commands[$t]};"
+  done
+  if [[ $tools != ${_kiln_tools-} ]]; then
+    typeset -g _kiln_tools=$tools
+    _kiln_urlencode "$tools"
+    printf '\e]1337;KilnTools=%s\a' "$REPLY"
   fi
   # Prompt themes may rebuild PS1 in their own precmd, so the wrap also runs last (from the
   # next prompt on: zsh does not see hooks added while it runs them).

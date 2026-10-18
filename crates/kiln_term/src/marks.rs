@@ -20,9 +20,9 @@ pub enum Mark {
     CommandEnd { exit_code: Option<i32> },
     /// `OSC 7 ; file://host/path`: the shell's current folder.
     Cwd { host: String, path: String },
-    /// `OSC 1337 ; KilnNode=…`: the `node` on the shell's PATH (empty: none). Kiln's own key in
-    /// iTerm2's namespace, which other terminals ignore.
-    NodePath(String),
+    /// `OSC 1337 ; KilnTools=name=path;…`: language runtimes on the shell's PATH (node,
+    /// python3, …). Kiln's own key in iTerm2's namespace, which other terminals ignore.
+    Tools(Vec<(String, String)>),
 }
 
 /// A mark plus where the cursor was when it arrived.
@@ -89,10 +89,15 @@ fn parse_osc(params: &[&[u8]]) -> Option<Mark> {
             _ => None,
         },
         [b"1337", kv] => {
-            let value = kv.strip_prefix(b"KilnNode=")?;
-            Some(Mark::NodePath(percent_decode(&String::from_utf8_lossy(
-                value,
-            ))))
+            let value = kv.strip_prefix(b"KilnTools=")?;
+            let list = percent_decode(&String::from_utf8_lossy(value));
+            let tools = list
+                .split(';')
+                .filter_map(|entry| entry.split_once('='))
+                .filter(|(name, path)| !name.is_empty() && !path.is_empty())
+                .map(|(name, path)| (name.to_string(), path.to_string()))
+                .collect();
+            Some(Mark::Tools(tools))
         }
         // A URI may contain ';', which the parser splits on.
         [b"7", uri @ ..] if !uri.is_empty() => {
@@ -205,9 +210,16 @@ mod tests {
     }
 
     #[test]
-    fn parses_node_path() {
-        let marks = scan_all(b"\x1b]1337;KilnNode=/opt/homebrew/bin/node\x07");
-        assert_eq!(marks[0].1, Mark::NodePath("/opt/homebrew/bin/node".into()));
+    fn parses_tools() {
+        let marks =
+            scan_all(b"\x1b]1337;KilnTools=node%3D%2Fbin%2Fnode%3Bgo%3D%2Fusr%2Fbin%2Fgo%3B\x07");
+        assert_eq!(
+            marks[0].1,
+            Mark::Tools(vec![
+                ("node".into(), "/bin/node".into()),
+                ("go".into(), "/usr/bin/go".into())
+            ])
+        );
     }
 
     #[test]

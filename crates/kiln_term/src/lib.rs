@@ -8,6 +8,7 @@ pub mod blocks;
 pub mod input;
 pub mod integration;
 pub mod marks;
+pub mod process;
 mod pty_loop;
 mod session;
 mod shell;
