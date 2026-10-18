@@ -62,6 +62,10 @@ pub struct TerminalView {
     pub(crate) first_frame_logged: bool,
     first_output_logged: bool,
     bench_startup: bool,
+    /// `KILN_TRACE_LATENCY=1`: logs keystroke → first frame painted after the shell answered.
+    trace_latency: bool,
+    input_at: Option<Instant>,
+    pub(crate) output_since_input: bool,
     _events: Task<()>,
     _blink: Option<Task<()>>,
 }
@@ -133,6 +137,9 @@ impl TerminalView {
             first_frame_logged: false,
             first_output_logged: false,
             bench_startup,
+            trace_latency: std::env::var_os("KILN_TRACE_LATENCY").is_some(),
+            input_at: None,
+            output_since_input: false,
             _events: events,
             _blink: None,
         };
@@ -149,6 +156,9 @@ impl TerminalView {
         for event in batch {
             match event {
                 SessionEvent::Term(TermEvent::Wakeup) => {
+                    if self.input_at.is_some() {
+                        self.output_since_input = true;
+                    }
                     if !self.first_output_logged {
                         self.first_output_logged = true;
                         log::info!("first shell output after {:?}", self.started.elapsed());
@@ -209,6 +219,19 @@ impl TerminalView {
         }
     }
 
+    /// Called after a frame is painted. Logs input latency when tracing is on.
+    pub(crate) fn frame_painted(&mut self) {
+        if self.output_since_input
+            && let Some(at) = self.input_at.take()
+        {
+            self.output_since_input = false;
+            log::info!(
+                "latency: keystroke to frame painted {:.2} ms",
+                at.elapsed().as_secs_f64() * 1000.
+            );
+        }
+    }
+
     pub(crate) fn on_first_frame(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if self.first_frame_logged {
             return;
@@ -246,6 +269,10 @@ impl TerminalView {
 
     /// Typing scrolls back to the live screen and keeps the cursor solid.
     fn before_input(&mut self, cx: &mut Context<Self>) {
+        if self.trace_latency {
+            self.input_at = Some(Instant::now());
+            self.output_since_input = false;
+        }
         let mut term = self.session.term().lock();
         if term.grid().display_offset() != 0 {
             term.scroll_display(Scroll::Bottom);

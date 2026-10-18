@@ -1,0 +1,26 @@
+{
+  "kiln": {
+    "startup": {
+      "window_on_screen_ms_median": 252.6,
+      "window_on_screen_ms_min": 238.1,
+      "shell_running_ms_median": 235.3,
+      "runs": 8
+    },
+    "idle_footprint_mb": 47.0,
+    "after_output_footprint_mb": 91.0,
+    "seq_2M_lines_s": 3.01,
+    "coloured_200k_lines_s": 1.64
+  },
+  "wezterm": {
+    "startup": {
+      "window_on_screen_ms_median": 488.1,
+      "window_on_screen_ms_min": 472.7,
+      "shell_running_ms_median": 410.2,
+      "runs": 8
+    },
+    "idle_footprint_mb": 59.0,
+    "after_output_footprint_mb": 101.0,
+    "seq_2M_lines_s": 3.05,
+    "coloured_200k_lines_s": 1.75
+  }
+}

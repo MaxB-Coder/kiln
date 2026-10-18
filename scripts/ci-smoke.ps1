@@ -21,11 +21,13 @@ $out
 if (-not ($out -match '^startup_ms=')) { throw "Kiln drew no frame with shell output" }
 $out | Out-File "smoke/startup-$name.txt"
 
-# 2. Screenshot of a session.
+# 2. Screenshot of a session. Start-Process joins arguments into one command line, so the
+#    scripts below avoid double quotes.
 if ($Wsl) {
-    $show = @("wsl.exe", "--distribution", $Wsl, "--", "sh", "-c", 'printf "\033[1mKiln on Windows, WSL\033[0m  $(uname -sr)\n\n"; for i in 0 1 2 3 4 5 6 7; do printf "\033[3${i}m colour$i \033[9${i}m bright$i\033[0m\n"; done; sleep 30')
+    $script = 'printf ''\033[1mKiln on Windows, WSL\033[0m  ''; uname -sr; echo; for i in 0 1 2 3 4 5 6 7; do printf ''\033[3%sm colour%s \033[9%sm bright%s\033[0m\n'' $i $i $i $i; done; sleep 30'
+    $show = @("wsl.exe", "--distribution", $Wsl, "--", "sh", "-c", "`"$script`"")
 } else {
-    $show = @("powershell.exe", "-NoLogo", "-NoProfile", "-Command", '$PSVersionTable.PSVersion; Get-ChildItem; Start-Sleep 30')
+    $show = @("powershell.exe", "-NoLogo", "-NoProfile", "-Command", "`"`$PSVersionTable.PSVersion; Get-ChildItem; Start-Sleep 30`"")
 }
 $proc = Start-Process -FilePath $Kiln -ArgumentList (@("--cols", "100", "--rows", "30", "--") + $show) -PassThru
 Start-Sleep 10

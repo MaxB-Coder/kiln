@@ -197,6 +197,14 @@ fn open_window(args: Args, started: Instant, cx: &mut App) {
 
     let result = cx.open_window(options, move |window, cx| {
         let metrics = CellMetrics::measure(font_size, window);
+        // The grid snaps cells to device pixels; size the window for the snapped cell so the
+        // requested columns and rows fit exactly.
+        window.resize(size(
+            metrics.cell_width * args.columns as f32 + px(2. * PADDING_X),
+            metrics.line_height * args.lines as f32
+                + px(PADDING_TOP + PADDING_BOTTOM)
+                + TITLEBAR_HEIGHT,
+        ));
         let mut session = SessionOptions::default();
         if let Some(shell) = args.shell.clone() {
             session.shell = shell;

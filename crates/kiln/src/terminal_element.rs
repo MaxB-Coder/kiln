@@ -505,6 +505,10 @@ impl Element for TerminalElement {
                 );
             }
         });
+
+        if self.view.read(cx).output_since_input {
+            self.view.update(cx, |view, _| view.frame_painted());
+        }
     }
 }
 

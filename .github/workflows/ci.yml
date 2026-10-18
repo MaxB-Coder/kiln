@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Weekly, so the WSL job (slow and billed at the Windows rate) still runs regularly.
+    - cron: "0 5 * * 1"
 
 permissions:
   contents: read
@@ -85,6 +88,7 @@ jobs:
 
   wsl:
     name: smoke (windows-x64, WSL Ubuntu)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
