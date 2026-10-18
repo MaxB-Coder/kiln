@@ -60,10 +60,12 @@ tick 6
 
 ## Not done or not verified
 
-- **Not tried by hand.** The screen was locked, so nothing was clicked or typed by a person.
-  Headless runs exercised the same code paths (typing, actions, hover, keystrokes into find and
-  the palette, the clipboard), but real mouse selection, IME and the native title-bar drag
-  still need a hands-on pass.
+- **Partly tried in the real window.** With access granted later, keystrokes went through the
+  real macOS path (key events, input method, PTY): `echo héllo-宽` and a failing `ls` were
+  recorded with the exact command line, exit codes 0 and 2, and the folder change. The window
+  stayed behind the user's work, where macOS pauses drawing, so the visuals come from the
+  headless renders. Still to try by hand: mouse selection across blocks, the title-bar drag,
+  and IME composition.
 - Find covers output, not the command lines in block headers.
 - Splits are equal width (no dragging) and side by side only.
 - Sessions and layouts are not restored after a restart (phase 2: project spaces with layouts).

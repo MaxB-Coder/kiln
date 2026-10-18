@@ -153,6 +153,9 @@ pub struct GridPainter<'a> {
     current_row: usize,
     pending_spaces: usize,
     bg_run: Option<(usize, usize, usize, Rgb)>,
+    /// Box-drawing and block characters, drawn as rectangles.
+    shapes: Vec<(Bounds<Pixels>, Hsla)>,
+    scale: f32,
     /// Any visible text was drawn.
     pub has_text: bool,
 }
@@ -176,8 +179,39 @@ impl<'a> GridPainter<'a> {
             current_row: usize::MAX,
             pending_spaces: 0,
             bg_run: None,
+            shapes: Vec::new(),
+            scale: 2.,
             has_text: false,
         }
+    }
+
+    /// The window's scale factor, so drawn lines land on whole device pixels.
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.scale = scale.max(1.);
+        self
+    }
+
+    /// Draws a box-drawing or block character itself. Returns false to use the font instead.
+    fn draw_box_char(&mut self, row: usize, column: usize, c: char, fg: Rgb) -> bool {
+        let cell_w = f32::from(self.metrics.cell_width);
+        let line_h = f32::from(self.metrics.line_height);
+        // One logical pixel per stroke, at least one device pixel.
+        let stroke = (1. * self.scale).round().max(1.) / self.scale;
+        let Some(pieces) = crate::box_drawing::pieces(c, stroke / cell_w, stroke / line_h) else {
+            return false;
+        };
+        let origin = self.cell_origin(column, row);
+        let snap = |v: f32| (v * self.scale).round() / self.scale;
+        let color = theme::rgb_to_hsla(fg);
+        for p in pieces {
+            let x0 = snap(f32::from(origin.x) + p.x * cell_w);
+            let x1 = snap(f32::from(origin.x) + (p.x + p.w) * cell_w).max(x0 + 1. / self.scale);
+            let y0 = snap(f32::from(origin.y) + p.y * line_h);
+            let y1 = snap(f32::from(origin.y) + (p.y + p.h) * line_h).max(y0 + 1. / self.scale);
+            let bounds = Bounds::new(point(px(x0), px(y0)), size(px(x1 - x0), px(y1 - y0)));
+            self.shapes.push((bounds, color.opacity(p.alpha)));
+        }
+        true
     }
 
     pub fn cell_origin(&self, column: usize, row: usize) -> Point<Pixels> {
@@ -263,6 +297,14 @@ impl<'a> GridPainter<'a> {
             self.flush_bg();
         }
 
+        if width == 1 && self.draw_box_char(row, column, cell.c, fg) {
+            // The next text on this row starts a new segment at its own column.
+            self.flush_segment();
+            self.pending_spaces = 0;
+            self.has_text = true;
+            return;
+        }
+
         let decorated = flags.intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT);
         let blank = matches!(cell.c, ' ' | '\t' | '\0') && cell.zerowidth().is_none();
         if blank && !decorated {
@@ -338,6 +380,7 @@ impl<'a> GridPainter<'a> {
             })
             .collect();
         PaintedGrid {
+            shapes: self.shapes,
             backgrounds: self.backgrounds,
             text,
             line_height: metrics.line_height,
@@ -348,14 +391,16 @@ impl<'a> GridPainter<'a> {
 
 pub struct PaintedGrid {
     backgrounds: Vec<(Bounds<Pixels>, Hsla)>,
+    shapes: Vec<(Bounds<Pixels>, Hsla)>,
     text: Vec<(Point<Pixels>, ShapedLine)>,
     line_height: Pixels,
     pub has_text: bool,
 }
 
 impl PaintedGrid {
+    /// Cell backgrounds, then box-drawing and block characters.
     pub fn paint_backgrounds(&self, window: &mut Window) {
-        for (bounds, color) in &self.backgrounds {
+        for (bounds, color) in self.backgrounds.iter().chain(&self.shapes) {
             window.paint_quad(fill(*bounds, *color));
         }
     }

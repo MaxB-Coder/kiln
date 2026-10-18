@@ -2,6 +2,7 @@
 //! the `snapshot` example renders it headless for visual checks.
 
 pub mod block_element;
+pub mod box_drawing;
 pub mod config;
 pub mod context;
 pub mod copy;

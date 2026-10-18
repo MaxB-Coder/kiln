@@ -254,7 +254,8 @@ impl Element for BlockBody {
         // Frozen output uses the default palette: programs' palette changes (OSC 4) were for
         // the live screen at the time.
         let colors = Colors::default();
-        let mut painter = GridPainter::new(bounds.origin, self.metrics, &colors, Tone::Muted);
+        let mut painter = GridPainter::new(bounds.origin, self.metrics, &colors, Tone::Muted)
+            .with_scale(window.scale_factor());
         let visible =
             crate::grid_paint::visible_rows(bounds, self.metrics.line_height, rows.len(), window);
         for (r, row) in rows

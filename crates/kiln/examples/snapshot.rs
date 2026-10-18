@@ -191,6 +191,9 @@ fn main() {
         Duration::from_secs(5),
     );
     s.shot("02-blocks");
+    s.run("clear", Duration::from_secs(5));
+    s.run("bench/sample.sh", Duration::from_secs(5));
+    s.shot("02b-rendering-sample");
     if std::env::var_os("KILN_SNAPSHOT_QUICK").is_some() {
         return;
     }
