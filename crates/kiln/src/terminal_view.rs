@@ -427,7 +427,12 @@ impl TerminalView {
         let elapsed = self.started.elapsed();
         log::info!("first frame with shell output after {elapsed:?}");
         if self.bench_startup {
-            println!("startup_ms={:.1}", elapsed.as_secs_f64() * 1000.);
+            let line = format!("startup_ms={:.1}", elapsed.as_secs_f64() * 1000.);
+            println!("{line}");
+            // Windows release builds have no console of their own: scripts read the file.
+            if let Some(path) = std::env::var_os("KILN_BENCH_FILE") {
+                let _ = std::fs::write(path, format!("{line}\n"));
+            }
             cx.quit();
         }
     }

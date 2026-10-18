@@ -103,6 +103,20 @@ impl Default for SessionOptions {
             "TERM_PROGRAM_VERSION".into(),
             env!("CARGO_PKG_VERSION").into(),
         );
+        // Apps started from Finder or a desktop launcher often have no locale; without one,
+        // shells fall back to ASCII and mangle UTF-8 input. C.UTF-8 is built into glibc, so it
+        // always exists on Linux (en_US.UTF-8 may not be generated); macOS has en_US.UTF-8.
+        if ["LC_ALL", "LC_CTYPE", "LANG"]
+            .iter()
+            .all(|var| std::env::var_os(var).is_none())
+        {
+            let lang = if cfg!(target_os = "macos") {
+                "en_US.UTF-8"
+            } else {
+                "C.UTF-8"
+            };
+            env.insert("LANG".into(), lang.into());
+        }
         Self {
             shell: ShellCommand::platform_default(),
             working_directory: home_dir(),

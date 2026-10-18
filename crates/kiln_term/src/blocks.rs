@@ -145,6 +145,7 @@ impl BlockRecorder {
         let (abs, column) = cursor_abs(term);
         match mark {
             Mark::PromptStart => {
+                self.input_start = None;
                 live.integrated = true;
                 live.phase = Phase::Prompt;
                 live.output_top = None;
@@ -159,7 +160,11 @@ impl BlockRecorder {
                 startup
             }
             Mark::InputStart => {
-                self.input_start = Some((abs, column));
+                // Line editors may redraw the prompt (and with it this mark) while the user
+                // types; the first one marks where the input really starts.
+                if self.input_start.is_none() {
+                    self.input_start = Some((abs, column));
+                }
                 live.phase = Phase::Prompt;
                 None
             }
@@ -361,6 +366,9 @@ fn logical_lines(term: &EngineTerm, top: usize, end: usize) -> Vec<Vec<Cell>> {
     while lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();
     }
+    // Pagers and full-screen programs can leave the screen blank above the cursor.
+    let leading = lines.iter().take_while(|line| line.is_empty()).count();
+    lines.drain(..leading);
     lines
 }
 

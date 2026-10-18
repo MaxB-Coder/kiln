@@ -27,7 +27,8 @@ Newest at the bottom.
 - **Command line in the mark**: kitty's `OSC 133;C;cmdline_url=` extension. The node path for the
   input bar goes through `OSC 1337;KilnNode=` (iTerm2's namespace; other terminals ignore it).
 - **Locale**: if no `LC_ALL`/`LC_CTYPE`/`LANG` is set (apps started from Finder), shells get
-  `LANG=en_US.UTF-8`, as WezTerm does.
+  a UTF-8 `LANG`, as WezTerm does: `en_US.UTF-8` on macOS, `C.UTF-8` on Linux (built into
+  glibc; `en_US.UTF-8` is missing on minimal systems, which broke non-ASCII input in a test).
 - **Copy format**: a ```` ```console ```` fence holding `folder $ command`, the output, and
   `# exit N · time`; the fence grows past any backtick run in the output. ⌘⇧C fenced, ⌘⌥C raw.
   Windows/Linux: Ctrl+Shift+C copies the selection, or the last output when nothing is

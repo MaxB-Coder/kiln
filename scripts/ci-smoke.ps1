@@ -17,11 +17,18 @@ if ($Wsl) {
     $name = "powershell"
 }
 
-# 1. Startup: Kiln quits after the first frame that shows shell output.
-$out = & $Kiln --bench-startup --cols 100 --rows 30 -- @shell
+# 1. Startup: Kiln quits after the first frame that shows shell output. Release builds are
+#    GUI-subsystem apps, so wait for the process and read the result from a file.
+$result = Join-Path (Resolve-Path smoke) "startup-$name.txt"
+Remove-Item $result -ErrorAction SilentlyContinue
+$env:KILN_BENCH_FILE = $result
+$quoted = $shell | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }
+$proc = Start-Process -FilePath $Kiln -ArgumentList (@("--bench-startup", "--cols", "100", "--rows", "30", "--") + $quoted) -PassThru
+if (-not $proc.WaitForExit(120000)) { Stop-Process -Id $proc.Id -Force; throw "Kiln did not finish within 2 minutes" }
+Remove-Item Env:KILN_BENCH_FILE
+$out = Get-Content $result -ErrorAction SilentlyContinue
 $out
 if (-not ($out -match '^startup_ms=')) { throw "Kiln drew no frame with shell output" }
-$out | Out-File "smoke/startup-$name.txt"
 
 # 2. Screenshot of a session. Start-Process joins arguments into one command line, so the
 #    scripts below avoid double quotes.

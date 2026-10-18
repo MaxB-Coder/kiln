@@ -29,6 +29,9 @@ fn run_block(program: &str, args: &[&str], command: &str) -> Option<Block> {
     let mut env = SessionOptions::default().env;
     env.insert("HOME".into(), home.to_string_lossy().into_owned());
     env.insert("PS1".into(), "$ ".into());
+    // Ubuntu's /etc/zsh/zshrc runs compinit, which asks about "insecure directories" in a
+    // fresh temporary HOME and blocks the test.
+    env.insert("skip_global_compinit".into(), "1".into());
     let options = SessionOptions {
         shell: ShellCommand::new(program, args.iter().copied()),
         working_directory: Some(home.clone()),

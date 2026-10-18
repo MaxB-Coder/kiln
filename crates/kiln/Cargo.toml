@@ -33,5 +33,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui_platform = { workspace = true, features = ["font-kit", "runtime_shaders", "test-support"] }
 
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+gpui_platform = { workspace = true, features = ["test-support"] }
+
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gpui_platform = { workspace = true, features = ["wayland", "x11", "test-support"] }

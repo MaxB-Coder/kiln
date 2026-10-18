@@ -184,7 +184,7 @@ fn main() {
 
     // 2. A few blocks: listing, git, a failure.
     s.run("ls -la", Duration::from_secs(5));
-    s.run("git log --oneline -6", Duration::from_secs(5));
+    s.run("git --no-pager log --oneline -6", Duration::from_secs(5));
     s.run("ls /does-not-exist", Duration::from_secs(5));
     s.run(
         "printf '\\033[32mok\\033[0m  colours stay in output, plain text is muted\\n'",
