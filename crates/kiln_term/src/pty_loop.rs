@@ -170,7 +170,7 @@ impl PtyLoop {
                     };
                     let block = {
                         let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
-                        self.recorder.on_mark(&mark, &mut **terminal, &mut live)
+                        self.recorder.on_mark(&mark, terminal, &mut live)
                     };
                     self.proxy.send(SessionEvent::Mark(record));
                     if let Some(block) = block {

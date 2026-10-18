@@ -148,7 +148,7 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         // Scripts in here run in every shell: nobody else may write them.
         let mut ancestors = dir.ancestors();
-        while let Some(path) = ancestors.next() {
+        for path in ancestors {
             if path.file_name().is_some_and(|n| n == "kiln") {
                 fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
                 break;
