@@ -28,12 +28,24 @@ fn powershell_block() {
 
     let deadline = Instant::now() + Duration::from_secs(60);
     let mut sent = false;
+    let mut seen = Vec::new();
     let block = loop {
         let event = rx
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .expect("no block before timeout");
+            .unwrap_or_else(|_| {
+                let term = session.term().lock();
+                let text: String = term.grid().display_iter().map(|c| c.c).collect();
+                panic!(
+                    "no block before timeout; marks {seen:?}; screen {:?}",
+                    text.trim()
+                )
+            });
+        if let SessionEvent::Mark(record) = &event {
+            seen.push(record.mark.clone());
+        }
         match event {
-            SessionEvent::Mark(record) if record.mark == Mark::PromptStart && !sent => {
+            SessionEvent::Mark(record) if record.mark == Mark::InputStart && !sent => {
+                std::thread::sleep(Duration::from_millis(300));
                 session.write(b"Write-Output first second; cmd /c exit 3\r".to_vec());
                 sent = true;
             }

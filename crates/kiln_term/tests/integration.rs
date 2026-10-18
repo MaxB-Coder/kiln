@@ -68,7 +68,9 @@ fn run_block(program: &str, args: &[&str], command: &str) -> Option<Block> {
             seen.push(record.mark.clone());
         }
         match event {
-            SessionEvent::Mark(record) if record.mark == Mark::PromptStart && !sent => {
+            // Type once the prompt is fully drawn (input mark), like a person would.
+            SessionEvent::Mark(record) if record.mark == Mark::InputStart && !sent => {
+                std::thread::sleep(Duration::from_millis(200));
                 session.write(format!("{command}\r").into_bytes());
                 sent = true;
             }

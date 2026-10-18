@@ -94,10 +94,13 @@ pub fn apply(
             if has_command {
                 return false;
             }
-            let path = path_string(&installed.powershell).replace('\'', "''");
-            shell
-                .args
-                .extend(["-NoExit".into(), "-Command".into(), format!(". '{path}'")]);
+            // Inline, not a script file: Windows client machines default to an execution
+            // policy that blocks .ps1 files, but it does not apply to -EncodedCommand.
+            shell.args.extend([
+                "-NoExit".into(),
+                "-EncodedCommand".into(),
+                encode_powershell(POWERSHELL),
+            ]);
             true
         }
         "wsl" => {
@@ -128,6 +131,26 @@ pub fn apply(
             false
         }
     }
+}
+
+/// Base64 of the UTF-16LE text, as `powershell -EncodedCommand` expects.
+fn encode_powershell(script: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16
+            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
+            | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(TABLE[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 fn shell_kind(program: &str) -> String {
@@ -187,6 +210,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn encodes_powershell_like_the_reference() {
+        // [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("ls"))
+        assert_eq!(encode_powershell("ls"), "bABzAA==");
+        assert_eq!(encode_powershell("echo é"), "ZQBjAGgAbwAgAOkA");
+    }
+
+    #[test]
     fn zsh_gets_zdotdir_and_powershell_gets_the_script() {
         let dir = std::env::temp_dir().join(format!("kiln-int-{}", std::process::id()));
         let installed = install(&dir).unwrap();
@@ -202,7 +232,7 @@ mod tests {
         assert!(apply(&installed, &mut pwsh, &mut env));
         assert_eq!(
             pwsh.args[1..3],
-            ["-NoExit".to_string(), "-Command".to_string()]
+            ["-NoExit".to_string(), "-EncodedCommand".to_string()]
         );
 
         let mut env = HashMap::new();

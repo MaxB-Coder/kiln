@@ -22,7 +22,8 @@ Newest at the bottom.
   to any width. Output printed before the first prompt becomes a quiet "shell started" block.
 - **Loading the shell integration** never touches the user's files: zsh via `ZDOTDIR` (Kiln's
   `.zshenv` restores it and sources the user's), bash via an exported `PROMPT_COMMAND`,
-  PowerShell via `-NoExit -Command`, WSL by passing the same through `WSLENV`. Scripts live in
+  PowerShell via `-NoExit -EncodedCommand` (inline, because Windows client machines block
+  `.ps1` files by default), WSL by passing the same through `WSLENV`. Scripts live in
   a versioned per-user cache folder with mode 0700. fish and nu get the classic terminal.
 - **Command line in the mark**: kitty's `OSC 133;C;cmdline_url=` extension. The node path for the
   input bar goes through `OSC 1337;KilnNode=` (iTerm2's namespace; other terminals ignore it).
