@@ -47,6 +47,23 @@ impl CellMetrics {
     }
 }
 
+/// Rows `first..last` of an element at `bounds` that fall inside the visible area (the
+/// current content mask), so long blocks only lay out what can be seen.
+pub fn visible_rows(
+    bounds: gpui::Bounds<Pixels>,
+    line_height: Pixels,
+    rows: usize,
+    window: &Window,
+) -> std::ops::Range<usize> {
+    let mask = window.content_mask().bounds;
+    let line_h = f32::from(line_height).max(1.);
+    let top = f32::from(mask.top() - bounds.top());
+    let bottom = f32::from(mask.bottom() - bounds.top());
+    let first = (top / line_h).floor().max(0.) as usize;
+    let last = ((bottom / line_h).ceil().max(0.) as usize).min(rows);
+    first.min(last)..last
+}
+
 pub fn base_font() -> Font {
     gpui::font(FONT_FAMILY)
 }

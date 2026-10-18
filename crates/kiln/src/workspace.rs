@@ -166,7 +166,7 @@ impl Workspace {
         }
     }
 
-    fn new_tab(
+    pub fn new_tab(
         &mut self,
         cwd: Option<PathBuf>,
         shell: Option<ShellCommand>,
@@ -194,7 +194,7 @@ impl Workspace {
         self.activate(insert_at, window, cx);
     }
 
-    fn focused_view(&self) -> Option<Entity<TerminalView>> {
+    pub fn focused_view(&self) -> Option<Entity<TerminalView>> {
         let tab = self.tabs.get(self.active)?;
         tab.panes.get(tab.focused).map(|p| p.view.clone())
     }
@@ -648,16 +648,22 @@ impl Workspace {
 
         let mut list = div().flex().flex_col().gap(px(2.));
         for (root, tabs) in groups {
-            let name = root
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| {
-                    if root.as_os_str().is_empty() {
-                        "starting…".into()
-                    } else {
-                        copy::short_folder(&root.to_string_lossy())
-                    }
-                });
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_default();
+            let name = if !home.is_empty() && root == Path::new(&home) {
+                "~".to_string()
+            } else {
+                root.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| {
+                        if root.as_os_str().is_empty() {
+                            "starting…".into()
+                        } else {
+                            copy::short_folder(&root.to_string_lossy())
+                        }
+                    })
+            };
             list = list.child(
                 div()
                     .pt(px(12.))
@@ -693,7 +699,7 @@ impl Workspace {
                     .items_center()
                     .justify_end()
                     .px(px(10.))
-                    .when(!cfg!(target_os = "macos") || fullscreen, |d| {
+                    .when(chrome() != Chrome::Mac || fullscreen, |d| {
                         d.justify_between().child(app_mark())
                     })
                     .window_control_area(WindowControlArea::Drag)
@@ -828,8 +834,7 @@ impl Workspace {
 
     fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette();
-        let leading = if cfg!(target_os = "macos") && !self.sidebar_open && !window.is_fullscreen()
-        {
+        let leading = if chrome() == Chrome::Mac && !self.sidebar_open && !window.is_fullscreen() {
             TRAFFIC_LIGHTS_WIDTH
         } else {
             px(10.)
@@ -855,7 +860,7 @@ impl Workspace {
                     window.start_window_move();
                 }
             })
-            .when(!cfg!(target_os = "macos") && !self.sidebar_open, |d| {
+            .when(chrome() != Chrome::Mac && !self.sidebar_open, |d| {
                 d.child(app_mark())
             })
             .child(
@@ -872,7 +877,7 @@ impl Workspace {
                     .text_ellipsis()
                     .child(SharedString::from(title)),
             )
-            .when(!cfg!(target_os = "macos"), |d| {
+            .when(chrome() != Chrome::Mac, |d| {
                 d.child(window_controls(window))
             })
             .into_any_element()
@@ -959,6 +964,27 @@ impl Workspace {
             );
         }
         row.into_any_element()
+    }
+}
+
+/// Which platform's window chrome to draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chrome {
+    Mac,
+    Windows,
+    Linux,
+}
+
+/// The chrome for this platform. `KILN_CHROME=windows|linux|mac` overrides it, so the other
+/// platforms' title strip can be previewed (and screenshotted) on any machine.
+pub fn chrome() -> Chrome {
+    match std::env::var("KILN_CHROME").as_deref() {
+        Ok("windows") => Chrome::Windows,
+        Ok("linux") => Chrome::Linux,
+        Ok("mac") => Chrome::Mac,
+        _ if cfg!(target_os = "macos") => Chrome::Mac,
+        _ if cfg!(windows) => Chrome::Windows,
+        _ => Chrome::Linux,
     }
 }
 

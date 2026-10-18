@@ -135,6 +135,8 @@ pub struct TerminalView {
     /// Last mouse cell reported to a program, to avoid repeating motion reports.
     last_mouse_cell: Option<(usize, i32)>,
     pub(crate) blocks: Vec<Rc<FrozenBlock>>,
+    /// The block under the mouse: it shows at full strength even when old.
+    hovered_block: Option<u64>,
     list_state: ListState,
     list_blocks: usize,
     list_running: bool,
@@ -221,6 +223,7 @@ impl TerminalView {
             scroll_remainder: 0.,
             last_mouse_cell: None,
             blocks: Vec::new(),
+            hovered_block: None,
             list_state,
             list_blocks: 0,
             list_running: false,
@@ -1240,6 +1243,8 @@ impl TerminalView {
                     .child(meta),
             );
 
+        let id = block.id;
+        let dimmed = !latest && !pinned && self.hovered_block != Some(id);
         div()
             .id(ElementId::NamedInteger("block".into(), block.id))
             .group(group)
@@ -1247,9 +1252,15 @@ impl TerminalView {
             .pt(px(14.))
             .flex()
             .flex_col()
-            .when(!latest && !pinned, |d| {
-                d.opacity(0.6).hover(|s| s.opacity(1.))
-            })
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                if *hovered {
+                    this.hovered_block = Some(id);
+                } else if this.hovered_block == Some(id) {
+                    this.hovered_block = None;
+                }
+                cx.notify();
+            }))
+            .when(dimmed, |d| d.opacity(0.6))
             .child(header)
             .when(has_output, |d| {
                 d.child(div().pt(px(4.)).child(BlockBody::new(
@@ -1445,10 +1456,10 @@ impl Render for TerminalView {
                 .flex()
                 .flex_col()
                 .child(
-                    list(self.list_state.clone(), cx.processor(Self::render_item))
-                        .flex_1()
-                        .w_full()
-                        .px(px(PADDING_X)),
+                    // The list ignores its own padding; pad a wrapper instead.
+                    div().flex_1().min_h_0().w_full().px(px(PADDING_X)).child(
+                        list(self.list_state.clone(), cx.processor(Self::render_item)).size_full(),
+                    ),
                 )
                 .when_some(prompt, |d, (top, rows)| {
                     d.child(

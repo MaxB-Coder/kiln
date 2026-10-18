@@ -255,7 +255,8 @@ impl Element for BlockBody {
         // the live screen at the time.
         let colors = Colors::default();
         let mut painter = GridPainter::new(bounds.origin, self.metrics, &colors, Tone::Muted);
-        for (r, row) in rows.iter().enumerate() {
+        let visible = crate::grid_paint::visible_rows(bounds, self.metrics.line_height, rows.len(), window);
+        for (r, row) in rows.iter().enumerate().skip(visible.start).take(visible.len()) {
             for (column, cell) in self.block.cells(*row).iter().enumerate() {
                 let point = TimelinePoint {
                     item: self.item,

@@ -4,72 +4,17 @@
 // `--bench-startup` and `--help` still reaches a console the app was started from.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-mod block_element;
-mod config;
-mod context;
-mod copy;
-mod grid_paint;
-mod live_element;
-mod logs;
-mod palette;
-mod search;
-mod terminal_view;
-mod text_input;
-mod theme;
-mod workspace;
-
 use std::time::Instant;
 
 use gpui::{
     App, AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds,
-    WindowDecorations, WindowOptions, actions, point, px, size,
+    WindowDecorations, WindowOptions, point, px, size,
 };
+use kiln::grid_paint::{self, CellMetrics};
+use kiln::terminal_view::{PADDING_BOTTOM, PADDING_TOP, PADDING_X};
+use kiln::workspace::{TITLEBAR_HEIGHT, Workspace};
+use kiln::*;
 use kiln_term::ShellCommand;
-
-use crate::grid_paint::CellMetrics;
-use crate::terminal_view::{PADDING_BOTTOM, PADDING_TOP, PADDING_X};
-use crate::workspace::{TITLEBAR_HEIGHT, Workspace};
-
-actions!(
-    kiln,
-    [
-        Quit,
-        NewWindow,
-        CloseWindow,
-        NewSession,
-        ClosePane,
-        SplitRight,
-        FocusNextPane,
-        FocusPrevPane,
-        NextSession,
-        PrevSession,
-        SelectSession1,
-        SelectSession2,
-        SelectSession3,
-        SelectSession4,
-        SelectSession5,
-        SelectSession6,
-        SelectSession7,
-        SelectSession8,
-        SelectSession9,
-        ToggleSidebar,
-        Find,
-        CommandPaletteToggle,
-        ZoomIn,
-        ZoomOut,
-        ZoomReset,
-        EditConfig,
-        Copy,
-        CopyLastOutput,
-        CopyLastOutputRaw,
-        Paste,
-        SelectAll,
-        ScrollPageUp,
-        ScrollPageDown,
-        ScrollToTop,
-        ScrollToBottom,
-    ]
-);
 
 #[derive(Clone)]
 struct Args {

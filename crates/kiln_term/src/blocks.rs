@@ -66,8 +66,9 @@ pub struct Block {
 }
 
 impl Block {
+    /// Exited with an error. Ctrl-C (130, SIGINT) is the user stopping it, not a failure.
     pub fn failed(&self) -> bool {
-        self.exit_code.is_some_and(|code| code != 0)
+        self.exit_code.is_some_and(|code| code != 0 && code != 130)
     }
 
     /// Output as plain text, one line per logical line.

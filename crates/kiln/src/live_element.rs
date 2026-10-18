@@ -146,7 +146,7 @@ impl Element for LiveElement {
                 .then_some((cursor_row as usize, cursor.point.column.0));
 
         let mut painter = GridPainter::new(bounds.origin, metrics, &colors, Tone::Normal);
-        for row in 0..rows {
+        for row in crate::grid_paint::visible_rows(bounds, metrics.line_height, rows, window) {
             let line = self.top as i32 + row as i32 - history;
             if line < -history || line >= screen_lines {
                 continue;

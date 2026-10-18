@@ -11,12 +11,18 @@ Collected during the autonomous build; raised at the end of the project.
 
 ## Needs you on this Mac
 
+- Phase 1 was checked with headless renders (real shells and real rendering, no display): the
+  screen was locked while I worked. Please try it by hand: mouse selection across blocks,
+  hover actions, the palette and find with the keyboard, splits, ⌘B, ⌘T.
+
 - ⌘C / ⌘V end to end, dead keys (Option+E then E), and the keystroke latency procedure in
   `bench/LATENCY.md` (my tools may not touch the clipboard or type into WezTerm).
 
 ## Repository and accounts
 
 - Push the local commits made after 2026-10-18 16:10 to `MaxB-Coder/kiln`? (Pushing is paused.)
+  CI then runs the new PowerShell block test on Windows and the headless screenshots on
+  macOS and Linux.
 - Install the Renovate GitHub app on the repo.
 - Choose a licence (none yet). Third-party code inside Kiln: alacritty's PTY loop (Apache-2.0,
   attributed); fonts (OFL + MIT).

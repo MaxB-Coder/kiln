@@ -69,6 +69,12 @@ jobs:
         timeout-minutes: 5
         run: xvfb-run -a -s "-screen 0 1600x1000x24" scripts/ci-smoke.sh target/release/kiln
 
+      - name: Headless screenshots of every feature (macOS, Linux)
+        if: runner.os != 'Windows'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: cargo run --release --locked -p kiln --example snapshot -- smoke/snapshots
+
       - name: Smoke run (Windows, PowerShell)
         if: runner.os == 'Windows'
         timeout-minutes: 5
