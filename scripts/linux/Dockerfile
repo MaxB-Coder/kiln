@@ -8,4 +8,10 @@ RUN apt-get update \
       libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers \
  && rm -rf /var/lib/apt/lists/*
 RUN rustup component add rustfmt clippy
+# PowerShell 7 for the shell-integration tests (official release, by architecture).
+ARG PWSH_VERSION=7.6.7
+RUN arch=$(dpkg --print-architecture | sed 's/amd64/x64/') \
+ && curl -fsSL -o /tmp/pwsh.tgz "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/powershell-${PWSH_VERSION}-linux-${arch}.tar.gz" \
+ && mkdir -p /opt/pwsh && tar -xzf /tmp/pwsh.tgz -C /opt/pwsh && chmod +x /opt/pwsh/pwsh \
+ && ln -s /opt/pwsh/pwsh /usr/local/bin/pwsh && rm /tmp/pwsh.tgz
 WORKDIR /work

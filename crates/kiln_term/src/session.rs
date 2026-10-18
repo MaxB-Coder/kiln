@@ -35,16 +35,27 @@ pub enum SessionEvent {
 
 /// Forwards engine events to the UI's callback.
 #[derive(Clone)]
-pub struct EventProxy(Arc<dyn Fn(SessionEvent) + Send + Sync>);
+pub struct EventProxy {
+    callback: Arc<dyn Fn(SessionEvent) + Send + Sync>,
+    /// Answers to the program (cursor position, device attributes) go straight back to the PTY
+    /// from the PTY thread: programs such as PowerShell wait for them before reading input.
+    writer: Arc<std::sync::OnceLock<LoopSender>>,
+}
 
 impl EventProxy {
     pub(crate) fn send(&self, event: SessionEvent) {
-        (self.0)(event)
+        (self.callback)(event)
     }
 }
 
 impl EventListener for EventProxy {
     fn send_event(&self, event: Event) {
+        if let Event::PtyWrite(text) = &event
+            && let Some(writer) = self.writer.get()
+        {
+            let _ = writer.send(Msg::Input(text.clone().into_bytes().into()));
+            return;
+        }
         self.send(SessionEvent::Term(event))
     }
 }
@@ -143,7 +154,10 @@ impl Session {
         size: GridSize,
         on_event: impl Fn(SessionEvent) + Send + Sync + 'static,
     ) -> Result<Self> {
-        let proxy = EventProxy(Arc::new(on_event));
+        let proxy = EventProxy {
+            callback: Arc::new(on_event),
+            writer: Arc::default(),
+        };
 
         let label = options.shell.clone();
         let integrated = options.shell_integration
@@ -186,8 +200,10 @@ impl Session {
 
         let live = Arc::new(Mutex::new(LiveState::default()));
         let recorder = BlockRecorder::new(options.scrollback_lines);
+        let proxy_writer = proxy.writer.clone();
         let pty_loop = PtyLoop::new(term.clone(), proxy, pty, true, recorder, live.clone())?;
         let sender = pty_loop.sender();
+        let _ = proxy_writer.set(sender.clone());
         pty_loop.spawn();
 
         Ok(Self {

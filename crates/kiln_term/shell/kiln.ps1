@@ -52,11 +52,14 @@ function global:prompt {
     $out
 }
 
-# PSReadLine calls this to read each command line; mark the output start once it returns.
-if (Get-Module -Name PSReadLine) {
+# PSReadLine reads each command line through PSConsoleHostReadLine. Wrap PSReadLine's own
+# function (its ReadLine overloads change between versions) and mark the output start once
+# the line is read.
+if (Get-Command PSConsoleHostReadLine -ErrorAction SilentlyContinue) {
+    $global:__KilnReadLine = ${function:PSConsoleHostReadLine}
     function global:PSConsoleHostReadLine {
-        $line = [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($Host.Runspace, $ExecutionContext)
-        if ($line.Trim().Length -gt 0) {
+        $line = & $global:__KilnReadLine
+        if ($line -and $line.Trim().Length -gt 0) {
             $global:__KilnRunning = $true
             [Console]::Write("$([char]27)]133;C;cmdline_url=$(__KilnEncode $line)$([char]7)")
         }

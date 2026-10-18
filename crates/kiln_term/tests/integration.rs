@@ -113,9 +113,30 @@ fn bash5_block() {
 }
 
 #[test]
-fn bash3_block_without_output_mark() {
-    // macOS ships bash 3.2: no PS0, so the recorder infers the output start.
+fn bash3_block() {
+    // macOS ships bash 3.2: no PS0, so the output mark comes from a DEBUG trap.
     if let Some(block) = run_block("/bin/bash", &["-l"], COMMAND) {
         check(block, COMMAND, OUTPUT);
+    }
+}
+
+#[test]
+fn pwsh_block() {
+    // PowerShell 7 where it is installed (the Linux test container has it).
+    let Some(pwsh) = [
+        "/usr/local/bin/pwsh",
+        "/opt/homebrew/bin/pwsh",
+        "/usr/bin/pwsh",
+    ]
+    .into_iter()
+    .find(|p| Path::new(p).exists()) else {
+        eprintln!("skipping: pwsh not installed");
+        return;
+    };
+    let command = "Write-Output first second; /bin/sh -c 'exit 3'";
+    if let Some(block) = run_block(pwsh, &["-NoLogo", "-NoProfile"], command) {
+        assert_eq!(block.command, command);
+        assert_eq!(block.exit_code, Some(3));
+        assert_eq!(block.output_text(), "first\nsecond");
     }
 }

@@ -54,8 +54,22 @@ _kiln_prompt_command() {
 
 if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
   PS0='\[\e]133;C\a\]'"${PS0-}"
+elif [[ -z "$(trap -p DEBUG)" ]]; then
+  # Older bash (macOS ships 3.2) has no PS0: the first command after each prompt marks the
+  # output start from a DEBUG trap. Only when the user has no DEBUG trap of their own.
+  _kiln_at_prompt=
+  _kiln_debug() {
+    [[ -n "$_kiln_at_prompt" && -z "${COMP_LINE-}" ]] || return 0
+    case "$BASH_COMMAND" in _kiln_arm*) return 0 ;; esac
+    _kiln_at_prompt=
+    printf '\e]133;C\a'
+  }
+  trap '_kiln_debug' DEBUG
 fi
 
-PROMPT_COMMAND="_kiln_prompt_command${_kiln_user_pc:+;$_kiln_user_pc}"
+# Runs last in PROMPT_COMMAND: from here on, the next command is the user's.
+_kiln_arm() { _kiln_at_prompt=1; }
+PROMPT_COMMAND="_kiln_prompt_command${_kiln_user_pc:+;$_kiln_user_pc};_kiln_arm"
 unset _kiln_user_pc
 _kiln_prompt_command
+_kiln_arm
