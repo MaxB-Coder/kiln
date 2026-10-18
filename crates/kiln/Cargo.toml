@@ -1,0 +1,25 @@
+[package]
+name = "kiln"
+version = "0.0.1"
+edition.workspace = true
+publish.workspace = true
+description = "Kiln terminal app"
+
+[dependencies]
+anyhow.workspace = true
+env_logger.workspace = true
+futures = "0.3"
+gpui.workspace = true
+kiln_term.workspace = true
+log.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# font-kit: text rendering (off by default in gpui_macos).
+# runtime_shaders: compile Metal shaders at startup, so it builds without full Xcode.
+gpui_platform = { workspace = true, features = ["font-kit", "runtime_shaders"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui_platform.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gpui_platform = { workspace = true, features = ["wayland", "x11"] }

@@ -1,0 +1,16 @@
+[package]
+name = "kiln_term"
+version = "0.0.1"
+edition.workspace = true
+publish.workspace = true
+description = "Kiln's terminal session: shell, PTY loop, engine and input encoding. No UI code."
+
+[dependencies]
+alacritty_terminal.workspace = true
+anyhow.workspace = true
+log.workspace = true
+# Same major version alacritty_terminal uses; the PTY registers with our Poller.
+polling = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
