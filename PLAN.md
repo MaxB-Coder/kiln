@@ -90,6 +90,18 @@ The full palette (ANSI 16 included) is in `~/dotfiles/home/dot_config/wezterm/pa
 3. **Ship** (1–2 weeks; the pipeline starts in phase 0): signed installers, cargo-packager
    updater, Renovate, cargo deny/audit, weekly releases.
 
+## Phase 0 outcomes (2026-10-18)
+
+Go on GPUI + alacritty_terminal; details in `notes/phase0.md`. Changes to the plan:
+
+- Window chrome is phase 1 work on Windows and Linux: Windows 11 controls drawn by Kiln, and
+  on Linux a client-side title bar and resize edges (GNOME on Wayland has no server ones).
+- Blocks are frozen per command: when a command finishes, its output is copied out of the
+  live grid into its own block, so blocks survive scrollback trimming and window resizes.
+- The font (Nerd Fonts-patched JetBrains Mono) is embedded in the app.
+- The Windows build switches to the Windows subsystem (no console window).
+- Test Windows on real hardware early (GPUI key-repeat and Alt issues).
+
 ## Security
 
 - The engine stays a plain dependency.
