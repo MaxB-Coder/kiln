@@ -8,7 +8,9 @@ $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force smoke | Out-Null
 
 if ($Wsl) {
-    $shell = @("wsl.exe", "--distribution", $Wsl, "--", "sh", "-c", "echo kiln-smoke; uname -a; sleep 20")
+    # --exec: run sh directly. With "--", wsl.exe passes the command through a second shell
+    # that expands $variables before sh sees them.
+    $shell = @("wsl.exe", "--distribution", $Wsl, "--exec", "sh", "-c", "echo kiln-smoke; uname -a; sleep 20")
     $name = "wsl"
 } else {
     $shell = @("powershell.exe", "-NoLogo", "-NoProfile", "-Command", "Write-Output kiln-smoke; Start-Sleep 20")
@@ -25,7 +27,7 @@ $out | Out-File "smoke/startup-$name.txt"
 #    scripts below avoid double quotes.
 if ($Wsl) {
     $script = 'printf ''\033[1mKiln on Windows, WSL\033[0m  ''; uname -sr; echo; for i in 0 1 2 3 4 5 6 7; do printf ''\033[3%sm colour%s \033[9%sm bright%s\033[0m\n'' $i $i $i $i; done; sleep 30'
-    $show = @("wsl.exe", "--distribution", $Wsl, "--", "sh", "-c", "`"$script`"")
+    $show = @("wsl.exe", "--distribution", $Wsl, "--exec", "sh", "-c", "`"$script`"")
 } else {
     $show = @("powershell.exe", "-NoLogo", "-NoProfile", "-Command", "`"`$PSVersionTable.PSVersion; Get-ChildItem; Start-Sleep 30`"")
 }

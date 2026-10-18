@@ -114,13 +114,19 @@ WezTerm, so do not compare sharpness pixel for pixel; by eye both are crisp.
 
 Other platforms (GitHub runners, software rendering, so only correctness):
 
-| Windows, PowerShell on ConPTY | Linux, X11 under Xvfb, Vulkan (lavapipe) |
+| Windows, PowerShell on ConPTY | Windows, WSL 2 Ubuntu on ConPTY |
 | --- | --- |
-| ![Windows](screenshots/ci-windows-powershell.png) | ![Linux](screenshots/ci-linux-x11.png) |
+| ![Windows](screenshots/ci-windows-powershell.png) | ![WSL](screenshots/ci-windows-wsl.png) |
 
-The WSL job passed (a frame with output from the WSL Ubuntu session was drawn), but its
-screenshot missed the window because of a quoting bug in the script, now fixed; it runs weekly.
-The missing glyphs in the Linux shot are CJK characters: the runner has no CJK font.
+| Linux, X11 under Xvfb, Vulkan (lavapipe) |
+| --- |
+| ![Linux](screenshots/ci-linux-x11.png) |
+
+- The missing glyphs in the Linux shot are CJK characters: the runner has no CJK font.
+- In the WSL shot the colour numbers are missing because of the test script, not Kiln:
+  `wsl.exe -- cmd` sends the command through a second shell that expands `$i` too early.
+  `wsl.exe --exec` avoids that (fixed in the script). Phase 1 must use `--exec` when it reruns
+  a command in WSL.
 
 ## Findings that change the plan
 
