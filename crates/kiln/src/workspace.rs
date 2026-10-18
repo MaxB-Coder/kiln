@@ -1,63 +1,1219 @@
-//! The window's root view. Phase 1 adds the sidebar, the input bar and splits here; for now it
-//! holds one terminal and the space the window controls need.
+//! The window's root view: the sidebar of sessions, the panes of the active session side by
+//! side, find, the command palette, and the title strip with the window controls.
 
-use std::time::Instant;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext as _, Context, Entity, InteractiveElement, IntoElement, ParentElement, Pixels,
-    Render, Styled, Window, div, px,
+    Action, AnyElement, App, AppContext as _, Context, Decorations, Entity, Focusable,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render, ResizeEdge,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, Window,
+    WindowControlArea, div, px,
 };
-use kiln_term::{GridSize, SessionOptions};
+use kiln_term::{GridSize, SessionOptions, ShellCommand};
 
-use crate::CloseWindow;
-use crate::terminal_element::CellMetrics;
-use crate::terminal_view::TerminalView;
-use crate::theme::{self, PALETTE};
+use crate::config::{self, Config};
+use crate::copy;
+use crate::grid_paint::{CellMetrics, FONT_FAMILY};
+use crate::logs;
+use crate::palette::{CommandPalette, PaletteEvent, PaletteItem, PaletteTarget};
+use crate::search::Match;
+use crate::terminal_view::{PaneEvent, PaneStatus, TerminalView};
+use crate::text_input::{TextInput, TextInputEvent};
+use crate::theme::{self, palette};
+use crate::{
+    ClosePane, CloseWindow, CommandPaletteToggle, CopyLastOutput, CopyLastOutputRaw, EditConfig,
+    Find, FocusNextPane, FocusPrevPane, NewSession, NewWindow, NextSession, PrevSession, Quit,
+    SelectSession1, SelectSession2, SelectSession3, SelectSession4, SelectSession5, SelectSession6,
+    SelectSession7, SelectSession8, SelectSession9, SplitRight, ToggleSidebar, ZoomIn, ZoomOut,
+    ZoomReset,
+};
 
-/// Height of the top strip that holds the window controls (traffic lights on macOS).
-pub const TITLEBAR_HEIGHT: Pixels = px(30.);
+/// Height of the strip at the top that holds the window controls.
+pub const TITLEBAR_HEIGHT: Pixels = px(32.);
+const SIDEBAR_WIDTH: Pixels = px(220.);
+/// Room for the macOS traffic lights when the sidebar is hidden.
+const TRAFFIC_LIGHTS_WIDTH: Pixels = px(78.);
+const PANE_GAP: Pixels = px(10.);
+
+struct Pane {
+    view: Entity<TerminalView>,
+    _events: Subscription,
+}
+
+/// A session in the sidebar: one or more panes side by side.
+struct Tab {
+    id: u64,
+    panes: Vec<Pane>,
+    focused: usize,
+}
+
+struct SearchBar {
+    input: Entity<TextInput>,
+    pane: Entity<TerminalView>,
+    matches: Vec<Match>,
+    current: Option<usize>,
+    _events: Subscription,
+}
 
 pub struct Workspace {
-    content: Result<Entity<TerminalView>, String>,
+    tabs: Vec<Tab>,
+    active: usize,
+    next_tab_id: u64,
+    sidebar_open: bool,
+    search: Option<SearchBar>,
+    palette: Option<(Entity<CommandPalette>, Subscription)>,
+    metrics: CellMetrics,
+    started: Instant,
+    bench_startup: bool,
+    shell_override: Option<ShellCommand>,
+    /// Git root (or folder) per working directory, for grouping sessions by project.
+    projects: HashMap<String, PathBuf>,
+    start_error: Option<String>,
+    _config_watch: Task<()>,
 }
 
 impl Workspace {
     pub fn new(
-        session: SessionOptions,
-        grid: GridSize,
+        shell_override: Option<ShellCommand>,
         metrics: CellMetrics,
         bench_startup: bool,
         started: Instant,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let content = match TerminalView::spawn_session(session, grid) {
-            Ok((session, events)) => Ok(cx.new(|cx| {
-                TerminalView::new(session, events, metrics, bench_startup, started, window, cx)
-            })),
-            Err(err) => Err(format!("{err:#}")),
+        let config = config::current();
+        let mut this = Self {
+            tabs: Vec::new(),
+            active: 0,
+            next_tab_id: 1,
+            sidebar_open: config.window.sidebar,
+            search: None,
+            palette: None,
+            metrics,
+            started,
+            bench_startup,
+            shell_override,
+            projects: HashMap::new(),
+            start_error: None,
+            _config_watch: Task::ready(()),
         };
-        Self { content }
+        this._config_watch = this.watch_config(window, cx);
+        this.new_tab(None, None, window, cx);
+        this
+    }
+
+    // ----- panes and sessions ---------------------------------------------------------------
+
+    fn session_options(&self, cwd: Option<PathBuf>, shell: Option<ShellCommand>) -> SessionOptions {
+        let config = config::current();
+        let mut options = SessionOptions::default();
+        if let Some(shell) = shell.or_else(|| self.shell_override.clone()) {
+            options.shell = shell;
+        } else if let Some(program) = config.shell.program.clone() {
+            options.shell =
+                ShellCommand::new(program, config.shell.args.clone().unwrap_or_default());
+        }
+        if let Some(cwd) = cwd.filter(|c| c.is_dir()) {
+            options.working_directory = Some(cwd);
+        }
+        options.scrollback_lines = config.scrollback;
+        options.shell_integration = config.shell.integration.unwrap_or(true);
+        options
+    }
+
+    fn spawn_pane(
+        &mut self,
+        cwd: Option<PathBuf>,
+        shell: Option<ShellCommand>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Pane> {
+        let options = self.session_options(cwd, shell);
+        // A first guess; the pane resizes the grid to its real size on its first frame.
+        let grid = GridSize {
+            columns: 100,
+            lines: 30,
+            cell_width: 16,
+            cell_height: 34,
+        };
+        let bench = self.bench_startup && self.tabs.is_empty();
+        match TerminalView::spawn_session(options, grid) {
+            Ok((session, events)) => {
+                let metrics = self.metrics;
+                let started = if self.tabs.is_empty() {
+                    self.started
+                } else {
+                    Instant::now()
+                };
+                let view = cx.new(|cx| {
+                    TerminalView::new(session, events, metrics, bench, started, window, cx)
+                });
+                let events = cx.subscribe_in(&view, window, Self::on_pane_event);
+                Some(Pane {
+                    view,
+                    _events: events,
+                })
+            }
+            Err(err) => {
+                log::error!("could not start the shell: {err:#}");
+                self.start_error = Some(format!("{err:#}"));
+                cx.notify();
+                None
+            }
+        }
+    }
+
+    fn new_tab(
+        &mut self,
+        cwd: Option<PathBuf>,
+        shell: Option<ShellCommand>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pane) = self.spawn_pane(cwd, shell, window, cx) else {
+            return;
+        };
+        let id = self.next_tab_id;
+        self.next_tab_id += 1;
+        let insert_at = if self.tabs.is_empty() {
+            0
+        } else {
+            self.active + 1
+        };
+        self.tabs.insert(
+            insert_at,
+            Tab {
+                id,
+                panes: vec![pane],
+                focused: 0,
+            },
+        );
+        self.activate(insert_at, window, cx);
+    }
+
+    fn focused_view(&self) -> Option<Entity<TerminalView>> {
+        let tab = self.tabs.get(self.active)?;
+        tab.panes.get(tab.focused).map(|p| p.view.clone())
+    }
+
+    fn focused_cwd(&self, cx: &App) -> Option<PathBuf> {
+        self.focused_view()
+            .and_then(|v| v.read(cx).cwd().map(PathBuf::from))
+    }
+
+    fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(view) = self.focused_view() {
+            window.focus(&view.focus_handle(cx), cx);
+        }
+    }
+
+    fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        self.active = index;
+        self.close_search(window, cx);
+        self.focus_active(window, cx);
+        self.update_title(window, cx);
+        cx.notify();
+    }
+
+    fn update_title(&self, window: &mut Window, cx: &App) {
+        if let Some(view) = self.focused_view() {
+            window.set_window_title(&view.read(cx).title());
+        }
+    }
+
+    fn split_right(
+        &mut self,
+        cwd: Option<PathBuf>,
+        shell: Option<ShellCommand>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cwd = cwd.or_else(|| self.focused_cwd(cx));
+        let Some(pane) = self.spawn_pane(cwd, shell, window, cx) else {
+            return;
+        };
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return;
+        };
+        tab.focused += 1;
+        tab.panes.insert(tab.focused, pane);
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    fn close_pane(
+        &mut self,
+        view: &Entity<TerminalView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((t, p)) = self.tabs.iter().enumerate().find_map(|(t, tab)| {
+            tab.panes
+                .iter()
+                .position(|pane| &pane.view == view)
+                .map(|p| (t, p))
+        }) else {
+            return;
+        };
+        if self.search.as_ref().is_some_and(|s| &s.pane == view) {
+            self.search = None;
+        }
+        let tab = &mut self.tabs[t];
+        tab.panes.remove(p);
+        if tab.panes.is_empty() {
+            self.tabs.remove(t);
+            if self.tabs.is_empty() {
+                window.remove_window();
+                return;
+            }
+            if self.active >= t && self.active > 0 {
+                self.active -= 1;
+            }
+        } else {
+            tab.focused = tab.focused.min(tab.panes.len() - 1);
+        }
+        self.focus_active(window, cx);
+        self.update_title(window, cx);
+        cx.notify();
+    }
+
+    fn focus_pane(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return;
+        };
+        let len = tab.panes.len() as isize;
+        tab.focused = (tab.focused as isize + delta).rem_euclid(len) as usize;
+        self.focus_active(window, cx);
+        self.update_title(window, cx);
+        cx.notify();
+    }
+
+    fn on_pane_event(
+        &mut self,
+        view: &Entity<TerminalView>,
+        event: &PaneEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            PaneEvent::Changed => {
+                if Some(view) == self.focused_view().as_ref() {
+                    self.update_title(window, cx);
+                }
+                cx.notify();
+            }
+            PaneEvent::Exited => self.close_pane(view, window, cx),
+            PaneEvent::OpenLog(path) => self.split_right(
+                path.parent().map(Path::to_path_buf),
+                Some(logs::viewer_command(path)),
+                window,
+                cx,
+            ),
+        }
+    }
+
+    // ----- find -----------------------------------------------------------------------------
+
+    fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pane) = self.focused_view() else {
+            return;
+        };
+        if let Some(search) = &self.search
+            && search.pane == pane
+        {
+            window.focus(&search.input.focus_handle(cx), cx);
+            return;
+        }
+        let input = cx.new(|cx| TextInput::new("Find", cx));
+        let events = cx.subscribe_in(
+            &input,
+            window,
+            |this, input, event, window, cx| match event {
+                TextInputEvent::Changed => {
+                    let query = input.read(cx).text().to_string();
+                    this.run_search(&query, cx);
+                }
+                // Enter goes back in time (older), Shift+Enter forward, like scrolling a terminal.
+                TextInputEvent::Submit { shift } => {
+                    this.step_search(if *shift { 1 } else { -1 }, cx)
+                }
+                TextInputEvent::Up => this.step_search(-1, cx),
+                TextInputEvent::Down => this.step_search(1, cx),
+                TextInputEvent::Cancel => this.close_search(window, cx),
+            },
+        );
+        window.focus(&input.focus_handle(cx), cx);
+        self.search = Some(SearchBar {
+            input,
+            pane,
+            matches: Vec::new(),
+            current: None,
+            _events: events,
+        });
+        cx.notify();
+    }
+
+    fn run_search(&mut self, query: &str, cx: &mut Context<Self>) {
+        let Some(search) = self.search.as_mut() else {
+            return;
+        };
+        let matches = search
+            .pane
+            .update(cx, |pane, cx| pane.set_search(query, cx));
+        search.current = matches.len().checked_sub(1);
+        search.matches = matches;
+        if let Some(m) = search.current.map(|i| search.matches[i]) {
+            search.pane.update(cx, |pane, cx| pane.reveal_match(m, cx));
+        }
+        cx.notify();
+    }
+
+    fn step_search(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(search) = self.search.as_mut() else {
+            return;
+        };
+        if search.matches.is_empty() {
+            return;
+        }
+        let len = search.matches.len() as isize;
+        let next = (search.current.unwrap_or(0) as isize + delta).rem_euclid(len) as usize;
+        search.current = Some(next);
+        let m = search.matches[next];
+        search.pane.update(cx, |pane, cx| pane.reveal_match(m, cx));
+        cx.notify();
+    }
+
+    fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(search) = self.search.take() {
+            search.pane.update(cx, |pane, cx| {
+                pane.set_search("", cx);
+            });
+            self.focus_active(window, cx);
+            cx.notify();
+        }
+    }
+
+    // ----- palette --------------------------------------------------------------------------
+
+    fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.palette.take().is_some() {
+            self.focus_active(window, cx);
+            cx.notify();
+            return;
+        }
+        let items = self.palette_items(cx);
+        let palette = cx.new(|cx| CommandPalette::new(items, window, cx));
+        let events = cx.subscribe_in(&palette, window, |this, _, event, window, cx| match event {
+            PaletteEvent::Dismiss => {
+                this.palette = None;
+                this.focus_active(window, cx);
+                cx.notify();
+            }
+            PaletteEvent::Confirm(target) => {
+                this.palette = None;
+                this.focus_active(window, cx);
+                match target {
+                    PaletteTarget::Action(action) => {
+                        window.dispatch_action(action.boxed_clone(), cx)
+                    }
+                    PaletteTarget::Session(index) => this.activate(*index, window, cx),
+                    PaletteTarget::RunCommand(command) => {
+                        if let Some(view) = this.focused_view() {
+                            view.update(cx, |view, cx| view.run_command(command, cx));
+                        }
+                    }
+                }
+                cx.notify();
+            }
+        });
+        self.palette = Some((palette, events));
+        cx.notify();
+    }
+
+    fn palette_items(&self, cx: &App) -> Vec<PaletteItem> {
+        let mut items = Vec::new();
+        let shortcut = |keys: &str| -> String {
+            if cfg!(target_os = "macos") {
+                keys.replace("Mod+", "⌘")
+                    .replace("Shift+", "⇧")
+                    .replace("Alt+", "⌥")
+            } else {
+                keys.replace("Mod+", "Ctrl+Shift+")
+                    .replace("Shift+Shift+", "Shift+")
+            }
+        };
+        let mut action = |label: &str, keys: &str, action: Box<dyn Action>| {
+            items.push(PaletteItem {
+                label: label.into(),
+                detail: shortcut(keys),
+                kind: "action",
+                target: PaletteTarget::Action(action),
+            })
+        };
+        action("New session", "Mod+T", Box::new(NewSession));
+        action("Split right", "Mod+D", Box::new(SplitRight));
+        action("Find", "Mod+F", Box::new(Find));
+        action(
+            "Copy last output (fenced)",
+            "Mod+Shift+C",
+            Box::new(CopyLastOutput),
+        );
+        action(
+            "Copy last output (raw)",
+            "Mod+Alt+C",
+            Box::new(CopyLastOutputRaw),
+        );
+        action("Toggle sidebar", "Mod+B", Box::new(ToggleSidebar));
+        action("Close pane", "Mod+W", Box::new(ClosePane));
+        action("Next session", "Mod+Shift+]", Box::new(NextSession));
+        action("Previous session", "Mod+Shift+[", Box::new(PrevSession));
+        action("Bigger text", "Mod+=", Box::new(ZoomIn));
+        action("Smaller text", "Mod+-", Box::new(ZoomOut));
+        action("Reset text size", "Mod+0", Box::new(ZoomReset));
+        action("Edit config", "Mod+,", Box::new(EditConfig));
+        action("New window", "Mod+N", Box::new(NewWindow));
+        action("Quit Kiln", "Mod+Q", Box::new(Quit));
+
+        for (index, tab) in self.tabs.iter().enumerate() {
+            let Some(view) = tab.panes.get(tab.focused).map(|p| p.view.read(cx)) else {
+                continue;
+            };
+            items.push(PaletteItem {
+                label: view.title(),
+                detail: view.cwd().map(copy::short_folder).unwrap_or_default(),
+                kind: "session",
+                target: PaletteTarget::Session(index),
+            });
+        }
+
+        // Past commands from every session, newest first, each once.
+        let mut seen = std::collections::HashSet::new();
+        let mut commands: Vec<String> = Vec::new();
+        for tab in &self.tabs {
+            for pane in &tab.panes {
+                commands.extend(pane.view.read(cx).commands());
+            }
+        }
+        for command in commands.into_iter().rev() {
+            if seen.insert(command.clone()) {
+                items.push(PaletteItem {
+                    label: command.clone(),
+                    detail: "run".into(),
+                    kind: "command",
+                    target: PaletteTarget::RunCommand(command),
+                });
+            }
+            if seen.len() >= 200 {
+                break;
+            }
+        }
+        items
+    }
+
+    // ----- config ---------------------------------------------------------------------------
+
+    /// Polls the config file once a second and applies changes.
+    fn watch_config(&self, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
+        let mut last: Option<SystemTime> = config::config_path()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let now = config::config_path()
+                    .and_then(|p| std::fs::metadata(p).ok())
+                    .and_then(|m| m.modified().ok());
+                if now == last {
+                    continue;
+                }
+                last = now;
+                let (config, _) = config::load();
+                if this
+                    .update_in(cx, |this, window, cx| this.apply_config(config, window, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+    }
+
+    fn apply_config(&mut self, config: Config, window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("config reloaded");
+        let font_size = px(config.font_size.clamp(6., 72.));
+        config::set_current(config);
+        self.set_font_size(font_size, window, cx);
+        window.refresh();
+    }
+
+    fn set_font_size(&mut self, font_size: Pixels, window: &mut Window, cx: &mut Context<Self>) {
+        self.metrics = CellMetrics::measure(font_size, window);
+        for tab in &self.tabs {
+            for pane in &tab.panes {
+                pane.view
+                    .update(cx, |view, cx| view.set_font_size(font_size, cx));
+            }
+        }
+        cx.notify();
+    }
+
+    fn zoom(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let size = if delta == 0. {
+            config::current().font_size
+        } else {
+            f32::from(self.metrics.font_size) + delta
+        };
+        self.set_font_size(px(size.clamp(6., 72.)), window, cx);
+    }
+
+    fn edit_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = config::config_path() else {
+            return;
+        };
+        if !path.exists() {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Err(err) = std::fs::write(&path, config::TEMPLATE) {
+                log::error!("could not create {}: {err}", path.display());
+                return;
+            }
+        }
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .ok()
+            .filter(|e| !e.trim().is_empty());
+        let file = path.to_string_lossy().into_owned();
+        let shell = if cfg!(windows) {
+            ShellCommand::new(editor.unwrap_or_else(|| "notepad.exe".into()), [file])
+        } else {
+            // Through a login shell, so $EDITOR and PATH come from the user's setup.
+            let editor = editor.unwrap_or_else(|| "${VISUAL:-${EDITOR:-vi}}".into());
+            ShellCommand::new(
+                "/bin/sh",
+                ["-lc".to_string(), format!("{editor} \"$0\"",), file],
+            )
+        };
+        self.split_right(
+            path.parent().map(Path::to_path_buf),
+            Some(shell),
+            window,
+            cx,
+        );
+    }
+
+    // ----- projects -------------------------------------------------------------------------
+
+    /// The project a folder belongs to: its git root, else the folder itself.
+    fn project_of(&mut self, cwd: &str) -> PathBuf {
+        if let Some(root) = self.projects.get(cwd) {
+            return root.clone();
+        }
+        let path = PathBuf::from(cwd);
+        let root = path
+            .ancestors()
+            .find(|dir| dir.join(".git").exists())
+            .map(Path::to_path_buf)
+            .unwrap_or(path);
+        self.projects.insert(cwd.to_string(), root.clone());
+        root
+    }
+
+    // ----- rendering ------------------------------------------------------------------------
+
+    fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let fullscreen = window.is_fullscreen();
+        // Group sessions by project, in order of first appearance.
+        let mut groups: Vec<(PathBuf, Vec<usize>)> = Vec::new();
+        for index in 0..self.tabs.len() {
+            let cwd = {
+                let tab = &self.tabs[index];
+                tab.panes
+                    .get(tab.focused)
+                    .and_then(|pane| pane.view.read(cx).cwd().map(str::to_string))
+            };
+            let project = cwd.map(|cwd| self.project_of(&cwd)).unwrap_or_default();
+            match groups.iter_mut().find(|(root, _)| *root == project) {
+                Some((_, tabs)) => tabs.push(index),
+                None => groups.push((project, vec![index])),
+            }
+        }
+
+        let mut list = div().flex().flex_col().gap(px(2.));
+        for (root, tabs) in groups {
+            let name = root
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| {
+                    if root.as_os_str().is_empty() {
+                        "starting…".into()
+                    } else {
+                        copy::short_folder(&root.to_string_lossy())
+                    }
+                });
+            list = list.child(
+                div()
+                    .pt(px(12.))
+                    .pb(px(4.))
+                    .px(px(10.))
+                    .text_size(px(11.))
+                    .text_color(theme::hsla(p.muted))
+                    .child(SharedString::from(name)),
+            );
+            for index in tabs {
+                list = list.child(self.render_session_row(index, cx));
+            }
+        }
+
+        div()
+            .id("sidebar")
+            .group("sidebar")
+            .flex_none()
+            .w(SIDEBAR_WIDTH)
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(theme::hsla(p.bar))
+            .font_family(FONT_FAMILY)
+            .text_size(px(12.))
+            // The traffic lights sit over the sidebar on macOS.
+            .child(
+                div()
+                    .h(TITLEBAR_HEIGHT)
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_end()
+                    .px(px(10.))
+                    .when(!cfg!(target_os = "macos") || fullscreen, |d| {
+                        d.justify_between().child(app_mark())
+                    })
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(MouseButton::Left, |event, window, _| {
+                        if event.click_count == 2 {
+                            window.titlebar_double_click();
+                        } else if !cfg!(windows) {
+                            window.start_window_move();
+                        }
+                    })
+                    .child(
+                        div()
+                            .id("new-session")
+                            .px(px(6.))
+                            .text_size(px(14.))
+                            .text_color(theme::hsla(p.muted))
+                            .invisible()
+                            .group_hover("sidebar", |s| s.visible())
+                            .hover(|s| s.text_color(theme::hsla(p.fg)))
+                            .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                let cwd = this.focused_cwd(cx);
+                                this.new_tab(cwd, None, window, cx)
+                            }))
+                            .child("+"),
+                    ),
+            )
+            .child(
+                div()
+                    .id("sessions")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .px(px(6.))
+                    .child(list),
+            )
+            .into_any_element()
+    }
+
+    fn render_session_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let tab = &self.tabs[index];
+        let active = index == self.active;
+        let view = tab.panes.get(tab.focused).map(|pane| pane.view.read(cx));
+        let title = view.map(|v| v.title()).unwrap_or_default();
+        // A session's status is the busiest of its panes.
+        let status = tab
+            .panes
+            .iter()
+            .map(|pane| pane.view.read(cx).status())
+            .max_by_key(|s| match s {
+                PaneStatus::Running => 2,
+                PaneStatus::Failed => 1,
+                PaneStatus::Idle => 0,
+            })
+            .unwrap_or(PaneStatus::Idle);
+        let dot = match status {
+            PaneStatus::Running => Some(p.ok),
+            PaneStatus::Failed => Some(p.failed),
+            PaneStatus::Idle => None,
+        };
+        let group: SharedString = format!("session-{}", tab.id).into();
+        let first_view = tab.panes.first().map(|pane| pane.view.clone());
+        div()
+            .id(("session", tab.id as usize))
+            .group(group.clone())
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .h(px(28.))
+            .px(px(10.))
+            .rounded(px(6.))
+            .when(active, |d| d.bg(theme::hsla(p.raised)))
+            .hover(|s| s.bg(theme::hsla(p.raised)))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, window, cx| this.activate(index, window, cx)))
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(6.))
+                    .rounded_full()
+                    .when_some(dot, |d, color| d.bg(theme::hsla(color))),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .text_color(theme::hsla(if active { p.fg } else { p.fg_dim }))
+                    .child(SharedString::from(title)),
+            )
+            .when(tab.panes.len() > 1, |d| {
+                d.child(
+                    div()
+                        .text_size(px(10.))
+                        .text_color(theme::hsla(p.muted))
+                        .child(format!("{}", tab.panes.len())),
+                )
+            })
+            .child(
+                div()
+                    .id(("close-session", tab.id as usize))
+                    .px(px(4.))
+                    .text_color(theme::hsla(p.muted))
+                    .invisible()
+                    .group_hover(group, |s| s.visible())
+                    .hover(|s| s.text_color(theme::hsla(p.fg)))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        // Closing a session closes all its panes (their shells get SIGHUP).
+                        if let Some(view) = first_view.clone() {
+                            let tab_index = this
+                                .tabs
+                                .iter()
+                                .position(|t| t.panes.iter().any(|p| p.view == view));
+                            if let Some(t) = tab_index {
+                                let views: Vec<_> =
+                                    this.tabs[t].panes.iter().map(|p| p.view.clone()).collect();
+                                for view in views {
+                                    this.close_pane(&view, window, cx);
+                                }
+                            }
+                        }
+                    }))
+                    .child("×"),
+            )
+            .into_any_element()
+    }
+
+    fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let leading = if cfg!(target_os = "macos") && !self.sidebar_open && !window.is_fullscreen()
+        {
+            TRAFFIC_LIGHTS_WIDTH
+        } else {
+            px(10.)
+        };
+        let title = self
+            .focused_view()
+            .map(|v| v.read(cx).title())
+            .unwrap_or_default();
+        div()
+            .id("titlebar")
+            .flex_none()
+            .h(TITLEBAR_HEIGHT)
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .pl(leading)
+            .window_control_area(WindowControlArea::Drag)
+            .on_mouse_down(MouseButton::Left, |event, window, _| {
+                if event.click_count == 2 {
+                    window.titlebar_double_click();
+                } else if !cfg!(windows) {
+                    window.start_window_move();
+                }
+            })
+            .when(!cfg!(target_os = "macos") && !self.sidebar_open, |d| {
+                d.child(app_mark())
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .justify_center()
+                    .font_family(FONT_FAMILY)
+                    .text_size(px(11.))
+                    .text_color(theme::hsla(p.muted))
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(SharedString::from(title)),
+            )
+            .when(!cfg!(target_os = "macos"), |d| {
+                d.child(window_controls(window))
+            })
+            .into_any_element()
+    }
+
+    fn render_search_bar(&self) -> Option<AnyElement> {
+        let search = self.search.as_ref()?;
+        let p = palette();
+        let count = match (search.current, search.matches.len()) {
+            (_, 0) => "no matches".to_string(),
+            (Some(i), n) => format!("{}/{}", i + 1, n),
+            (None, n) => format!("{n}"),
+        };
+        Some(
+            div()
+                .absolute()
+                .top(px(8.))
+                .right(px(16.))
+                .w(px(320.))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(10.))
+                .px(px(12.))
+                .py(px(8.))
+                .rounded(px(8.))
+                .bg(theme::hsla(p.bar))
+                .shadow_lg()
+                .font_family(FONT_FAMILY)
+                .child(div().flex_1().min_w_0().child(search.input.clone()))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(11.))
+                        .text_color(theme::hsla(p.muted))
+                        .child(count),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_panes(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(tab) = self.tabs.get(self.active) else {
+            let p = palette();
+            let message = self
+                .start_error
+                .clone()
+                .unwrap_or_else(|| "No sessions".into());
+            return div()
+                .p(px(16.))
+                .text_color(theme::hsla(p.failed))
+                .font_family(FONT_FAMILY)
+                .child(format!("Kiln could not start the shell: {message}"))
+                .into_any_element();
+        };
+        let several = tab.panes.len() > 1;
+        let mut row = div().size_full().flex().flex_row().gap(PANE_GAP);
+        for (i, pane) in tab.panes.iter().enumerate() {
+            let focused = i == tab.focused;
+            let view = pane.view.clone();
+            row = row.child(
+                div()
+                    .id(("pane", i))
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .relative()
+                    // Panes that do not have focus step back a little; no borders.
+                    .when(several && !focused, |d| d.opacity(0.72))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            if let Some(tab) = this.tabs.get_mut(this.active)
+                                && let Some(index) = tab.panes.iter().position(|p| p.view == view)
+                                && tab.focused != index
+                            {
+                                tab.focused = index;
+                                this.update_title(window, cx);
+                                cx.notify();
+                            }
+                        }),
+                    )
+                    .child(pane.view.clone()),
+            );
+        }
+        row.into_any_element()
     }
 }
 
-impl Render for Workspace {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let body = match &self.content {
-            Ok(terminal) => terminal.clone().into_any_element(),
-            Err(err) => div()
-                .p_4()
-                .text_color(theme::hsla(PALETTE.failed))
-                .child(format!("Kiln could not start the shell: {err}"))
-                .into_any_element(),
-        };
+/// The small `>_` mark where the traffic lights would be (Windows and Linux).
+fn app_mark() -> AnyElement {
+    let p = palette();
+    div()
+        .font_family(FONT_FAMILY)
+        .text_size(px(12.))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(theme::hsla(p.muted))
+        .child(">_")
+        .into_any_element()
+}
+
+/// Minimize, maximize and close, Windows 11 style (also used on Linux when the app draws its
+/// own title bar).
+fn window_controls(window: &Window) -> AnyElement {
+    let p = palette();
+    // Codicon glyphs from the embedded Nerd Font.
+    let maximized = window.is_maximized();
+    let button = |id: &'static str, glyph: &'static str, area: WindowControlArea, close: bool| {
         div()
+            .id(id)
+            .w(px(46.))
+            .h(TITLEBAR_HEIGHT)
             .flex()
-            .flex_col()
+            .items_center()
+            .justify_center()
+            .font_family(FONT_FAMILY)
+            .text_size(px(12.))
+            .text_color(theme::hsla(p.fg_dim))
+            .when(close, |d| {
+                d.hover(|s| s.bg(gpui::rgb(0xc42b1c)).text_color(gpui::white()))
+            })
+            .when(!close, |d| d.hover(|s| s.bg(theme::hsla(p.bg1))))
+            .window_control_area(area)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, window, cx| match area {
+                WindowControlArea::Min => window.minimize_window(),
+                WindowControlArea::Max => window.zoom_window(),
+                WindowControlArea::Close => window.dispatch_action(Box::new(CloseWindow), cx),
+                WindowControlArea::Drag => {}
+            })
+            .child(glyph)
+    };
+    div()
+        .flex()
+        .flex_row()
+        .flex_none()
+        .child(button("win-min", "\u{eaba}", WindowControlArea::Min, false))
+        .child(button(
+            "win-max",
+            if maximized { "\u{eabb}" } else { "\u{eab9}" },
+            WindowControlArea::Max,
+            false,
+        ))
+        .child(button(
+            "win-close",
+            "\u{eab8}",
+            WindowControlArea::Close,
+            true,
+        ))
+        .into_any_element()
+}
+
+/// Invisible edges for resizing when Kiln draws its own window frame (Linux).
+fn resize_edges(window: &Window) -> Option<AnyElement> {
+    let Decorations::Client { tiling } = window.window_decorations() else {
+        return None;
+    };
+    let edge = |id: &'static str, edge: ResizeEdge| {
+        div()
+            .id(id)
+            .absolute()
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                window.start_window_resize(edge);
+                cx.stop_propagation();
+            })
+    };
+    let w = px(5.);
+    Some(
+        div()
+            .absolute()
             .size_full()
-            .bg(theme::hsla(PALETTE.bg))
+            .when(!tiling.top, |d| {
+                d.child(
+                    edge("edge-top", ResizeEdge::Top)
+                        .top_0()
+                        .left(w)
+                        .right(w)
+                        .h(w),
+                )
+            })
+            .when(!tiling.bottom, |d| {
+                d.child(
+                    edge("edge-bottom", ResizeEdge::Bottom)
+                        .bottom_0()
+                        .left(w)
+                        .right(w)
+                        .h(w),
+                )
+            })
+            .when(!tiling.left, |d| {
+                d.child(
+                    edge("edge-left", ResizeEdge::Left)
+                        .left_0()
+                        .top(w)
+                        .bottom(w)
+                        .w(w),
+                )
+            })
+            .when(!tiling.right, |d| {
+                d.child(
+                    edge("edge-right", ResizeEdge::Right)
+                        .right_0()
+                        .top(w)
+                        .bottom(w)
+                        .w(w),
+                )
+            })
+            .child(
+                edge("edge-tl", ResizeEdge::TopLeft)
+                    .top_0()
+                    .left_0()
+                    .size(w),
+            )
+            .child(
+                edge("edge-tr", ResizeEdge::TopRight)
+                    .top_0()
+                    .right_0()
+                    .size(w),
+            )
+            .child(
+                edge("edge-bl", ResizeEdge::BottomLeft)
+                    .bottom_0()
+                    .left_0()
+                    .size(w),
+            )
+            .child(
+                edge("edge-br", ResizeEdge::BottomRight)
+                    .bottom_0()
+                    .right_0()
+                    .size(w),
+            )
+            .into_any_element(),
+    )
+}
+
+impl Render for Workspace {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette();
+        let sidebar = self.sidebar_open.then(|| self.render_sidebar(window, cx));
+        let titlebar = self.render_titlebar(window, cx);
+        let panes = self.render_panes(cx);
+        let search = self.render_search_bar();
+        let palette_overlay = self.palette.as_ref().map(|(palette, _)| {
+            div()
+                .id("palette-scrim")
+                .absolute()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .pt(px(72.))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.palette = None;
+                        this.focus_active(window, cx);
+                        cx.notify();
+                    }),
+                )
+                .child(palette.clone())
+        });
+
+        div()
+            .id("workspace")
+            .key_context("Workspace")
+            .relative()
+            .size_full()
+            .flex()
+            .flex_row()
+            .bg(theme::hsla(p.bg))
+            .text_color(theme::hsla(p.fg))
+            .on_action(cx.listener(|this, _: &NewSession, window, cx| {
+                let cwd = this.focused_cwd(cx);
+                this.new_tab(cwd, None, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SplitRight, window, cx| {
+                this.split_right(None, None, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ClosePane, window, cx| {
+                if let Some(view) = this.focused_view() {
+                    this.close_pane(&view, window, cx);
+                }
+            }))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
-            .child(div().h(TITLEBAR_HEIGHT).w_full().flex_none())
-            .child(div().flex_1().min_h_0().child(body))
+            .on_action(
+                cx.listener(|this, _: &FocusNextPane, window, cx| this.focus_pane(1, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &FocusPrevPane, window, cx| this.focus_pane(-1, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &NextSession, window, cx| {
+                let next = (this.active + 1) % this.tabs.len().max(1);
+                this.activate(next, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PrevSession, window, cx| {
+                let len = this.tabs.len().max(1);
+                this.activate((this.active + len - 1) % len, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SelectSession1, w, cx| this.activate(0, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession2, w, cx| this.activate(1, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession3, w, cx| this.activate(2, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession4, w, cx| this.activate(3, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession5, w, cx| this.activate(4, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession6, w, cx| this.activate(5, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession7, w, cx| this.activate(6, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession8, w, cx| this.activate(7, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectSession9, w, cx| {
+                let last = this.tabs.len().saturating_sub(1);
+                this.activate(last, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
+                this.sidebar_open = !this.sidebar_open;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &Find, window, cx| this.open_search(window, cx)))
+            .on_action(cx.listener(|this, _: &CommandPaletteToggle, window, cx| {
+                this.toggle_palette(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ZoomIn, window, cx| this.zoom(1., window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, window, cx| this.zoom(-1., window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomReset, window, cx| this.zoom(0., window, cx)))
+            .on_action(cx.listener(|this, _: &EditConfig, window, cx| this.edit_config(window, cx)))
+            .when_some(sidebar, |d, sidebar| d.child(sidebar))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(titlebar)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .relative()
+                            .child(panes)
+                            .when_some(search, |d, s| d.child(s)),
+                    ),
+            )
+            .when_some(palette_overlay, |d, overlay| d.child(overlay))
+            .when_some(resize_edges(window), |d, edges| d.child(edges))
     }
 }

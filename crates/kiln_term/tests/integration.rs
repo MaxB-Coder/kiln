@@ -69,6 +69,14 @@ fn run_block(program: &str, args: &[&str], command: &str) -> Option<Block> {
                 session.write(format!("{command}\r").into_bytes());
                 sent = true;
             }
+            SessionEvent::Block(block) if block.startup => {
+                // macOS bash 3.2 prints a banner before its first prompt.
+                assert!(
+                    block.output_text().contains("zsh"),
+                    "startup: {:?}",
+                    block.output_text()
+                );
+            }
             SessionEvent::Block(block) => return Some(block),
             _ => {}
         }

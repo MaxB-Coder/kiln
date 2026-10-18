@@ -6,8 +6,7 @@ use gpui::{Hsla, Rgba};
 use kiln_term::engine::term::color::Colors;
 use kiln_term::engine::vte::ansi::{Color, NamedColor, Rgb};
 
-// Status and chrome colours are used once blocks and the sidebar land (phase 1).
-#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub bg: u32,
     pub bar: u32,
@@ -25,7 +24,7 @@ pub struct Palette {
     pub ansi: [u32; 16],
 }
 
-pub const PALETTE: Palette = Palette {
+pub const DEFAULT_PALETTE: Palette = Palette {
     bg: 0x282828,
     bar: 0x1d2021,
     raised: 0x32302f,
@@ -46,6 +45,17 @@ pub const PALETTE: Palette = Palette {
         0xebdbb2, // bright
     ],
 };
+
+static CURRENT: std::sync::RwLock<Palette> = std::sync::RwLock::new(DEFAULT_PALETTE);
+
+/// The palette in use (the default, or the config file's).
+pub fn palette() -> Palette {
+    *CURRENT.read().unwrap_or_else(|e| e.into_inner())
+}
+
+pub fn set_palette(palette: Palette) {
+    *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = palette;
+}
 
 pub fn hsla(hex: u32) -> Hsla {
     gpui::rgb(hex).into()
@@ -81,7 +91,7 @@ pub fn resolve(color: Color, overrides: &Colors) -> Rgb {
 /// The colour for a palette index when no program overrode it.
 pub fn indexed(index: u8) -> Rgb {
     match index {
-        0..=15 => rgb_from_hex(PALETTE.ansi[index as usize]),
+        0..=15 => rgb_from_hex(palette().ansi[index as usize]),
         // 6×6×6 colour cube.
         16..=231 => {
             let i = index - 16;
@@ -103,10 +113,10 @@ pub fn indexed(index: u8) -> Rgb {
 fn named(name: NamedColor) -> Rgb {
     use NamedColor::*;
     match name {
-        Foreground | BrightForeground => rgb_from_hex(PALETTE.fg),
-        Background => rgb_from_hex(PALETTE.bg),
-        Cursor => rgb_from_hex(PALETTE.accent),
-        DimForeground => rgb_from_hex(PALETTE.fg_dim),
+        Foreground | BrightForeground => rgb_from_hex(palette().fg),
+        Background => rgb_from_hex(palette().bg),
+        Cursor => rgb_from_hex(palette().accent),
+        DimForeground => rgb_from_hex(palette().fg_dim),
         DimBlack | DimRed | DimGreen | DimYellow | DimBlue | DimMagenta | DimCyan | DimWhite => {
             dim(indexed((name as usize - DimBlack as usize) as u8))
         }

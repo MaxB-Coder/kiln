@@ -1,0 +1,236 @@
+//! The config file: `~/.config/kiln/kiln.toml` (macOS, Linux; `$XDG_CONFIG_HOME` respected) or
+//! `%APPDATA%\Kiln\kiln.toml` (Windows). Everything is optional; the file is reloaded when it
+//! changes.
+
+use std::path::PathBuf;
+use std::sync::RwLock;
+use std::time::SystemTime;
+
+use serde::Deserialize;
+
+use crate::theme::{DEFAULT_PALETTE, Palette};
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Config {
+    /// Font size in points.
+    pub font_size: f32,
+    /// Lines of scrollback per running command.
+    pub scrollback: usize,
+    pub cursor_blink: bool,
+    /// macOS: Option sends Esc+key (like Alt elsewhere) instead of composing characters.
+    pub option_as_alt: bool,
+    pub shell: ShellConfig,
+    pub window: WindowConfig,
+    pub theme: ThemeConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ShellConfig {
+    /// Program to run; empty means the login shell (PowerShell on Windows).
+    pub program: Option<String>,
+    pub args: Option<Vec<String>>,
+    /// Load Kiln's shell integration (needed for blocks).
+    pub integration: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WindowConfig {
+    pub columns: usize,
+    pub rows: usize,
+    pub sidebar: bool,
+}
+
+/// Palette overrides, as "#rrggbb" strings. Keys match the palette's names.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ThemeConfig {
+    pub bg: Option<String>,
+    pub bar: Option<String>,
+    pub raised: Option<String>,
+    pub bg1: Option<String>,
+    pub bg2: Option<String>,
+    pub bg3: Option<String>,
+    pub muted: Option<String>,
+    pub fg: Option<String>,
+    pub fg_dim: Option<String>,
+    pub accent: Option<String>,
+    pub failed: Option<String>,
+    pub ok: Option<String>,
+    pub modified: Option<String>,
+    /// The 16 terminal colours.
+    pub ansi: Option<Vec<String>>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            font_size: 13.,
+            scrollback: 10_000,
+            cursor_blink: true,
+            option_as_alt: false,
+            shell: ShellConfig::default(),
+            window: WindowConfig::default(),
+            theme: ThemeConfig::default(),
+        }
+    }
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            columns: 120,
+            rows: 36,
+            sidebar: true,
+        }
+    }
+}
+
+impl Config {
+    /// The palette with this config's overrides applied. Bad colours are ignored (and logged).
+    pub fn palette(&self) -> Palette {
+        let mut p = DEFAULT_PALETTE;
+        let t = &self.theme;
+        let set = |slot: &mut u32, value: &Option<String>, name: &str| {
+            if let Some(value) = value {
+                match parse_hex(value) {
+                    Some(hex) => *slot = hex,
+                    None => log::warn!("config: theme.{name} = {value:?} is not a #rrggbb colour"),
+                }
+            }
+        };
+        set(&mut p.bg, &t.bg, "bg");
+        set(&mut p.bar, &t.bar, "bar");
+        set(&mut p.raised, &t.raised, "raised");
+        set(&mut p.bg1, &t.bg1, "bg1");
+        set(&mut p.bg2, &t.bg2, "bg2");
+        set(&mut p.bg3, &t.bg3, "bg3");
+        set(&mut p.muted, &t.muted, "muted");
+        set(&mut p.fg, &t.fg, "fg");
+        set(&mut p.fg_dim, &t.fg_dim, "fg_dim");
+        set(&mut p.accent, &t.accent, "accent");
+        set(&mut p.failed, &t.failed, "failed");
+        set(&mut p.ok, &t.ok, "ok");
+        set(&mut p.modified, &t.modified, "modified");
+        if let Some(ansi) = &t.ansi {
+            for (i, value) in ansi.iter().take(16).enumerate() {
+                set(&mut p.ansi[i], &Some(value.clone()), "ansi");
+            }
+        }
+        p
+    }
+}
+
+fn parse_hex(value: &str) -> Option<u32> {
+    let hex = value.strip_prefix('#')?;
+    (hex.len() == 6)
+        .then(|| u32::from_str_radix(hex, 16).ok())
+        .flatten()
+}
+
+pub fn config_path() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return std::env::var_os("APPDATA")
+            .map(|p| PathBuf::from(p).join("Kiln").join("kiln.toml"));
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join("kiln").join("kiln.toml"))
+}
+
+/// Reads the config file. A missing file is the default config; a broken one is logged and
+/// also gives the default, so Kiln always starts.
+pub fn load() -> (Config, Option<SystemTime>) {
+    let Some(path) = config_path() else {
+        return (Config::default(), None);
+    };
+    let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return (Config::default(), modified);
+    };
+    match parse(&text) {
+        Ok(config) => (config, modified),
+        Err(err) => {
+            log::error!("config {}: {err}", path.display());
+            (Config::default(), modified)
+        }
+    }
+}
+
+pub fn parse(text: &str) -> Result<Config, toml::de::Error> {
+    toml::from_str(text)
+}
+
+static CURRENT: RwLock<Option<Config>> = RwLock::new(None);
+
+pub fn current() -> Config {
+    CURRENT
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_default()
+}
+
+pub fn set_current(config: Config) {
+    crate::theme::set_palette(config.palette());
+    *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = Some(config);
+}
+
+/// The commented template written when the user opens the config for the first time.
+pub const TEMPLATE: &str = r##"# Kiln config. Every setting is optional; delete what you don't change.
+# Kiln reloads this file when you save it.
+
+font_size = 13
+scrollback = 10000
+cursor_blink = true
+# macOS only: Option sends Esc+key instead of composing characters like é.
+option_as_alt = false
+
+[shell]
+# program = "/bin/zsh"
+# args = ["-l"]
+# Shell integration draws each command as a block. Turn off for a classic terminal.
+# integration = true
+
+[window]
+columns = 120
+rows = 36
+sidebar = true
+
+[theme]
+# Any palette colour, as "#rrggbb":
+# bg = "#282828"
+# bar = "#1d2021"
+# fg = "#ebdbb2"
+# fg_dim = "#bdae93"
+# muted = "#928374"
+# accent = "#e07b39"
+# failed = "#b8645a"
+# ok = "#8f9a6c"
+# modified = "#c4a35e"
+# ansi = ["#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+#         "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2"]
+"##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_parses_to_the_defaults() {
+        assert_eq!(parse(TEMPLATE).unwrap(), Config::default());
+    }
+
+    #[test]
+    fn theme_overrides_apply_and_bad_values_are_ignored() {
+        let config =
+            parse("font_size = 14\n[theme]\naccent = \"#ff0000\"\nfg = \"red\"\n").unwrap();
+        assert_eq!(config.font_size, 14.);
+        let p = config.palette();
+        assert_eq!(p.accent, 0xff0000);
+        assert_eq!(p.fg, DEFAULT_PALETTE.fg);
+    }
+}

@@ -59,6 +59,8 @@ pub struct Block {
     pub lines: Vec<Vec<Cell>>,
     /// The start of the output scrolled out of the scrollback before the command finished.
     pub truncated: bool,
+    /// Output the shell printed before its first prompt (login banner, startup errors).
+    pub startup: bool,
 }
 
 impl Block {
@@ -113,6 +115,7 @@ pub struct BlockRecorder {
     started: Option<(Instant, SystemTime)>,
     output_top: Option<usize>,
     cwd: Option<String>,
+    seen_prompt: bool,
 }
 
 impl BlockRecorder {
@@ -125,6 +128,7 @@ impl BlockRecorder {
             started: None,
             output_top: None,
             cwd: None,
+            seen_prompt: false,
         }
     }
 
@@ -140,10 +144,16 @@ impl BlockRecorder {
             Mark::PromptStart => {
                 live.integrated = true;
                 live.phase = Phase::Prompt;
-                live.prompt_top = Some(abs);
                 live.output_top = None;
                 live.command = None;
-                None
+                let startup = (!self.seen_prompt)
+                    .then(|| self.startup_block(term, abs))
+                    .flatten();
+                self.seen_prompt = true;
+                // The startup block cleared the scrollback, which moves the prompt's row.
+                let (abs, _) = cursor_abs(term);
+                live.prompt_top = Some(abs);
+                startup
             }
             Mark::InputStart => {
                 self.input_start = Some((abs, column));
@@ -183,6 +193,32 @@ impl BlockRecorder {
                 None
             }
         }
+    }
+
+    /// Whatever the shell printed before its first prompt, as a block of its own.
+    fn startup_block(&mut self, term: &mut EngineTerm, abs: usize) -> Option<Block> {
+        let lines = if abs > 0 {
+            logical_lines(term, 0, abs - 1)
+        } else {
+            Vec::new()
+        };
+        term.grid_mut().clear_history();
+        if lines.is_empty() {
+            return None;
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        Some(Block {
+            id,
+            command: String::new(),
+            cwd: None,
+            started_at: SystemTime::now(),
+            duration: Duration::ZERO,
+            exit_code: None,
+            lines,
+            truncated: false,
+            startup: true,
+        })
     }
 
     /// Text the user typed: from the input mark to just before the cursor.
@@ -270,6 +306,7 @@ impl BlockRecorder {
             exit_code,
             lines,
             truncated,
+            startup: false,
         })
     }
 }
