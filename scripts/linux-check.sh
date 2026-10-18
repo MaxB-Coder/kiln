@@ -11,7 +11,7 @@ docker run --rm \
   -v kiln-cargo-git:/usr/local/cargo/git \
   -e CARGO_TARGET_DIR=/work/target/linux \
   -e RUST_LOG=warn \
-  kiln-linux bash -lc '
+  kiln-linux bash -c '
     git config --global --add safe.directory /work
     cargo test --workspace --locked
     cargo clippy --workspace --all-targets --locked -- -D warnings

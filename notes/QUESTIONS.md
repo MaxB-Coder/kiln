@@ -20,9 +20,7 @@ Collected during the autonomous build; raised at the end of the project.
 
 ## Repository and accounts
 
-- Push the local commits made after 2026-10-18 16:10 to `MaxB-Coder/kiln`? (Pushing is paused.)
-  CI then runs the new PowerShell block test on Windows and the headless screenshots on
-  macOS and Linux.
+- ~~Push to `MaxB-Coder/kiln`?~~ Answered 2026-10-18: yes, pushing to the private repo is allowed.
 - Install the Renovate GitHub app on the repo.
 - Choose a licence (none yet). Third-party code inside Kiln: alacritty's PTY loop (Apache-2.0,
   attributed); fonts (OFL + MIT).

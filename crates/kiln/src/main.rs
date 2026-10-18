@@ -21,6 +21,8 @@ struct Args {
     shell: Option<ShellCommand>,
     /// Quit after the first frame that shows shell output and print the time it took.
     bench_startup: bool,
+    /// Open without taking focus from the app in front (for tests and scripts).
+    background: bool,
     columns: Option<usize>,
     lines: Option<usize>,
 }
@@ -29,6 +31,7 @@ fn parse_args() -> Args {
     let mut args = Args {
         shell: None,
         bench_startup: false,
+        background: false,
         columns: None,
         lines: None,
     };
@@ -36,6 +39,7 @@ fn parse_args() -> Args {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--bench-startup" => args.bench_startup = true,
+            "--background" => args.background = true,
             "--cols" => args.columns = it.next().and_then(|v| v.parse().ok()),
             "--rows" => args.lines = it.next().and_then(|v| v.parse().ok()),
             #[cfg(windows)]
@@ -54,7 +58,7 @@ fn parse_args() -> Args {
             }
             "--help" | "-h" => {
                 println!(
-                    "kiln [--cols N] [--rows N] [--bench-startup] [--wsl | --pwsh] [-- program args...]"
+                    "kiln [--cols N] [--rows N] [--background] [--bench-startup] [--wsl | --pwsh] [-- program args...]"
                 );
                 std::process::exit(0);
             }
@@ -157,7 +161,9 @@ fn main() {
         ]);
 
         open_window(args.clone(), started, cx);
-        cx.activate(true);
+        if !args.background {
+            cx.activate(true);
+        }
     });
 }
 
@@ -262,6 +268,7 @@ fn open_window(args: Args, started: Instant, cx: &mut App) {
             traffic_light_position: Some(point(px(12.), px(11.))),
         }),
         app_id: Some("dev.kiln.Kiln".into()),
+        focus: !args.background,
         window_min_size: Some(size(px(360.), px(200.))),
         // Linux: Kiln draws its own title bar, so it looks the same on GNOME, KDE and X11.
         window_decorations: Some(if cfg!(target_os = "linux") {

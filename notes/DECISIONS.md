@@ -64,3 +64,8 @@ Newest at the bottom.
   there is one, so `--help` and `--bench-startup` still print.
 - **Visual checks without a display**: `cargo run -p kiln --example snapshot` renders the real app
   headless (real shells, real text and GPU rendering) and saves PNGs; it also runs in CI.
+- **Pushing**: the user allowed pushes to the private `MaxB-Coder/kiln` repo (2026-10-18), so CI
+  checks every phase on macOS, Windows (PowerShell, WSL) and Linux.
+- **`--background`** opens Kiln without taking focus (used for every test launch, so a test
+  window never catches the user's typing).
+- **Find also matches command lines** in block headers, highlighted in place.

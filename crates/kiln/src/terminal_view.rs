@@ -1053,6 +1053,12 @@ impl TerminalView {
     /// Scrolls so a match is visible.
     pub fn reveal_match(&mut self, m: Match, cx: &mut Context<Self>) {
         match m {
+            Match::Header { item, .. } => {
+                self.list_state.scroll_to(ListOffset {
+                    item_ix: item,
+                    offset_in_item: px(0.),
+                });
+            }
             Match::Block { item, line, .. } => {
                 let columns = self.session.size().columns;
                 let row = self.blocks[item]
@@ -1170,12 +1176,33 @@ impl TerminalView {
                 .text_size(small)
                 .child("shell started")
         } else {
-            div()
+            // Find highlights in the command line.
+            let mut title = div()
+                .flex()
+                .flex_row()
                 .text_color(theme::hsla(palette().fg))
                 .whitespace_nowrap()
-                .overflow_hidden()
-                .text_ellipsis()
-                .child(block.command.clone())
+                .overflow_hidden();
+            let mut at = 0;
+            for &(start, end) in self.search_highlights.header_ranges(ix) {
+                if start > at {
+                    title = title.child(block.command[at..start].to_string());
+                }
+                title = title.child(
+                    div()
+                        .bg(theme::hsla(palette().modified))
+                        .text_color(theme::hsla(palette().bg))
+                        .child(block.command[start..end].to_string()),
+                );
+                at = end;
+            }
+            title.child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(block.command[at..].to_string()),
+            )
         };
         let meta = if block.startup {
             String::new()

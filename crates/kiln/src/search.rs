@@ -12,6 +12,12 @@ use crate::block_element::FrozenBlock;
 /// One match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Match {
+    /// In a finished block's command line: byte range `start..end`.
+    Header {
+        item: usize,
+        start: usize,
+        end: usize,
+    },
     /// In a finished block: logical line and cell range `start..end`.
     Block {
         item: usize,
@@ -35,14 +41,19 @@ type BlockRanges = HashMap<usize, Vec<(usize, usize, usize)>>;
 pub struct SearchHighlights {
     live: Rc<Vec<(Line, Column, Column)>>,
     blocks: Rc<BlockRanges>,
+    headers: Rc<HashMap<usize, Vec<(usize, usize)>>>,
 }
 
 impl SearchHighlights {
     pub fn from_matches(matches: &[Match]) -> Self {
         let mut live = Vec::new();
         let mut blocks = BlockRanges::new();
+        let mut headers: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
         for m in matches {
             match *m {
+                Match::Header { item, start, end } => {
+                    headers.entry(item).or_default().push((start, end))
+                }
                 Match::Block {
                     item,
                     line,
@@ -55,6 +66,7 @@ impl SearchHighlights {
         Self {
             live: Rc::new(live),
             blocks: Rc::new(blocks),
+            headers: Rc::new(headers),
         }
     }
 
@@ -62,6 +74,11 @@ impl SearchHighlights {
         self.live.iter().any(|&(line, start, end)| {
             line == point.line && start <= point.column && point.column <= end
         })
+    }
+
+    /// Byte ranges of matches in a block's command line.
+    pub fn header_ranges(&self, item: usize) -> &[(usize, usize)] {
+        self.headers.get(&item).map_or(&[], Vec::as_slice)
     }
 
     pub fn block_contains(&self, item: usize, line: usize, cell: usize) -> bool {
@@ -115,6 +132,35 @@ fn find_in_cells(cells: &[Cell], query: &str) -> Vec<(usize, usize)> {
     out
 }
 
+/// Case-insensitive matches of `query` in `text`, as byte ranges.
+fn find_in_text(text: &str, query: &str) -> Vec<(usize, usize)> {
+    let needle: Vec<char> = query.to_lowercase().chars().collect();
+    let chars: Vec<(usize, char)> = text
+        .char_indices()
+        .flat_map(|(i, c)| c.to_lowercase().map(move |l| (i, l)))
+        .collect();
+    let mut out = Vec::new();
+    if needle.is_empty() {
+        return out;
+    }
+    let mut i = 0;
+    while i + needle.len() <= chars.len() {
+        if chars[i..i + needle.len()]
+            .iter()
+            .map(|(_, c)| *c)
+            .eq(needle.iter().copied())
+        {
+            let (last_at, _) = chars[i + needle.len() - 1];
+            let end = last_at + text[last_at..].chars().next().map_or(0, char::len_utf8);
+            out.push((chars[i].0, end));
+            i += needle.len();
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 /// All matches, oldest first.
 pub fn find(
     query: &str,
@@ -127,6 +173,9 @@ pub fn find(
         return matches;
     }
     for (item, block) in blocks.iter().enumerate() {
+        for (start, end) in find_in_text(&block.block.command, query) {
+            matches.push(Match::Header { item, start, end });
+        }
         for (line, cells) in block.block.lines.iter().enumerate() {
             for (start, end) in find_in_cells(cells, query) {
                 matches.push(Match::Block {
@@ -167,6 +216,15 @@ mod tests {
                 ..Default::default()
             })
             .collect()
+    }
+
+    #[test]
+    fn finds_matches_in_command_lines() {
+        assert_eq!(
+            find_in_text("cd ~/Kiln && kiln", "kiln"),
+            vec![(5, 9), (13, 17)]
+        );
+        assert_eq!(find_in_text("café", "É"), vec![(3, 5)]);
     }
 
     #[test]
