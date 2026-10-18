@@ -10,6 +10,7 @@ because the Mac's screen was locked while this was built. The same tool runs in 
 | --- | --- | --- |
 | Blocks: one per command, old ones dim, hover actions Copy / Rerun / Pin / Open log, failures as a small dot | Done | [02](screenshots/phase1/02-blocks.png), [03](screenshots/phase1/03-hover-actions.png) |
 | Commands bright, output muted (program colours kept), metadata dim | Done | [02](screenshots/phase1/02-blocks.png) |
+| Rendering: box drawing, blocks, eighths and shades drawn seamlessly; `clear` empties the timeline | Done | [02b](screenshots/phase1/02b-rendering-sample.png) |
 | Running command shown live, with a green dot and elapsed time | Done | [04](screenshots/phase1/04-running.png) |
 | Input bar pinned at the bottom: the shell's own prompt and line editor (autosuggestions, highlighting, fzf all keep working) | Done | [01](screenshots/phase1/01-prompt.png) |
 | Dim context in the input bar: Node version in JS projects, `WSL · distro` on Windows | Done (not in the shots: this repo is not a JS project) | |
@@ -66,11 +67,8 @@ tick 6
   stayed behind the user's work, where macOS pauses drawing, so the visuals come from the
   headless renders. Still to try by hand: mouse selection across blocks, the title-bar drag,
   and IME composition.
-- Find covers output, not the command lines in block headers.
 - Splits are equal width (no dragging) and side by side only.
 - Sessions and layouts are not restored after a restart (phase 2: project spaces with layouts).
-- Box and block characters still come from the font (seams possible); drawing them is a
-  rendering task for phase 2.
 - Bash 3.2 (macOS's built-in bash) drops non-ASCII typed input; that is its old readline.
 
 ## Next: phase 2
