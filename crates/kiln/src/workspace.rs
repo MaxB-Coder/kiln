@@ -658,7 +658,8 @@ impl Workspace {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| {
                         if root.as_os_str().is_empty() {
-                            "starting…".into()
+                            // No folder reported (a shell without integration, or one still starting).
+                            "other".into()
                         } else {
                             copy::short_folder(&root.to_string_lossy())
                         }

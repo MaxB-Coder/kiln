@@ -53,11 +53,25 @@ tick 6
 
 ## Tests
 
-- 30 unit and integration tests, all passing. Real shells: zsh, bash 5 and bash 3.2 sessions
-  record the right command, output and exit code; a PowerShell test is ready for Windows CI.
-- `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo deny` clean.
-- `kiln_term` cross-checks clean for Windows and Linux targets. The GUI crate needs each
-  platform's SDK and runs in CI (Windows) and in a Linux container (see below).
+- 36 unit and integration tests. Real shells on real PTYs record the right command, output
+  and exit code for zsh, bash 5, bash 3.2, PowerShell 7 and Windows PowerShell 5.1.
+- CI ([MaxB-Coder/kiln](https://github.com/MaxB-Coder/kiln/actions), private): all six jobs
+  green on the last run: macOS arm64, Linux x64, Windows x64 (tests, a PowerShell session on
+  ConPTY), a WSL Ubuntu session, clippy with warnings as errors, and cargo-deny. macOS and
+  Linux CI also render the headless screenshots and keep them as artifacts.
+- Linux on this Mac: `scripts/linux-check.sh` builds and tests in a container (Debian, bash,
+  PowerShell 7, software Vulkan) and renders the screenshots in `screenshots/linux/`.
+
+Windows, from CI (PowerShell without integration, so the classic grid; real Windows 11
+controls at the top right):
+
+![Windows](screenshots/phase1/ci-windows-powershell.png)
+
+Bugs CI and the container caught and fixed: the UTF-8 locale was never set (non-ASCII input
+broke in fresh environments); PowerShell's cursor-position query went unanswered without a UI
+(it now gets answered on the PTY thread); the PowerShell script called a PSReadLine API that
+newer versions removed, and Windows blocks `.ps1` files by default (it now loads inline);
+bash 3.2's command line came back cut short (it now gets a proper output mark).
 
 ## Not done or not verified
 
