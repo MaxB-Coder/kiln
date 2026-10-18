@@ -112,10 +112,8 @@ fn bash5_block() {
 
 #[test]
 fn bash3_block_without_output_mark() {
-    // macOS ships bash 3.2: no PS0, so the recorder infers the output start. Its readline
-    // also drops non-ASCII input, so this command stays ASCII.
-    let command = "printf 'first\\nsecond\\n'; (exit 3)";
-    if let Some(block) = run_block("/bin/bash", &["-l"], command) {
-        check(block, command, "first\nsecond");
+    // macOS ships bash 3.2: no PS0, so the recorder infers the output start.
+    if let Some(block) = run_block("/bin/bash", &["-l"], COMMAND) {
+        check(block, COMMAND, OUTPUT);
     }
 }

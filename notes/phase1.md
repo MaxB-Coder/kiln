@@ -69,7 +69,6 @@ tick 6
   and IME composition.
 - Splits are equal width (no dragging) and side by side only.
 - Sessions and layouts are not restored after a restart (phase 2: project spaces with layouts).
-- Bash 3.2 (macOS's built-in bash) drops non-ASCII typed input; that is its old readline.
 
 ## Next: phase 2
 
