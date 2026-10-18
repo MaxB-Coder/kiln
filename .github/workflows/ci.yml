@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-15 }
+          - { name: windows-x64, os: windows-2025 }
+          - { name: linux-x64, os: ubuntu-24.04 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build and smoke-test packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config clang \
+            libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libssl-dev \
+            xvfb mesa-vulkan-drivers imagemagick zsh
+
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.name }}
+
+      - name: Build
+        run: cargo build --release --locked -p kiln
+
+      - name: Test
+        run: cargo test --release --locked --workspace
+
+      - name: Smoke run (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 5
+        run: scripts/ci-smoke.sh target/release/kiln
+
+      - name: Smoke run (Linux, X11 under Xvfb with lavapipe Vulkan)
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" scripts/ci-smoke.sh target/release/kiln
+
+      - name: Smoke run (Windows, PowerShell)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        run: scripts/ci-smoke.ps1 -Kiln target/release/kiln.exe
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kiln-${{ matrix.name }}
+          path: |
+            target/release/kiln
+            target/release/kiln.exe
+            smoke/
+          if-no-files-found: warn
+          retention-days: 14
+
+  wsl:
+    name: smoke (windows-x64, WSL Ubuntu)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Vampire/setup-wsl@v5
+        with:
+          distribution: Ubuntu-24.04
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-x64
+      - name: Build
+        run: cargo build --release --locked -p kiln
+      - name: Smoke run (WSL session)
+        timeout-minutes: 5
+        shell: pwsh
+        run: scripts/ci-smoke.ps1 -Kiln target/release/kiln.exe -Wsl Ubuntu-24.04
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kiln-windows-wsl-smoke
+          path: smoke/
+          if-no-files-found: warn
+          retention-days: 14
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config clang \
+            libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libssl-dev
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-x64
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+  deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources

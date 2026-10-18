@@ -1,0 +1,56 @@
+# cargo-deny: run in CI on every push (see .github/workflows/ci.yml).
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+# Vulnerabilities fail the build anywhere in the graph. "Unmaintained" notices fail only for
+# crates Kiln depends on directly: GPUI pulls in several (paste, rustybuzz, ttf-parser, zbus
+# parts) that only Zed can replace. They are tracked in notes/phase0.md.
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# GPUI comes from Zed's repository by commit; these are the git dependencies its graph needs.
+allow-git = [
+    "https://github.com/zed-industries/zed",
+    "https://github.com/zed-industries/async-process.git",
+    "https://github.com/zed-industries/async-task.git",
+    "https://github.com/zed-industries/calloop",
+    "https://github.com/zed-industries/font-kit",
+    "https://github.com/zed-industries/khronos-egl",
+    "https://github.com/zed-industries/wasm_thread",
+    "https://github.com/zed-industries/xim-rs.git",
+    "https://github.com/gfx-rs/wgpu",
+]
