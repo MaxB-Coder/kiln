@@ -6,6 +6,7 @@
 
 mod block_element;
 mod config;
+mod context;
 mod copy;
 mod grid_paint;
 mod live_element;

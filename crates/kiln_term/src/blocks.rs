@@ -44,6 +44,8 @@ pub struct LiveState {
     pub command_started: Option<SystemTime>,
     pub cwd: Option<String>,
     pub last_exit: Option<i32>,
+    /// The `node` on the shell's PATH, as the integration reports it.
+    pub node_path: Option<String>,
 }
 
 /// One finished command.
@@ -190,6 +192,10 @@ impl BlockRecorder {
             }
             Mark::Cwd { path, .. } => {
                 live.cwd = Some(path.clone());
+                None
+            }
+            Mark::NodePath(path) => {
+                live.node_path = (!path.is_empty()).then(|| path.clone());
                 None
             }
         }

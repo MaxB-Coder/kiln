@@ -39,6 +39,12 @@ function global:prompt {
         if (-not $path.StartsWith('/')) { $path = '/' + $path }
         $out += "$esc]7;file://$([Environment]::MachineName)$(__KilnEncode $path)$bel"
     }
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $nodePath = if ($node) { $node.Source } else { '' }
+    if ($nodePath -ne $global:__KilnNode) {
+        $global:__KilnNode = $nodePath
+        $out += "$esc]1337;KilnNode=$(__KilnEncode $nodePath)$bel"
+    }
     $out += "$esc]133;A$bel"
     $out += & $global:__KilnUserPrompt
     $out += "$esc]133;B$bel"

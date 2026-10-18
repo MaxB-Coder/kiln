@@ -35,6 +35,17 @@ _kiln_prompt_command() {
   _kiln_first=
   _kiln_urlencode "$PWD"
   printf '\e]7;file://%s%s\a' "${HOSTNAME}" "$REPLY"
+  # Context for the input bar: which node is on PATH (searched in-process, no subprocess).
+  local node= dir IFS=:
+  for dir in $PATH; do
+    if [[ -x "$dir/node" && ! -d "$dir/node" ]]; then node="$dir/node"; break; fi
+  done
+  unset IFS
+  if [[ $node != "${_kiln_node-}" ]]; then
+    _kiln_node=$node
+    _kiln_urlencode "$node"
+    printf '\e]1337;KilnNode=%s\a' "$REPLY"
+  fi
   if [[ $PS1 != *'133;A'* ]]; then
     PS1='\[\e]133;A\a\]'"${PS1}"'\[\e]133;B\a\]'
   fi

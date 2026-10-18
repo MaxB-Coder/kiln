@@ -20,6 +20,9 @@ pub enum Mark {
     CommandEnd { exit_code: Option<i32> },
     /// `OSC 7 ; file://host/path`: the shell's current folder.
     Cwd { host: String, path: String },
+    /// `OSC 1337 ; KilnNode=…`: the `node` on the shell's PATH (empty: none). Kiln's own key in
+    /// iTerm2's namespace, which other terminals ignore.
+    NodePath(String),
 }
 
 /// A mark plus where the cursor was when it arrived.
@@ -85,6 +88,12 @@ fn parse_osc(params: &[&[u8]]) -> Option<Mark> {
             }
             _ => None,
         },
+        [b"1337", kv] => {
+            let value = kv.strip_prefix(b"KilnNode=")?;
+            Some(Mark::NodePath(percent_decode(&String::from_utf8_lossy(
+                value,
+            ))))
+        }
         // A URI may contain ';', which the parser splits on.
         [b"7", uri @ ..] if !uri.is_empty() => {
             let uri = uri
@@ -193,6 +202,12 @@ mod tests {
                 path: "/Users/max/My Code".into()
             }
         );
+    }
+
+    #[test]
+    fn parses_node_path() {
+        let marks = scan_all(b"\x1b]1337;KilnNode=/opt/homebrew/bin/node\x07");
+        assert_eq!(marks[0].1, Mark::NodePath("/opt/homebrew/bin/node".into()));
     }
 
     #[test]

@@ -45,6 +45,16 @@ impl ShellCommand {
     /// A WSL session, in the distribution's home folder.
     #[cfg(windows)]
     pub fn wsl(distribution: Option<&str>) -> Self {
+        Self::wsl_command(distribution)
+    }
+
+    /// The WSL command line, on any platform (for tests).
+    #[doc(hidden)]
+    pub fn wsl_for_test(distribution: &str) -> Self {
+        Self::wsl_command(Some(distribution))
+    }
+
+    fn wsl_command(distribution: Option<&str>) -> Self {
         let mut args = Vec::new();
         if let Some(distribution) = distribution {
             args.extend(["--distribution".to_string(), distribution.to_string()]);

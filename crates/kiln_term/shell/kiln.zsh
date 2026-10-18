@@ -32,6 +32,13 @@ _kiln_precmd() {
   fi
   _kiln_urlencode "$PWD"
   printf '\e]7;file://%s%s\a' "${HOST}" "$REPLY"
+  # Context for the input bar: which node is on PATH (a hash lookup, no subprocess).
+  local node=${commands[node]-}
+  if [[ $node != ${_kiln_node-} ]]; then
+    typeset -g _kiln_node=$node
+    _kiln_urlencode "$node"
+    printf '\e]1337;KilnNode=%s\a' "$REPLY"
+  fi
   # Prompt themes may rebuild PS1 in their own precmd, so the wrap also runs last (from the
   # next prompt on: zsh does not see hooks added while it runs them).
   _kiln_wrap_prompt

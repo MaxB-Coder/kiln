@@ -141,6 +141,10 @@ pub struct TerminalView {
     search_highlights: SearchHighlights,
     title: Option<String>,
     cwd: Option<String>,
+    /// Dim context in the input bar ("node 22.3.0", "WSL · Ubuntu").
+    context: Option<String>,
+    context_for: Option<(Option<String>, Option<String>)>,
+    _context_task: Option<Task<()>>,
     started: Instant,
     pub(crate) first_frame_logged: bool,
     first_output_logged: bool,
@@ -223,6 +227,9 @@ impl TerminalView {
             search_highlights: SearchHighlights::default(),
             title: None,
             cwd: None,
+            context: None,
+            context_for: None,
+            _context_task: None,
             started,
             first_frame_logged: false,
             first_output_logged: false,
@@ -304,8 +311,42 @@ impl TerminalView {
             }
         }
         self.sync_list(cleared);
+        self.refresh_context(cx);
         cx.emit(PaneEvent::Changed);
         cx.notify();
+    }
+
+    /// Recomputes the input bar's context when the folder or the node on PATH changed. The
+    /// version lookup may run `node --version` once, so it happens in the background.
+    fn refresh_context(&mut self, cx: &mut Context<Self>) {
+        let live = self.session.live();
+        let key = (live.cwd.clone(), live.node_path.clone());
+        if self.context_for.as_ref() == Some(&key) {
+            return;
+        }
+        self.context_for = Some(key.clone());
+        let wsl = crate::context::wsl_label(self.session.shell());
+        self._context_task = Some(cx.spawn(async move |this, cx| {
+            let node = cx
+                .background_executor()
+                .spawn(async move {
+                    let (cwd, node) = key;
+                    let (cwd, node) = (cwd?, node?);
+                    if !crate::context::is_node_project(&cwd) {
+                        return None;
+                    }
+                    crate::context::node_version(&node).map(|v| format!("node {v}"))
+                })
+                .await;
+            let label = match (node, wsl) {
+                (Some(node), Some(wsl)) => Some(format!("{node}   {wsl}")),
+                (node, wsl) => node.or(wsl),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.context = label;
+                cx.notify();
+            });
+        }));
     }
 
     /// Keeps the list's items (blocks, then the running command) in step with the session.
@@ -1418,13 +1459,29 @@ impl Render for TerminalView {
                             .px(px(PADDING_X))
                             .pt(px(10.))
                             .pb(px(10.))
+                            .relative()
                             .child(LiveElement::new(
                                 entity,
                                 self.focus.clone(),
                                 LiveRole::Prompt,
                                 top,
                                 rows,
-                            )),
+                            ))
+                            .when_some(self.context.clone(), |d, context| {
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(10.))
+                                        .right(px(PADDING_X))
+                                        .h(self.metrics.line_height)
+                                        .flex()
+                                        .items_center()
+                                        .font_family(FONT_FAMILY)
+                                        .text_size(px(11.))
+                                        .text_color(theme::hsla(palette().muted))
+                                        .child(context),
+                                )
+                            }),
                     )
                 })
                 .into_any_element(),
