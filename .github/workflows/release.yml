@@ -111,9 +111,10 @@ jobs:
       - name: Install Rust (from rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
 
+      # Keyed by runner image too: tools built on one Ubuntu do not run on an older one.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ matrix.name }}
+          shared-key: release-${{ matrix.name }}-${{ matrix.os }}
 
       - name: Install cargo-packager and cargo-about
         run: |
@@ -223,7 +224,7 @@ jobs:
             exit 1
           fi
           KILN_E2E_PACKAGE="$package" cargo test --profile dist --locked -p kiln_update \
-            --test update -- --ignored --nocapture
+            --test update accepts_a_signed_release_build -- --ignored --nocapture
 
       - name: Install and start (Windows, per-user installer)
         if: runner.os == 'Windows'
