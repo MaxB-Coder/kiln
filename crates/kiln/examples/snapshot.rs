@@ -3,7 +3,8 @@
 //! Uses GPUI's headless app context with the real text system and the real GPU renderer, and
 //! real shells on real PTYs, so the pictures show Kiln as it behaves; no display is needed.
 //!
-//! Usage: cargo run -p kiln --example snapshot -- [out dir]   (default notes/screenshots/phase1)
+//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2]
+//! (default: notes/screenshots/phase1, scenario phase1)
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,6 +31,8 @@ impl Shots {
         let end = Instant::now() + duration;
         while Instant::now() < end {
             std::thread::sleep(Duration::from_millis(25));
+            // The headless app runs on a test clock: move it with real time so timers fire.
+            self.cx.advance_clock(Duration::from_millis(25));
             self.cx.run_until_parked();
             self.redraw();
         }
@@ -148,11 +151,17 @@ impl Shots {
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    let scenario = std::env::args().nth(2).unwrap_or_else(|| "phase1".into());
     let out = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("notes/screenshots/phase1"));
+        .unwrap_or_else(|| PathBuf::from(format!("notes/screenshots/{scenario}")));
     std::fs::create_dir_all(&out).unwrap();
+    // Saved sessions go to a scratch file, never the real one.
+    let state_file =
+        std::env::temp_dir().join(format!("kiln-snapshot-{}.json", std::process::id()));
+    // SAFETY: no other thread runs yet.
+    unsafe { std::env::set_var("KILN_STATE_FILE", &state_file) };
     let project = std::env::current_dir().unwrap();
 
     let text_system = gpui_platform::current_platform(true).text_system();
@@ -163,12 +172,18 @@ fn main() {
     );
     cx.allow_parking();
     cx.update(|cx| grid_paint::load_embedded_fonts(cx));
-    config::set_current(Config::default());
+    config::set_current(Config {
+        // Short, so the phase 2 scenario can show a finished command's attention dot.
+        notify_after_secs: 2,
+        // A blinking cursor would make the pictures depend on timing.
+        cursor_blink: false,
+        ..Config::default()
+    });
 
     let window = cx
         .open_window(size(px(1180.), px(720.)), |window, cx| {
             let metrics = CellMetrics::measure(px(13.), window);
-            cx.new(|cx| Workspace::new(None, metrics, false, Instant::now(), window, cx))
+            cx.new(|cx| Workspace::new(None, metrics, false, false, Instant::now(), window, cx))
         })
         .unwrap();
     let mut s = Shots { cx, window, out };
@@ -176,6 +191,12 @@ fn main() {
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "phase2" {
+        phase2(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        println!("done");
+        return;
+    }
     s.run(
         &format!("cd {}", shell_quote(&project)),
         Duration::from_secs(5),
@@ -268,6 +289,133 @@ fn main() {
     unsafe { std::env::remove_var("KILN_CHROME") };
 
     println!("done");
+}
+
+/// Phase 2: the context rail, focus mode, tints, attention, projects and restored sessions.
+fn phase2(s: &mut Shots) {
+    let demo = demo_project();
+    s.run(
+        &format!("cd {}", shell_quote(&demo)),
+        Duration::from_secs(5),
+    );
+    s.run("git --no-pager log --oneline", Duration::from_secs(5));
+
+    // 13. The rail: the dev server's process and port, the changes, node, the session.
+    s.type_only("node src/server.js\r");
+    s.pump(Duration::from_millis(2500));
+    s.action(Box::new(kiln::ToggleRail));
+    s.pump(Duration::from_millis(2500));
+    s.shot("13-rail");
+    s.type_only("\x03");
+    s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
+
+    // 14. Focus mode: one pane, nothing else.
+    s.action(Box::new(kiln::SplitRight));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.run("git --no-pager diff --stat", Duration::from_secs(5));
+    s.action(Box::new(kiln::ToggleFocusMode));
+    s.shot("14-focus-mode");
+    s.action(Box::new(kiln::ToggleFocusMode));
+
+    // 15–16. Tints. `ssh` is a stand-in function here: nothing connects anywhere.
+    s.action(Box::new(kiln::NewSession));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.run(
+        "ssh() { printf 'Last login: Mon Oct 19 09:12 from 10.0.4.2\\n%s:~$ \\n' \"${1#*@}\"; sleep 30; }",
+        Duration::from_secs(5),
+    );
+    s.type_only("ssh deploy@db.prod.example.com\r");
+    s.pump(Duration::from_millis(2500));
+    s.shot("15-production-tint");
+    s.type_only("\x03");
+    s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
+    s.type_only("ssh build@build-box\r");
+    s.pump(Duration::from_millis(1500));
+    s.shot("16-remote-tint");
+    s.type_only("\x03");
+    s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
+
+    // 17. A long command finishes in another session: an orange dot until it is shown.
+    s.type_only("sleep 3; echo built\r");
+    s.pump(Duration::from_millis(300));
+    s.action(Box::new(kiln::SelectSession1));
+    s.pump(Duration::from_millis(4000));
+    s.shot("17-attention");
+
+    // 18. Projects in the palette (saved every two seconds).
+    s.pump(Duration::from_millis(2200));
+    s.action(Box::new(kiln::CommandPaletteToggle));
+    s.type_into_field("acme");
+    s.shot("18-palette-projects");
+    s.keystroke("escape");
+
+    // 19. A new window restores the saved sessions: folders, splits, the rail.
+    s.pump(Duration::from_millis(2200));
+    let restored =
+        s.cx.open_window(size(px(1180.), px(720.)), |window, cx| {
+            let metrics = CellMetrics::measure(px(13.), window);
+            cx.new(|cx| Workspace::new(None, metrics, false, true, Instant::now(), window, cx))
+        })
+        .unwrap();
+    s.window = restored;
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.pump(Duration::from_millis(2500));
+    s.shot("19-restored");
+
+    // 20. Windows chrome with the rail open: the window controls sit at the top of the rail.
+    // SAFETY: only this thread reads the variable (in the next render).
+    unsafe { std::env::set_var("KILN_CHROME", "windows") };
+    s.pump(Duration::from_millis(400));
+    s.shot("20-windows-chrome-with-rail");
+    unsafe { std::env::remove_var("KILN_CHROME") };
+}
+
+/// A small git project with a few changes, in a scratch folder.
+fn demo_project() -> PathBuf {
+    let root = std::env::temp_dir().join("kiln-demo").join("acme-web");
+    let _ = std::fs::remove_dir_all(&root);
+    let write = |path: &str, text: &str| {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    write(
+        "package.json",
+        "{\n  \"name\": \"acme-web\",\n  \"scripts\": { \"dev\": \"node src/server.js\" }\n}\n",
+    );
+    write("README.md", "# acme-web\n");
+    write(
+        "src/server.js",
+        "const http = require('http');\nconst routes = require('./routes');\n\
+         http.createServer(routes).listen(4173, '127.0.0.1', () =>\n  \
+         console.log('listening on http://localhost:4173'));\n",
+    );
+    write(
+        "src/routes.js",
+        "module.exports = (req, res) => res.end('ok');\n",
+    );
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=Demo", "-c", "user.email=demo@example.com"])
+            .args(args)
+            .current_dir(&root)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "Serve the home page"]);
+    write(
+        "src/routes.js",
+        "module.exports = (req, res) => {\n  if (req.url === '/health') return res.end('up');\n  res.end('ok');\n};\n",
+    );
+    write("src/auth.js", "module.exports = () => true;\n");
+    write("docs/deploy.md", "# Deploy\n");
+    git(&["add", "docs/deploy.md"]);
+    std::fs::remove_file(root.join("README.md")).unwrap();
+    root
 }
 
 fn shell_quote(path: &Path) -> String {

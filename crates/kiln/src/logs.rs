@@ -13,17 +13,7 @@ use crate::copy;
 const KEEP: usize = 200;
 
 pub fn log_dir() -> Option<PathBuf> {
-    let base = if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/Kiln"))
-    } else if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("Kiln"))
-    } else {
-        std::env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-            .map(|p| p.join("kiln"))
-    }?;
-    Some(base.join("logs"))
+    crate::state::data_dir().map(|d| d.join("logs"))
 }
 
 /// Writes the block to a new log file and returns its path.

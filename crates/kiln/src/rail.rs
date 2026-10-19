@@ -386,7 +386,16 @@ fn section(title: &str, aside: Option<String>) -> Div {
             .text_size(px(11.))
             .text_color(theme::hsla(p.muted))
             .child(div().flex_none().child(title.to_string()))
-            .when_some(aside, |d, aside| d.child(ellipsis(aside))),
+            .when_some(aside, |d, aside| {
+                d.child(
+                    div()
+                        .min_w_0()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(aside),
+                )
+            }),
     )
 }
 

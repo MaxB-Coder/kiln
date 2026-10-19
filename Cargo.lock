@@ -2882,6 +2882,7 @@ dependencies = [
  "kiln_term",
  "log",
  "serde",
+ "serde_json",
  "toml 0.9.12+spec-1.1.0",
 ]
 

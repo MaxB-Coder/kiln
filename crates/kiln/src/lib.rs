@@ -14,6 +14,7 @@ pub mod palette;
 pub mod rail;
 pub mod remote;
 pub mod search;
+pub mod state;
 pub mod terminal_view;
 pub mod text_input;
 pub mod theme;

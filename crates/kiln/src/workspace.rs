@@ -21,6 +21,7 @@ use crate::logs;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteItem, PaletteTarget};
 use crate::rail::Rail;
 use crate::search::Match;
+use crate::state::{self, TabState, WindowState};
 use crate::terminal_view::{PaneEvent, PaneStatus, TerminalView};
 use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
@@ -41,6 +42,10 @@ const PANE_GAP: Pixels = px(10.);
 
 struct Pane {
     view: Entity<TerminalView>,
+    /// The folder it started in, until the shell reports its own.
+    start_cwd: Option<String>,
+    /// Runs a one-off program (a diff, a log, the config editor): not saved with the layout.
+    ephemeral: bool,
     _events: Subscription,
 }
 
@@ -79,13 +84,16 @@ pub struct Workspace {
     projects: HashMap<String, PathBuf>,
     start_error: Option<String>,
     _config_watch: Task<()>,
+    _state_watch: Task<()>,
 }
 
 impl Workspace {
+    /// `restore`: reopen the sessions saved from the last window (else one new session).
     pub fn new(
         shell_override: Option<ShellCommand>,
         metrics: CellMetrics,
         bench_startup: bool,
+        restore: bool,
         started: Instant,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -107,6 +115,7 @@ impl Workspace {
             projects: HashMap::new(),
             start_error: None,
             _config_watch: Task::ready(()),
+            _state_watch: Task::ready(()),
         };
         this._config_watch = this.watch_config(window, cx);
         cx.observe_window_activation(window, |this, window, cx| {
@@ -118,7 +127,16 @@ impl Workspace {
             }
         })
         .detach();
-        this.new_tab(None, None, window, cx);
+        let saved = restore.then(|| state::current().window).flatten();
+        if !saved.is_some_and(|saved| this.restore(saved, window, cx)) {
+            this.new_tab(None, None, window, cx);
+        }
+        this._state_watch = this.watch_state(window, cx);
+        cx.on_app_quit(|this, cx| {
+            this.save_state(cx);
+            async {}
+        })
+        .detach();
         this
     }
 
@@ -148,6 +166,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Pane> {
+        let start_cwd = cwd.as_ref().map(|c| c.to_string_lossy().into_owned());
+        let ephemeral = shell.is_some();
         let options = self.session_options(cwd, shell);
         // A first guess; the pane resizes the grid to its real size on its first frame.
         let grid = GridSize {
@@ -171,6 +191,8 @@ impl Workspace {
                 let events = cx.subscribe_in(&view, window, Self::on_pane_event);
                 Some(Pane {
                     view,
+                    start_cwd,
+                    ephemeral,
                     _events: events,
                 })
             }
@@ -289,6 +311,8 @@ impl Workspace {
         if tab.panes.is_empty() {
             self.tabs.remove(t);
             if self.tabs.is_empty() {
+                // The last session closed: next launch starts fresh.
+                self.save_state(cx);
                 window.remove_window();
                 return;
             }
@@ -511,6 +535,7 @@ impl Workspace {
                         window.dispatch_action(action.boxed_clone(), cx)
                     }
                     PaletteTarget::Session(index) => this.activate(*index, window, cx),
+                    PaletteTarget::Project(root) => this.open_project(root.clone(), window, cx),
                     PaletteTarget::RunCommand(command) => {
                         if let Some(view) = this.focused_view() {
                             view.update(cx, |view, cx| view.run_command(command, cx));
@@ -579,6 +604,22 @@ impl Workspace {
                 detail: view.cwd().map(copy::short_folder).unwrap_or_default(),
                 kind: "session",
                 target: PaletteTarget::Session(index),
+            });
+        }
+
+        for project in state::current().projects {
+            let root = PathBuf::from(&project.root);
+            if !root.is_dir() {
+                continue;
+            }
+            items.push(PaletteItem {
+                label: root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| project.root.clone()),
+                detail: copy::short_folder(&project.root),
+                kind: "project",
+                target: PaletteTarget::Project(root),
             });
         }
 
@@ -705,7 +746,13 @@ impl Workspace {
         if let Some(root) = self.projects.get(cwd) {
             return root.clone();
         }
-        let path = PathBuf::from(cwd);
+        // Resolve links, so /var/… and /private/var/… are one project. (Not on Windows, where
+        // it would turn C:\… into \\?\C:\….)
+        let path = if cfg!(windows) {
+            PathBuf::from(cwd)
+        } else {
+            std::fs::canonicalize(cwd).unwrap_or_else(|_| PathBuf::from(cwd))
+        };
         let root = path
             .ancestors()
             .find(|dir| dir.join(".git").exists())
@@ -713,6 +760,142 @@ impl Workspace {
             .unwrap_or(path);
         self.projects.insert(cwd.to_string(), root.clone());
         root
+    }
+
+    // ----- saved sessions and project spaces ------------------------------------------------
+
+    /// Opens a saved window's sessions. Returns false when none could start.
+    fn restore(&mut self, saved: WindowState, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        for tab in &saved.tabs {
+            self.open_tab_layout(tab, window, cx);
+        }
+        if self.tabs.is_empty() {
+            return false;
+        }
+        self.sidebar_open = saved.sidebar;
+        if saved.rail && self.rail.is_none() {
+            self.toggle_rail(window, cx);
+        }
+        self.activate(saved.active.min(self.tabs.len() - 1), window, cx);
+        true
+    }
+
+    /// A new session with the saved panes, side by side.
+    fn open_tab_layout(&mut self, tab: &TabState, window: &mut Window, cx: &mut Context<Self>) {
+        let mut cwds = tab.panes.iter().map(|cwd| cwd.as_ref().map(PathBuf::from));
+        let before = self.tabs.len();
+        self.new_tab(cwds.next().flatten(), None, window, cx);
+        if self.tabs.len() == before {
+            return;
+        }
+        for cwd in cwds {
+            self.split_right(cwd, None, window, cx);
+        }
+        if let Some(current) = self.tabs.get_mut(self.active) {
+            current.focused = tab.focused.min(current.panes.len() - 1);
+        }
+        self.focus_active(window, cx);
+    }
+
+    /// Shows a project: its open session, else its saved layout, else a new session there.
+    fn open_project(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let key = root.to_string_lossy().into_owned();
+        state::touch_project(&key);
+        for index in 0..self.tabs.len() {
+            if self.tab_cwd(index, cx).map(|cwd| self.project_of(&cwd)) == Some(root.clone()) {
+                self.activate(index, window, cx);
+                return;
+            }
+        }
+        let saved = state::current()
+            .projects
+            .into_iter()
+            .find(|p| p.root == key)
+            .map(|p| p.tabs)
+            .unwrap_or_default();
+        if saved.is_empty() {
+            self.new_tab(Some(root), None, window, cx);
+        } else {
+            for tab in &saved {
+                self.open_tab_layout(tab, window, cx);
+            }
+        }
+    }
+
+    fn tab_cwd(&self, index: usize, cx: &App) -> Option<String> {
+        let tab = self.tabs.get(index)?;
+        let pane = tab.panes.get(tab.focused)?;
+        pane.view
+            .read(cx)
+            .cwd()
+            .map(str::to_string)
+            .or_else(|| pane.start_cwd.clone())
+    }
+
+    /// This window's sessions, as saved.
+    fn window_state(&self, cx: &App) -> WindowState {
+        let mut active = 0;
+        let mut tabs = Vec::new();
+        for (index, tab) in self.tabs.iter().enumerate() {
+            let panes: Vec<_> = tab.panes.iter().filter(|pane| !pane.ephemeral).collect();
+            if panes.is_empty() {
+                continue;
+            }
+            if index == self.active {
+                active = tabs.len();
+            }
+            let focused = tab
+                .panes
+                .get(tab.focused)
+                .and_then(|f| panes.iter().position(|p| p.view == f.view))
+                .unwrap_or(0);
+            tabs.push(TabState {
+                panes: panes
+                    .iter()
+                    .map(|pane| {
+                        pane.view
+                            .read(cx)
+                            .cwd()
+                            .map(str::to_string)
+                            .or_else(|| pane.start_cwd.clone())
+                    })
+                    .collect(),
+                focused,
+            });
+        }
+        WindowState {
+            sidebar: self.sidebar_open,
+            rail: self.rail.is_some(),
+            active,
+            tabs,
+        }
+    }
+
+    fn save_state(&mut self, cx: &mut Context<Self>) {
+        let window = self.window_state(cx);
+        // Only folders in git are projects.
+        let mut roots: HashMap<String, Option<String>> = HashMap::new();
+        for cwd in window.tabs.iter().flat_map(|t| t.panes.iter().flatten()) {
+            let root = self.project_of(cwd);
+            let is_project = root.join(".git").exists();
+            roots.insert(
+                cwd.clone(),
+                is_project.then(|| root.to_string_lossy().into_owned()),
+            );
+        }
+        state::save_window(window, |cwd| roots.get(cwd).cloned().flatten());
+    }
+
+    /// Saves the sessions every two seconds when they changed.
+    fn watch_state(&self, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(2)).await;
+                if this.update(cx, |this, cx| this.save_state(cx)).is_err() {
+                    break;
+                }
+            }
+        })
     }
 
     // ----- rendering ------------------------------------------------------------------------
@@ -755,13 +938,29 @@ impl Workspace {
                         }
                     })
             };
+            // Projects (folders in git) get their colour; home and loose folders do not.
+            let color = (!root.as_os_str().is_empty() && root.join(".git").exists())
+                .then(|| state::project_color(&root.to_string_lossy(), &config::current()));
             list = list.child(
                 div()
                     .pt(px(12.))
                     .pb(px(4.))
                     .px(px(10.))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.))
                     .text_size(px(11.))
                     .text_color(theme::hsla(p.muted))
+                    .when_some(color, |d, color| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .size(px(7.))
+                                .rounded(px(2.))
+                                .bg(theme::hsla(color)),
+                        )
+                    })
                     .child(SharedString::from(name)),
             );
             for index in tabs {

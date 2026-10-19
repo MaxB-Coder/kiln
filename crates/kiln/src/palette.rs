@@ -16,6 +16,7 @@ use crate::theme::{self, palette};
 pub enum PaletteTarget {
     Action(Box<dyn Action>),
     Session(usize),
+    Project(std::path::PathBuf),
     RunCommand(String),
 }
 
@@ -188,8 +189,14 @@ impl Render for CommandPalette {
                             .child(SharedString::from(item.label.clone())),
                     )
                     .child(
+                        // Folders can be long: the detail gives way before the label does.
                         div()
-                            .flex_none()
+                            .flex_shrink_1()
+                            .min_w_0()
+                            .max_w(px(260.))
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
                             .text_size(px(11.))
                             .text_color(theme::hsla(p.muted))
                             .child(SharedString::from(item.detail.clone())),

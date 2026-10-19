@@ -25,6 +25,8 @@ struct Args {
     background: bool,
     columns: Option<usize>,
     lines: Option<usize>,
+    /// Reopen the last window's sessions.
+    restore: bool,
 }
 
 fn parse_args() -> Args {
@@ -34,12 +36,14 @@ fn parse_args() -> Args {
         background: false,
         columns: None,
         lines: None,
+        restore: true,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--bench-startup" => args.bench_startup = true,
             "--background" => args.background = true,
+            "--fresh" => args.restore = false,
             "--cols" => args.columns = it.next().and_then(|v| v.parse().ok()),
             "--rows" => args.lines = it.next().and_then(|v| v.parse().ok()),
             #[cfg(windows)]
@@ -58,7 +62,7 @@ fn parse_args() -> Args {
             }
             "--help" | "-h" => {
                 println!(
-                    "kiln [--cols N] [--rows N] [--background] [--bench-startup] [--wsl | --pwsh] [-- program args...]"
+                    "kiln [--cols N] [--rows N] [--background] [--fresh] [--bench-startup] [--wsl | --pwsh] [-- program args...]"
                 );
                 std::process::exit(0);
             }
@@ -86,8 +90,10 @@ fn main() {
     #[cfg(windows)]
     attach_parent_console();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    let args = parse_args();
+    let mut args = parse_args();
     let (config, _) = config::load();
+    // A given program, or a benchmark, starts with just that; otherwise the last sessions.
+    args.restore &= config.window.restore && args.shell.is_none() && !args.bench_startup;
     config::set_current(config);
 
     gpui_platform::application().run(move |cx: &mut App| {
@@ -119,6 +125,7 @@ fn main() {
             open_window(
                 Args {
                     bench_startup: false,
+                    restore: false,
                     ..new_window_args.clone()
                 },
                 Instant::now(),
@@ -313,6 +320,7 @@ fn open_window(args: Args, started: Instant, cx: &mut App) {
                 args.shell.clone(),
                 metrics,
                 args.bench_startup,
+                args.restore,
                 started,
                 window,
                 cx,

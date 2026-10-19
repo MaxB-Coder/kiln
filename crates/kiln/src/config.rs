@@ -72,6 +72,8 @@ pub struct WindowConfig {
     pub columns: usize,
     pub rows: usize,
     pub sidebar: bool,
+    /// Reopen the last window's sessions (folders and splits) at launch.
+    pub restore: bool,
 }
 
 /// Palette overrides, as "#rrggbb" strings. Keys match the palette's names.
@@ -118,6 +120,7 @@ impl Default for WindowConfig {
             columns: 120,
             rows: 36,
             sidebar: true,
+            restore: true,
         }
     }
 }
@@ -261,6 +264,8 @@ notify_after_secs = 10
 columns = 120
 rows = 36
 sidebar = true
+# Reopen the last window's sessions (their folders and splits) at launch.
+restore = true
 
 [tints]
 # Panes running ssh or mosh to another machine get a blue tint.
