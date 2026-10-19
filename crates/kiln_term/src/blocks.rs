@@ -44,6 +44,8 @@ pub struct LiveState {
     pub command_started: Option<SystemTime>,
     pub cwd: Option<String>,
     pub last_exit: Option<i32>,
+    /// Where the typed command starts (row, column), from the first input mark of a prompt.
+    pub input_start: Option<(usize, usize)>,
     /// Language runtimes on the shell's PATH (name, path), as the integration reports them.
     pub tools: Vec<(String, String)>,
 }
@@ -113,10 +115,8 @@ pub fn line_text(cells: &[Cell]) -> String {
 pub struct BlockRecorder {
     next_id: u64,
     scrollback_limit: usize,
-    input_start: Option<(usize, usize)>,
     command: Option<String>,
     started: Option<(Instant, SystemTime)>,
-    output_top: Option<usize>,
     cwd: Option<String>,
     seen_prompt: bool,
 }
@@ -126,10 +126,8 @@ impl BlockRecorder {
         Self {
             next_id: 1,
             scrollback_limit,
-            input_start: None,
             command: None,
             started: None,
-            output_top: None,
             cwd: None,
             seen_prompt: false,
         }
@@ -145,7 +143,7 @@ impl BlockRecorder {
         let (abs, column) = cursor_abs(term);
         match mark {
             Mark::PromptStart => {
-                self.input_start = None;
+                live.input_start = None;
                 live.integrated = true;
                 live.phase = Phase::Prompt;
                 live.output_top = None;
@@ -162,8 +160,8 @@ impl BlockRecorder {
             Mark::InputStart => {
                 // Line editors may redraw the prompt (and with it this mark) while the user
                 // types; the first one marks where the input really starts.
-                if self.input_start.is_none() {
-                    self.input_start = Some((abs, column));
+                if live.input_start.is_none() {
+                    live.input_start = Some((abs, column));
                 }
                 live.phase = Phase::Prompt;
                 None
@@ -172,12 +170,11 @@ impl BlockRecorder {
                 let command = command
                     .clone()
                     .filter(|c| !c.trim().is_empty())
-                    .or_else(|| self.input_text(term, abs, column));
+                    .or_else(|| self.input_text(term, abs, column, live.input_start));
                 let top = if column == 0 { abs } else { abs + 1 };
                 let now = (Instant::now(), SystemTime::now());
                 self.command = command.clone();
                 self.started = Some(now);
-                self.output_top = Some(top);
                 self.cwd = live.cwd.clone();
                 live.phase = Phase::Running;
                 live.output_top = Some(top);
@@ -186,7 +183,7 @@ impl BlockRecorder {
                 None
             }
             Mark::CommandEnd { exit_code } => {
-                let mut block = self.finish(term, *exit_code, abs, column);
+                let mut block = self.finish(term, *exit_code, abs, column, live);
                 if let Some(block) = block.as_mut() {
                     block.cwd = self.cwd.take().or_else(|| live.cwd.clone());
                 }
@@ -234,8 +231,14 @@ impl BlockRecorder {
     }
 
     /// Text the user typed: from the input mark to just before the cursor.
-    fn input_text(&self, term: &EngineTerm, abs: usize, column: usize) -> Option<String> {
-        let (start_abs, start_col) = self.input_start?;
+    fn input_text(
+        &self,
+        term: &EngineTerm,
+        abs: usize,
+        column: usize,
+        input_start: Option<(usize, usize)>,
+    ) -> Option<String> {
+        let (start_abs, start_col) = input_start?;
         let history = term.grid().history_size();
         let start = Point::new(Line(start_abs as i32 - history as i32), Column(start_col));
         let end = if column == 0 {
@@ -260,9 +263,10 @@ impl BlockRecorder {
         exit_code: Option<i32>,
         abs: usize,
         column: usize,
+        live: &mut LiveState,
     ) -> Option<Block> {
-        let input_start = self.input_start.take();
-        let (top, command) = match (self.output_top.take(), self.command.take()) {
+        let input_start = live.input_start.take();
+        let (top, command) = match (live.output_top.take(), self.command.take()) {
             (Some(top), command) => (top, command.unwrap_or_default()),
             // No output mark (bash before 4.4): the command is the input line and the output
             // starts below it. An empty line is not a command.
@@ -323,6 +327,87 @@ impl BlockRecorder {
     }
 }
 
+/// A grid position that survives reflow: logical lines above the cursor's line and cells into
+/// that logical line, or rows below the cursor (a mark at the end of the cursor's row).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Anchor {
+    Above { lines: usize, cells: usize },
+    Below(usize),
+}
+
+/// Whether row `abs` continues on the next row (a soft wrap).
+fn wraps(term: &EngineTerm, abs: usize) -> bool {
+    let grid = term.grid();
+    let line = Line(abs as i32 - grid.history_size() as i32);
+    if line > grid.bottommost_line() || line < grid.topmost_line() {
+        return false;
+    }
+    grid[line][Column(grid.columns() - 1)]
+        .flags
+        .contains(Flags::WRAPLINE)
+}
+
+/// The first row of the logical line that row `abs` belongs to.
+fn line_start(term: &EngineTerm, mut abs: usize) -> usize {
+    while abs > 0 && wraps(term, abs - 1) {
+        abs -= 1;
+    }
+    abs
+}
+
+fn anchor(term: &EngineTerm, abs: usize, column: usize) -> Anchor {
+    let (cursor, _) = cursor_abs(term);
+    if abs > cursor {
+        return Anchor::Below(abs - cursor);
+    }
+    let start = line_start(term, abs);
+    let cells = (abs - start) * term.columns() + column;
+    let mut row = line_start(term, cursor);
+    let mut lines = 0;
+    while row > start {
+        row = line_start(term, row - 1);
+        lines += 1;
+    }
+    Anchor::Above { lines, cells }
+}
+
+fn resolve(term: &EngineTerm, anchor: Anchor) -> (usize, usize) {
+    let (cursor, _) = cursor_abs(term);
+    match anchor {
+        Anchor::Below(rows) => (cursor + rows, 0),
+        Anchor::Above { lines, cells } => {
+            let mut row = line_start(term, cursor);
+            for _ in 0..lines {
+                if row == 0 {
+                    break;
+                }
+                row = line_start(term, row - 1);
+            }
+            let columns = term.columns().max(1);
+            (row + cells / columns, cells % columns)
+        }
+    }
+}
+
+/// Resizes the terminal and moves the recorded prompt, input and output rows with the text,
+/// which the engine reflows: without this, a narrower pane would start a running command's
+/// output inside its own wrapped command line.
+pub(crate) fn resize_keeping_marks(
+    term: &mut EngineTerm,
+    live: &mut LiveState,
+    size: crate::session::GridSize,
+) {
+    let prompt = live.prompt_top.map(|row| anchor(term, row, 0));
+    let output = live.output_top.map(|row| anchor(term, row, 0));
+    let input = live
+        .input_start
+        .map(|(row, column)| anchor(term, row, column));
+    term.resize(size);
+    live.prompt_top = prompt.map(|a| resolve(term, a).0);
+    live.output_top = output.map(|a| resolve(term, a).0);
+    live.input_start = input.map(|a| resolve(term, a));
+}
+
 fn cursor_abs(term: &EngineTerm) -> (usize, usize) {
     let grid = term.grid();
     let point = grid.cursor.point;
@@ -375,5 +460,71 @@ fn logical_lines(term: &EngineTerm, top: usize, end: usize) -> Vec<Vec<Cell>> {
 fn trim_trailing_blanks(cells: &mut Vec<Cell>) {
     while cells.last().is_some_and(|cell| cell.is_empty()) {
         cells.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::{EventProxy, GridSize};
+    use alacritty_terminal::term::{Config, Term};
+    use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+
+    fn row_text(term: &EngineTerm, abs: usize) -> String {
+        let history = term.grid().history_size() as i32;
+        let line = Line(abs as i32 - history);
+        term.bounds_to_string(
+            Point::new(line, Column(0)),
+            Point::new(line, Column(term.columns() - 1)),
+        )
+    }
+
+    #[test]
+    fn marks_follow_the_text_when_the_terminal_reflows() {
+        let size = GridSize {
+            columns: 20,
+            lines: 10,
+            cell_width: 8,
+            cell_height: 16,
+        };
+        let mut term = Term::new(Config::default(), &size, EventProxy::for_test());
+        let mut parser: Processor<StdSyncHandler> = Processor::new();
+        // A 33-character command line: two rows at 20 columns. Then its output.
+        parser.advance(&mut term, b"$ echo 0123456789abcdefghijklmnop\r\n");
+        let (output_row, _) = cursor_abs(&term);
+        assert_eq!(output_row, 2);
+        parser.advance(&mut term, b"out1\r\nout2");
+        let mut live = LiveState {
+            prompt_top: Some(0),
+            output_top: Some(output_row),
+            input_start: Some((0, 2)),
+            ..Default::default()
+        };
+
+        // Narrower: the command line takes four rows, so the output starts on the fifth.
+        resize_keeping_marks(
+            &mut term,
+            &mut live,
+            GridSize {
+                columns: 10,
+                ..size
+            },
+        );
+        assert_eq!(live.output_top, Some(4));
+        assert!(row_text(&term, 4).starts_with("out1"));
+        assert_eq!(live.prompt_top, Some(0));
+        assert_eq!(live.input_start, Some((0, 2)));
+
+        // Wider: one row.
+        resize_keeping_marks(
+            &mut term,
+            &mut live,
+            GridSize {
+                columns: 40,
+                ..size
+            },
+        );
+        assert_eq!(live.output_top, Some(1));
+        assert!(row_text(&term, 1).starts_with("out1"));
     }
 }

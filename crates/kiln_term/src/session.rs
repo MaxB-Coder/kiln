@@ -46,6 +46,14 @@ impl EventProxy {
     pub(crate) fn send(&self, event: SessionEvent) {
         (self.callback)(event)
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {
+            callback: Arc::new(|_| {}),
+            writer: Arc::default(),
+        }
+    }
 }
 
 impl EventListener for EventProxy {
@@ -263,7 +271,12 @@ impl Session {
             return;
         }
         self.size = size;
-        self.term.lock().resize(size);
+        {
+            // Same lock order as the PTY thread: the terminal, then the live state.
+            let mut term = self.term.lock();
+            let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
+            crate::blocks::resize_keeping_marks(&mut term, &mut live, size);
+        }
         let _ = self.sender.send(Msg::Resize(size.into()));
     }
 }
