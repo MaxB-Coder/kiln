@@ -190,6 +190,9 @@ fn main() {
         ]);
 
         open_window(args.clone(), started, cx);
+        if !args.bench_startup {
+            update::start(cx);
+        }
         if !args.background {
             cx.activate(true);
         }

@@ -1,0 +1,249 @@
+name: Release
+
+# Builds Kiln's installers on macOS, Windows and Linux, installs and starts each one, and (only
+# when asked) publishes them as a GitHub release.
+#
+# - Run by hand (Actions → Release → Run workflow): builds and tests the installers and keeps
+#   them as workflow artifacts. Tick "publish" to also create the release.
+# - Weekly (Monday 06:00 UTC): does nothing unless the repository variable KILN_RELEASES is
+#   "on"; then it releases when main changed since the last release.
+#
+# Versions are dates (2026.10.26). Optional settings, each skipped when absent:
+#   vars.KILN_UPDATE_ENDPOINT   where the app reads latest.json (https://…/latest.json)
+#   vars.KILN_UPDATE_PUBKEY     the updater's public key (cargo packager signer generate)
+#   vars.KILN_DOWNLOAD_BASE     where the release files are downloadable; defaults to this
+#                               repository's release downloads (which need the repo public)
+#   secrets.KILN_UPDATE_PRIVATE_KEY (+ _PASSWORD)   signs the update files
+#   secrets.APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, vars.APPLE_SIGNING_IDENTITY,
+#   secrets.APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID   Developer ID signing and notarisation
+#   secrets.AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, vars.AZURE_SIGNING_ENDPOINT,
+#   AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE   Windows signing (Azure Trusted Signing)
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a GitHub release (otherwise only build and test the installers)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      build: ${{ steps.plan.outputs.build }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          PUBLISH: ${{ inputs.publish }}
+          RELEASES: ${{ vars.KILN_RELEASES }}
+        run: |
+          version="$(date -u +%Y.%-m.%-d)"
+          last="$(git tag --list 'v*' --sort=-creatordate | head -1)"
+          changed=true
+          if [ -n "$last" ] && [ -z "$(git log --oneline "$last"..HEAD)" ]; then changed=false; fi
+          if [ "$EVENT" = schedule ]; then
+            if [ "$RELEASES" = on ] && [ "$changed" = true ]; then build=true; else build=false; fi
+            publish=$build
+          else
+            build=true
+            if [ "$PUBLISH" = true ]; then publish=true; else publish=false; fi
+          fi
+          if [ "$publish" = true ] && git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version is already released today"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "build=$build"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "Kiln $version: build=$build publish=$publish (last release: ${last:-none})"
+
+  package:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    name: package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-15 }
+          - { name: windows-x64, os: windows-2025 }
+          - { name: linux-x64, os: ubuntu-24.04 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config clang \
+            libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev xvfb mesa-vulkan-drivers
+
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.name }}
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+
+      - name: Set the version
+        run: python3 scripts/set-version.py "${{ needs.plan.outputs.version }}" || python scripts/set-version.py "${{ needs.plan.outputs.version }}"
+
+      - name: Developer ID signing (when configured)
+        if: runner.os == 'macOS' && vars.APPLE_SIGNING_IDENTITY != ''
+        env:
+          IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib
+          p = pathlib.Path("crates/kiln/Cargo.toml")
+          identity = os.environ["IDENTITY"].replace('"', '')
+          p.write_text(p.read_text().replace('signingIdentity = "-"', f'signingIdentity = "{identity}"'))
+          PY
+
+      - name: Windows signing (when configured)
+        if: runner.os == 'Windows' && vars.AZURE_SIGNING_ENDPOINT != ''
+        env:
+          ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          cargo install trusted-signing-cli --locked
+          cat >> crates/kiln/Cargo.toml <<TOML
+
+          [package.metadata.packager.windows]
+          signCommand = "trusted-signing-cli -e $ENDPOINT -a $ACCOUNT -c $PROFILE -d Kiln %1"
+          TOML
+
+      - name: Package
+        env:
+          KILN_UPDATE_ENDPOINT: ${{ vars.KILN_UPDATE_ENDPOINT }}
+          KILN_UPDATE_PUBKEY: ${{ vars.KILN_UPDATE_PUBKEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.KILN_UPDATE_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.KILN_UPDATE_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          # Settings that are not configured arrive empty; empty is not the same as unset to
+          # the tools, so drop them.
+          for name in KILN_UPDATE_ENDPOINT KILN_UPDATE_PUBKEY CARGO_PACKAGER_SIGN_PRIVATE_KEY \
+            CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
+          # An unencrypted update key has no password; cargo-packager still wants the variable.
+          if [ -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" ] && [ -z "${CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD+x}" ]; then
+            export CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD=""
+          fi
+          scripts/package.sh
+
+      - name: Install and start (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        run: |
+          hdiutil attach -quiet -nobrowse -mountpoint /tmp/kiln-dmg target/packages/Kiln-*.dmg
+          ditto /tmp/kiln-dmg/Kiln.app "$RUNNER_TEMP/Kiln.app"
+          hdiutil detach -quiet /tmp/kiln-dmg
+          "$RUNNER_TEMP/Kiln.app/Contents/MacOS/kiln" --version
+          scripts/ci-smoke.sh "$RUNNER_TEMP/Kiln.app/Contents/MacOS/kiln"
+
+      - name: Install and start (Linux, .deb)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          sudo apt-get install -y ./target/packages/*.deb
+          kiln --version
+          xvfb-run -a -s "-screen 0 1600x1000x24" scripts/ci-smoke.sh "$(command -v kiln)"
+          sudo apt-get remove -y kiln
+
+      - name: Install and start (Windows, per-user installer)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/packages/*-setup.exe | Select-Object -First 1
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList "/S"
+          $exe = Get-ChildItem "$env:LOCALAPPDATA" -Recurse -Filter kiln.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.DirectoryName -like "*Kiln*" } | Select-Object -First 1
+          if (-not $exe) { throw "the installer did not put kiln.exe under LOCALAPPDATA" }
+          "installed: $($exe.FullName)"
+          if (-not (Test-Path (Join-Path $exe.DirectoryName "uninstall.exe"))) { throw "no uninstaller next to kiln.exe" }
+          scripts/ci-smoke.ps1 -Kiln $exe.FullName
+          Start-Process -Wait -FilePath (Join-Path $exe.DirectoryName "uninstall.exe") -ArgumentList "/S"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiln-${{ needs.plan.outputs.version }}-${{ matrix.name }}
+          path: |
+            target/packages/*.dmg
+            target/packages/*.tar.gz
+            target/packages/*.sig
+            target/packages/*.exe
+            target/packages/*.deb
+            smoke/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: [plan, package]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: kiln-${{ needs.plan.outputs.version }}-*
+          merge-multiple: true
+      - name: Update manifest (when the updater is configured)
+        if: vars.KILN_UPDATE_ENDPOINT != ''
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          BASE: ${{ vars.KILN_DOWNLOAD_BASE || format('{0}/{1}/releases/download/v{2}', github.server_url, github.repository, needs.plan.outputs.version) }}
+        run: python3 scripts/update-manifest.py "$VERSION" "$BASE" dist > dist/latest.json
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          rm -rf dist/smoke
+          gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" \
+            --title "Kiln $VERSION" --generate-notes

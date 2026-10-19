@@ -18,6 +18,7 @@ pub mod state;
 pub mod terminal_view;
 pub mod text_input;
 pub mod theme;
+pub mod update;
 pub mod workspace;
 
 use gpui::actions;
@@ -53,6 +54,7 @@ actions!(
         ZoomOut,
         ZoomReset,
         EditConfig,
+        InstallUpdate,
         Copy,
         CopyLastOutput,
         CopyLastOutputRaw,

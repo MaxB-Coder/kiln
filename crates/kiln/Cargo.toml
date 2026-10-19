@@ -11,6 +11,11 @@ env_logger.workspace = true
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Updates: signed release manifests over HTTPS (the only network use).
+cargo-packager-updater = "0.2.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots"] }
+semver = "1"
+url = "2"
 toml = "0.9"
 gpui.workspace = true
 kiln_term.workspace = true
@@ -29,6 +34,7 @@ gpui_platform = { workspace = true, features = ["wayland", "x11"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
@@ -39,3 +45,43 @@ gpui_platform = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gpui_platform = { workspace = true, features = ["wayland", "x11", "test-support"] }
+
+# Installers, built with cargo-packager (https://github.com/crabnebula-dev/cargo-packager).
+# Run scripts/package.sh (or see .github/workflows/release.yml). Paths are relative to this file;
+# the version is this package's.
+[package.metadata.packager]
+productName = "Kiln"
+identifier = "dev.kiln.Kiln"
+description = "A calm, cross-platform terminal"
+longDescription = "Kiln shows each command as a block, keeps the shell's own line editor, and copies output in a paste-ready form."
+category = "DeveloperTool"
+authors = ["Kiln"]
+publisher = "Kiln"
+icons = ["../../assets/icon/kiln.icns", "../../assets/icon/kiln.ico", "../../assets/icon/kiln-*.png"]
+outDir = "../../target/packages"
+beforePackagingCommand = "cargo build --release --locked -p kiln"
+binaries = [{ path = "kiln", main = true }]
+
+[package.metadata.packager.macos]
+minimumSystemVersion = "13.0"
+# Ad hoc signature: no Apple Developer account. The release workflow swaps in a Developer ID
+# when the signing secrets exist (and notarises then).
+signingIdentity = "-"
+
+[package.metadata.packager.nsis]
+# Per-user install: no administrator rights needed, and the updater can replace it quietly.
+installMode = "currentUser"
+appdataPaths = ["$LOCALAPPDATA/Kiln"]
+
+[package.metadata.packager.deb]
+section = "x11"
+depends = [
+  "libfontconfig1",
+  "libfreetype6",
+  "libvulkan1",
+  "libwayland-client0",
+  "libx11-xcb1",
+  "libxcb1",
+  "libxkbcommon0",
+  "libxkbcommon-x11-0",
+]

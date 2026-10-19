@@ -3,7 +3,7 @@
 //! Uses GPUI's headless app context with the real text system and the real GPU renderer, and
 //! real shells on real PTYs, so the pictures show Kiln as it behaves; no display is needed.
 //!
-//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2]
+//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2|phase3]
 //! (default: notes/screenshots/phase1, scenario phase1)
 
 use std::path::{Path, PathBuf};
@@ -191,6 +191,12 @@ fn main() {
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "phase3" {
+        phase3(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        println!("done");
+        return;
+    }
     if scenario == "phase2" {
         phase2(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -384,6 +390,33 @@ fn phase2(s: &mut Shots) {
     s.pump(Duration::from_millis(400));
     s.shot("20-windows-chrome-with-rail");
     unsafe { std::env::remove_var("KILN_CHROME") };
+}
+
+/// Phase 3: an update on offer, in the sidebar and the palette. (The offer is made up here;
+/// nothing is downloaded.)
+fn phase3(s: &mut Shots) {
+    let update = cargo_packager_updater::Update {
+        config: Default::default(),
+        body: Some("Kiln 2026.10.26".into()),
+        current_version: "2026.10.19".into(),
+        version: "2026.10.26".into(),
+        date: None,
+        target: "macos".into(),
+        extract_path: PathBuf::from("/Applications/Kiln.app"),
+        download_url: "https://example.com/Kiln.app.tar.gz".parse().unwrap(),
+        signature: String::new(),
+        timeout: None,
+        headers: Default::default(),
+        format: cargo_packager_updater::UpdateFormat::App,
+    };
+    s.cx.update(|cx| {
+        kiln::update::set_state(kiln::update::UpdateState::Available(Arc::new(update)), cx)
+    });
+    s.run("echo 'a new version is on offer'", Duration::from_secs(5));
+    s.shot("21-update-available");
+    s.action(Box::new(kiln::CommandPaletteToggle));
+    s.shot("22-palette-update");
+    s.keystroke("escape");
 }
 
 /// A small git project with a few changes, in a scratch folder.

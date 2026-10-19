@@ -1,28 +1,66 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
   "timezone": "Europe/London",
-  "schedule": ["before 6am on monday"],
-  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
-  "vulnerabilityAlerts": { "enabled": true, "labels": ["security"], "schedule": ["at any time"] },
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 6am on monday"
+    ]
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ],
+    "schedule": [
+      "at any time"
+    ]
+  },
   "packageRules": [
     {
       "description": "The terminal engine: security fixes arrive as plain version bumps.",
-      "matchPackageNames": ["alacritty_terminal"],
-      "labels": ["engine"]
+      "matchPackageNames": [
+        "alacritty_terminal"
+      ],
+      "labels": [
+        "engine"
+      ]
     },
     {
       "description": "GPUI follows Zed main weekly. When it bumps, re-sync [patch.crates-io] with zed/Cargo.toml.",
-      "matchDepNames": ["zed-industries/zed"],
+      "matchDepNames": [
+        "zed-industries/zed"
+      ],
       "groupName": "gpui",
-      "labels": ["gpui"]
+      "labels": [
+        "gpui"
+      ]
+    },
+    {
+      "description": "The Rust toolchain and the Linux image's Rust move together.",
+      "matchDepNames": [
+        "rust"
+      ],
+      "groupName": "rust toolchain",
+      "labels": [
+        "toolchain"
+      ]
     }
   ],
   "customManagers": [
     {
       "customType": "regex",
       "description": "GPUI git pins in Cargo.toml",
-      "managerFilePatterns": ["/^Cargo\\.toml$/"],
+      "managerFilePatterns": [
+        "/^Cargo\\.toml$/"
+      ],
       "matchStrings": [
         "git = \"https://github.com/zed-industries/zed\", rev = \"(?<currentDigest>[0-9a-f]{40})\""
       ],
@@ -30,6 +68,45 @@
       "packageNameTemplate": "https://github.com/zed-industries/zed",
       "currentValueTemplate": "main",
       "datasourceTemplate": "git-refs"
+    },
+    {
+      "customType": "regex",
+      "description": "The Rust toolchain in rust-toolchain.toml",
+      "managerFilePatterns": [
+        "/^rust-toolchain\\.toml$/"
+      ],
+      "matchStrings": [
+        "channel = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "rust",
+      "packageNameTemplate": "rust-lang/rust",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "cargo-packager, installed by version in the release workflow and scripts",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/release\\.yml$/",
+        "/^scripts/package\\.sh$/"
+      ],
+      "matchStrings": [
+        "cargo-packager --version (?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "cargo-packager",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "description": "PowerShell in the Linux test image",
+      "managerFilePatterns": [
+        "/^scripts/linux/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG PWSH_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "PowerShell/PowerShell",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ]
 }

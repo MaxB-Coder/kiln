@@ -26,8 +26,23 @@ pub struct Config {
     pub window: WindowConfig,
     pub theme: ThemeConfig,
     pub tints: TintConfig,
+    pub updates: UpdatesConfig,
     /// Per-project settings, keyed by the project's folder ("~/code/app" works).
     pub projects: std::collections::BTreeMap<String, ProjectConfig>,
+}
+
+/// Checking for updates: Kiln's only network use.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    /// Check once a day (release builds installed from a Kiln installer only).
+    pub check: bool,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self { check: true }
+    }
 }
 
 /// Background tints for panes connected to other machines.
@@ -109,6 +124,7 @@ impl Default for Config {
             window: WindowConfig::default(),
             theme: ThemeConfig::default(),
             tints: TintConfig::default(),
+            updates: UpdatesConfig::default(),
             projects: Default::default(),
         }
     }
@@ -272,6 +288,11 @@ restore = true
 remote = true
 # Hosts matching these get a red tint instead ("*" matches anything).
 production = ["*prod*"]
+
+[updates]
+# Check for a new version once a day: the only time Kiln uses the network. Updates are signed,
+# and install only when you choose to.
+check = true
 
 # Per project, keyed by folder:
 # [projects."~/developer/kiln"]

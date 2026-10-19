@@ -1,0 +1,22 @@
+name: Security
+
+# Every day, checks the dependency tree against the RustSec advisory database, so a new
+# vulnerability in something Kiln ships shows up as a failed run (and a GitHub email) without
+# waiting for a push. Renovate opens the fix (vulnerabilityAlerts in renovate.json).
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories

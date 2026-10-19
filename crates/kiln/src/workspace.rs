@@ -27,10 +27,10 @@ use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
 use crate::{
     ClosePane, CloseWindow, CommandPaletteToggle, CopyLastOutput, CopyLastOutputRaw, EditConfig,
-    Find, FocusNextPane, FocusPrevPane, NewSession, NewWindow, NextSession, PrevSession, Quit,
-    SelectSession1, SelectSession2, SelectSession3, SelectSession4, SelectSession5, SelectSession6,
-    SelectSession7, SelectSession8, SelectSession9, SplitRight, ToggleFocusMode, ToggleRail,
-    ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
+    Find, FocusNextPane, FocusPrevPane, InstallUpdate, NewSession, NewWindow, NextSession,
+    PrevSession, Quit, SelectSession1, SelectSession2, SelectSession3, SelectSession4,
+    SelectSession5, SelectSession6, SelectSession7, SelectSession8, SelectSession9, SplitRight,
+    ToggleFocusMode, ToggleRail, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 
 /// Height of the strip at the top that holds the window controls.
@@ -599,6 +599,17 @@ impl Workspace {
         action("Edit config", "Mod+,", Box::new(EditConfig));
         action("New window", "Mod+N", Box::new(NewWindow));
         action("Quit Kiln", "Mod+Q", Box::new(Quit));
+        if let Some(label) = crate::update::state(cx).label() {
+            items.insert(
+                0,
+                PaletteItem {
+                    label,
+                    detail: String::new(),
+                    kind: "update",
+                    target: PaletteTarget::Action(Box::new(InstallUpdate)),
+                },
+            );
+        }
 
         for (index, tab) in self.tabs.iter().enumerate() {
             let Some(view) = tab.panes.get(tab.focused).map(|p| p.view.read(cx)) else {
@@ -1031,6 +1042,36 @@ impl Workspace {
                     .px(px(6.))
                     .child(list),
             )
+            .when_some(crate::update::state(cx).label(), |d, label| {
+                // A new version: one quiet line at the bottom, until it is installed.
+                d.child(
+                    div()
+                        .id("update")
+                        .flex_none()
+                        .m(px(6.))
+                        .h(px(28.))
+                        .px(px(10.))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.))
+                        .rounded(px(6.))
+                        .text_color(theme::hsla(p.fg_dim))
+                        .hover(|s| s.bg(theme::hsla(p.raised)))
+                        .cursor_pointer()
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(InstallUpdate), cx)
+                        })
+                        .child(
+                            div()
+                                .flex_none()
+                                .size(px(6.))
+                                .rounded_full()
+                                .bg(theme::hsla(p.accent)),
+                        )
+                        .child(SharedString::from(label)),
+                )
+            })
             .into_any_element()
     }
 
@@ -1575,6 +1616,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ZoomOut, window, cx| this.zoom(-1., window, cx)))
             .on_action(cx.listener(|this, _: &ZoomReset, window, cx| this.zoom(0., window, cx)))
             .on_action(cx.listener(|this, _: &EditConfig, window, cx| this.edit_config(window, cx)))
+            .on_action(|_: &InstallUpdate, window, cx| crate::update::install(window, cx))
             .when_some(sidebar, |d, sidebar| d.child(sidebar))
             .child(
                 div()
