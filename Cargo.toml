@@ -38,3 +38,10 @@ opt-level = 2
 lto = "thin"
 codegen-units = 1
 debug = "line-tables-only"
+
+
+# Installers (scripts/package.sh): release without the debug line tables, which nearly
+# doubled the Linux packages. Symbol names stay, so crash backtraces still name functions.
+[profile.dist]
+inherits = "release"
+strip = "debuginfo"

@@ -22,7 +22,7 @@ cargo about generate --frozen --fail -m crates/kiln/Cargo.toml about.hbs \
 
 case "$(uname -s)" in
   Darwin)
-    cargo packager --release --formats app
+    cargo packager --profile dist --formats app
     # The dmg is made with macOS's own hdiutil (cargo-packager's dmg step downloads a script).
     arch="$(uname -m)"
     stage="$(mktemp -d)"
@@ -33,7 +33,7 @@ case "$(uname -s)" in
       "$out/Kiln-$version-$arch.dmg"
     ;;
   Linux)
-    cargo packager --release --formats deb
+    cargo packager --profile dist --formats deb
     # A plain tarball too, for other distributions. (No AppImage yet: cargo-packager fetches
     # its AppImage tools unpinned at build time; see notes/DECISIONS.md.)
     arch="$(uname -m)"
@@ -41,7 +41,7 @@ case "$(uname -s)" in
     trap 'rm -rf "$stage"' EXIT
     dir="$stage/kiln-$version-linux-$arch"
     mkdir -p "$dir"
-    cp target/release/kiln "$dir/kiln"
+    cp target/dist/kiln "$dir/kiln"
     cp assets/icon/kiln-256.png "$dir/kiln.png"
     cp target/THIRD_PARTY_LICENSES.md assets/fonts/JetBrainsMono-OFL.txt \
       assets/fonts/NerdFonts-LICENSE "$dir/"
@@ -58,7 +58,7 @@ DESKTOP
     tar -czf "$out/kiln-$version-linux-$arch.tar.gz" -C "$stage" "kiln-$version-linux-$arch"
     ;;
   MINGW* | MSYS* | CYGWIN*)
-    cargo packager --release --formats nsis
+    cargo packager --profile dist --formats nsis
     ;;
   *)
     echo "package.sh: unsupported system $(uname -s)" >&2
