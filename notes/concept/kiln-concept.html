@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiln concept</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<!--
+  The agreed Kiln design (October 2026), as the reference to check the app against.
+  Open in a browser. Hover commands to see their actions; the buttons switch the states.
+  Status colours are the muted ones: failed #b8645a, running/OK #8f9a6c, modified #c4a35e.
+-->
+<style>
+:root{--ui:#e8e6e3;--ui2:#a8a29a;--btn:#3a3836}
+body{margin:0;padding:28px;background:#1a1a1a;color:var(--ui);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+h1{font-size:18px;font-weight:500;margin:0 0 4px}
+p.sub{font-size:13px;color:var(--ui2);margin:0 0 14px;max-width:900px}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px;align-items:center}
+.ctl button{font:12px -apple-system,sans-serif;background:transparent;color:var(--ui);border:1px solid #4a4744;border-radius:7px;padding:5px 10px;cursor:pointer}
+.ctl button.on{border-color:#e07b39;color:#e07b39}
+.seg{display:inline-flex;border:1px solid #4a4744;border-radius:7px;overflow:hidden;margin-right:6px}
+.seg button{border:none;border-radius:0}
+.seg button.on{background:#2c2a28;color:var(--ui)}
+.w{max-width:1100px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.6;color:#ebdbb2;background:#282828;border-radius:14px;overflow:hidden;display:grid;grid-template-columns:170px minmax(0,1fr) 0px;height:520px;position:relative}
+.w.win{border-radius:8px}
+.w.rail{grid-template-columns:170px minmax(0,1fr) 190px}
+.w.focus{grid-template-columns:0px minmax(0,1fr) 0px}
+.side{background:#1d2021;padding:14px 0 12px;display:flex;flex-direction:column;overflow:hidden}
+.dots{display:flex;gap:6px;padding:0 14px 22px}.dots i{width:11px;height:11px;border-radius:50%;display:block}
+.brand{display:none;align-items:center;gap:7px;padding:0 14px 22px;color:#a89984;font-size:11px}
+.brand i{width:15px;height:12px;border-radius:2px;background:#e07b39;display:inline-flex;align-items:center;justify-content:center;color:#1d2021;font-size:8px;font-weight:700;font-style:normal}
+.w.win .dots{display:none}.w.win .brand{display:flex}
+.p{padding:3px 14px;color:#a89984;display:flex;align-items:center;gap:8px}
+.p i{width:6px;height:6px;border-radius:50%;display:block;flex:none}
+.grouphead{padding:3px 14px;color:#7c6f64;font-size:11px}
+.s{padding:3px 14px 3px 28px;color:#7c6f64;display:flex;justify-content:space-between;align-items:center}
+.s.on{color:#ebdbb2}
+.s.on span:first-child{background:#282828;margin:-3px -8px;padding:3px 8px;border-radius:6px}
+.gap{height:12px}
+.foot{margin-top:auto;padding:0 14px;color:#665c54;font-size:10.5px}
+.panes{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-width:0;min-height:0}
+.w.split .panes{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.main{display:flex;flex-direction:column;padding:12px 24px 16px;min-width:0;min-height:0;position:relative}
+.w.focus .main{width:72%;margin:0 auto}
+.main.pane2{display:none;border-left:1px solid #32302f}
+.w.split .main.pane2{display:flex}
+.top{color:#7c6f64;font-size:11px;display:flex;justify-content:space-between;margin-bottom:8px;min-height:16px}
+.top .live{display:none}.w.focus .top .live{display:inline}.w.focus .top .br{display:none}
+.caps{display:none;position:absolute;top:0;right:0;height:32px}
+.caps span{width:44px;display:flex;align-items:center;justify-content:center;color:#a89984;font-size:13px;font-family:-apple-system,"Segoe UI",sans-serif}
+.caps span:hover{background:#32302f}.caps span:last-child:hover{background:#c42b1c;color:#fff}
+.w.win .main:not(.pane2) .caps{display:flex}
+.w.win.split .main:not(.pane2) .caps{display:none}
+.w.win.split .pane2 .caps{display:flex}
+.w.win .main:not(.pane2) .top .br,.w.win.split .pane2 .top .br{margin-right:140px}
+.w.win.split .main:not(.pane2) .top .br{margin-right:0}
+.find{display:none;align-items:center;justify-content:space-between;background:#32302f;border-radius:8px;padding:5px 11px;margin-bottom:8px;color:#ebdbb2}
+.w.search .find{display:flex}
+.pins{display:none;margin-bottom:6px}
+.w.pinned .pins{display:block}
+.tl{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:6px;overflow:hidden}
+.blk{border-radius:8px;padding:6px 9px;margin:0 -9px;cursor:default}
+.blk:hover,.blk.sel{background:#2f2d2c}
+.h{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.c{color:#ebdbb2}
+.meta{color:#665c54;font-size:10.5px;display:inline-flex;align-items:center;gap:6px}
+.dot{width:5px;height:5px;border-radius:50%;display:inline-block;flex:none}
+.dot.r{background:#b8645a}.dot.g{background:#8f9a6c}.dot.pin{background:#7c6f64}
+.acts{display:none;gap:12px;color:#a89984;font-size:10.5px}
+.acts span{cursor:pointer}.acts span:hover{color:#e07b39}
+.blk:hover .acts,.blk.sel .acts{display:flex}
+.blk:hover .meta.t,.blk.sel .meta.t{display:none}
+.out{color:#928374;white-space:pre}
+.old .c{color:#a89984}.old .out{color:#7c6f64}
+.o{color:#e07b39}.y{color:#c4a35e}
+mark{background:#7c5a1e;color:#ebdbb2;border-radius:2px;padding:0 1px}
+.comp{margin-top:12px;background:#32302f;border-radius:10px;padding:10px 13px 9px}
+.w.win .comp{border-radius:6px}
+.cur{display:inline-block;width:7px;height:2px;background:#e07b39;vertical-align:-1px}
+.pills{display:flex;gap:6px;margin-top:8px;align-items:center}
+.pill{border-radius:999px;padding:0 9px;font-size:10.5px;font-weight:700;line-height:19px;white-space:nowrap}
+.p1{background:#e07b39;color:#1d2021}
+.p2{background:#3c3836;color:#d5c4a1}.p2 b{color:#e07b39}
+.p3{background:#282828;color:#a89984}
+.rl{background:#1d2021;overflow:hidden;padding:14px 0}
+.w.win .rl{padding-top:40px}
+.rs{padding:0 14px 12px;white-space:nowrap}
+.lb{color:#665c54;font-size:10.5px;margin-bottom:3px}
+.row{display:flex;justify-content:space-between;color:#bdae93}
+.toast{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);width:60%;background:#1d2021;border-radius:10px;box-shadow:0 0 0 1px #504945;padding:9px 13px;display:none;z-index:3}
+.toast.show{display:block}
+.toast pre{margin:6px 0 0;font-family:inherit;font-size:11px;color:#bdae93;white-space:pre-wrap}
+.veil{position:absolute;inset:0;background:rgba(18,18,18,.62);display:none;align-items:flex-start;justify-content:center;padding-top:52px;z-index:4}
+.w.pal .veil.palv,.w.keys .veil.keysv{display:flex}
+.box{width:58%;background:#1d2021;border-radius:12px;padding:6px 0 10px;box-shadow:0 0 0 1px #3c3836}
+.w.win .box{border-radius:8px}
+.box .q{padding:9px 15px 10px}
+.it{display:flex;justify-content:space-between;padding:5px 15px;color:#a89984}
+.it.sel{background:#282828;color:#ebdbb2}
+.it i{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:9px;vertical-align:1px}
+.grp{color:#665c54;font-size:10.5px;padding:9px 15px 3px}
+.keysgrid{display:grid;grid-template-columns:1fr 1fr;column-gap:22px;padding:0 15px}
+.kr{display:flex;justify-content:space-between;align-items:center;padding:3px 0;color:#a89984}
+.kc{display:inline-flex;gap:3px}.kc span{background:#32302f;color:#bdae93;border-radius:4px;padding:0 6px;font-size:10.5px;line-height:18px}
+.kh{color:#665c54;font-size:10.5px;padding:9px 0 3px;grid-column:span 1}
+.notes{max-width:1100px;margin-top:22px;font-size:13px;color:var(--ui2);line-height:1.6}
+.notes b{color:var(--ui);font-weight:500}
+.notes ol{padding-left:20px}
+</style>
+</head>
+<body>
+<h1>Kiln concept</h1>
+<p class="sub">Clean at rest, everything one hover or shortcut away. Hover a command for its actions; use the buttons for the other states. The numbered list under the window is the checklist the app is held to.</p>
+
+<div class="ctl">
+  <span class="seg"><button class="on" data-os="mac">Mac</button><button data-os="win">Windows</button></span>
+  <button data-t="rail"><span class="k" data-mac="⌘I" data-win="Ctrl+Shift+I">⌘I</span> Context</button>
+  <button data-t="split"><span class="k" data-mac="⌘D" data-win="Ctrl+Shift+D">⌘D</span> Split</button>
+  <button data-t="search"><span class="k" data-mac="⌘F" data-win="Ctrl+Shift+F">⌘F</span> Find</button>
+  <button data-t="pal"><span class="k" data-mac="⌘K" data-win="Ctrl+Shift+K">⌘K</span> Palette</button>
+  <button data-t="keys"><span class="k" data-mac="⌘/" data-win="Ctrl+Shift+/">⌘/</span> Shortcuts</button>
+  <button data-t="focus"><span class="k" data-mac="⌘." data-win="Ctrl+Shift+.">⌘.</span> Focus</button>
+  <button data-t="pinned">Pinned</button>
+  <button id="navBtn"><span class="k" data-mac="⌘↑" data-win="Ctrl+Shift+↑">⌘↑</span> Select command</button>
+  <button id="multiBtn">⇧-click two commands</button>
+  <button id="copyBtn"><span class="k" data-mac="⌘⇧C" data-win="Ctrl+Shift+C">⌘⇧C</span> Copy</button>
+</div>
+
+<div class="w" id="w">
+  <div class="side">
+    <div class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+    <div class="brand"><i>&gt;_</i>Kiln</div>
+    <div class="p"><i style="background:#83a598"></i>receipts</div>
+    <div class="s on"><span>api</span><span class="dot r"></span></div>
+    <div class="s"><span>web</span></div>
+    <div class="s"><span>dev server</span><span class="dot g"></span></div>
+    <div class="gap"></div>
+    <div class="p"><i style="background:#e07b39"></i>dotfiles</div>
+    <div class="p"><i style="background:#d3869b"></i>website</div>
+    <div class="gap"></div>
+    <div class="grouphead">Home</div>
+    <div class="s"><span>zsh</span></div>
+    <div class="foot"><span class="k" data-mac="⌘K" data-win="Ctrl+Shift+K">⌘K</span></div>
+  </div>
+  <div class="panes">
+    <div class="main">
+      <div class="caps"><span>─</span><span>▢</span><span>✕</span></div>
+      <div class="top"><span>receipts › api</span><span class="br">feat/auth <span class="y">✱2</span></span><span class="live"><span class="dot g" style="vertical-align:1px"></span> 2 running</span></div>
+      <div class="find"><span><span class="o">⌕</span> auth</span><span class="meta">2 of 5 · ⏎ next · ⇧⏎ previous · esc</span></div>
+      <div class="pins"><div class="blk" style="background:#2b2a29"><div class="h"><span class="c"><span class="dot pin"></span> npm run migrate:status</span><span class="meta">pinned · 09:41</span></div><div class="out">3 pending: 041_add_receipts, 042_index_users, 043_drop_tmp</div></div></div>
+      <div class="tl">
+        <div class="blk old" id="b1"><div class="h"><span class="c">git pull</span><span class="meta t">0.3s</span><span class="acts"><span>Copy</span><span>Rerun</span><span>Pin</span></span></div><div class="out">Already up to date.</div></div>
+        <div class="blk old" id="b2"><div class="h"><span class="c">ls src</span><span class="meta t">0.0s</span><span class="acts"><span>Copy</span><span>Rerun</span><span>Pin</span></span></div><div class="out"><mark>auth</mark>/  routes/  app.ts  <mark>auth</mark>.ts  db.ts</div></div>
+        <div class="blk" id="b3"><div class="h"><span class="c"><span class="dot r"></span> npm test</span><span class="meta t">12.4s</span><span class="acts"><span class="cp">Copy</span><span>Rerun</span><span>Pin</span><span>Open log</span></span></div><div class="out">FAIL <mark>auth</mark>.test.ts › rejects expired token
+  Expected 401, received 200</div></div>
+      </div>
+      <div class="comp">
+        <div><span class="o">❯</span> <span class="cur"></span></div>
+        <div class="pills"><span class="pill p1">receipts</span><span class="pill p2"> feat/auth <b>✱2</b></span><span class="pill p3"><span class="k" data-mac="node 25" data-win="node 25">node 25</span></span><span class="pill p3 wslpill" style="display:none">Ubuntu</span></div>
+      </div>
+    </div>
+    <div class="main pane2">
+      <div class="caps"><span>─</span><span>▢</span><span>✕</span></div>
+      <div class="top"><span>receipts › web</span><span class="br">feat/auth <span class="y">✱2</span></span></div>
+      <div class="tl">
+        <div class="blk"><div class="h"><span class="c"><span class="dot g"></span> npm run dev:web</span><span class="meta t">:5173</span><span class="acts"><span>Copy</span><span>Stop</span><span>Pin</span></span></div><div class="out">ready on :5173
+GET / 200 · 12ms</div></div>
+      </div>
+      <div class="comp">
+        <div><span class="o">❯</span> <span class="cur"></span></div>
+        <div class="pills"><span class="pill p1">receipts</span><span class="pill p2"> feat/auth <b>✱2</b></span><span class="pill p3">node 25</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="rl">
+    <div class="rs"><div class="lb">Changes</div><div class="row"><span>src/auth.ts</span><span class="y">M</span></div><div class="row"><span>auth.test.ts</span><span class="y">M</span></div></div>
+    <div class="rs"><div class="lb">Running</div><div class="row"><span>dev server</span><span style="color:#8f9a6c">:3000</span></div><div class="row"><span>postgres</span><span style="color:#8f9a6c">:5432</span></div></div>
+    <div class="rs"><div class="lb">Runtime</div><div class="row"><span>node</span><span class="meta">25.0</span></div><div class="row"><span>go</span><span class="meta">1.27</span></div></div>
+    <div class="rs"><div class="lb">Session</div><div class="row"><span>shell</span><span class="meta"><span class="k" data-mac="zsh" data-win="zsh · Ubuntu">zsh</span></span></div><div class="row"><span>started</span><span class="meta">09:12</span></div></div>
+  </div>
+  <div class="toast" id="toast"><span class="o">⧉</span> <span id="toastTitle">Copied, ready to paste</span><pre id="toastPre"></pre></div>
+  <div class="veil palv">
+    <div class="box">
+      <div class="q"><span class="o">❯</span> te<span class="cur"></span></div>
+      <div class="grp">Commands</div>
+      <div class="it sel"><span>npm test</span><span class="meta">rerun · receipts</span></div>
+      <div class="it"><span>npm test -- --watch</span><span class="meta">receipts</span></div>
+      <div class="grp">Projects</div>
+      <div class="it"><span><i style="background:#83a598"></i>receipts</span><span class="meta">open</span></div>
+      <div class="grp">Actions</div>
+      <div class="it"><span>Copy last output</span><span class="meta"><span class="k" data-mac="⌘⇧C" data-win="Ctrl+Shift+C">⌘⇧C</span></span></div>
+      <div class="it"><span>Keyboard shortcuts</span><span class="meta"><span class="k" data-mac="⌘/" data-win="Ctrl+Shift+/">⌘/</span></span></div>
+    </div>
+  </div>
+  <div class="veil keysv">
+    <div class="box" style="width:70%">
+      <div class="q"><span class="o">❯</span> <span class="cur"></span><span class="meta" style="margin-left:8px">filter shortcuts</span></div>
+      <div class="keysgrid">
+        <div><div class="kh">Sessions and windows</div>
+          <div class="kr"><span>New session</span><span class="kc"><span class="k" data-mac="⌘T" data-win="Ctrl+Shift+T">⌘T</span></span></div>
+          <div class="kr"><span>Next session</span><span class="kc"><span class="k" data-mac="⌘⇧]" data-win="Ctrl+Shift+]">⌘⇧]</span></span></div>
+          <div class="kr"><span>Go to session 1–9</span><span class="kc"><span class="k" data-mac="⌘1–9" data-win="Ctrl+1–9">⌘1–9</span></span></div>
+          <div class="kh">Panes</div>
+          <div class="kr"><span>Split right</span><span class="kc"><span class="k" data-mac="⌘D" data-win="Ctrl+Shift+D">⌘D</span></span></div>
+          <div class="kr"><span>Close pane</span><span class="kc"><span class="k" data-mac="⌘W" data-win="Ctrl+Shift+W">⌘W</span></span></div>
+        </div>
+        <div><div class="kh">Commands and copy</div>
+          <div class="kr"><span>Select previous / next command</span><span class="kc"><span class="k" data-mac="⌘↑ ⌘↓" data-win="Ctrl+Shift+↑ ↓">⌘↑ ⌘↓</span></span></div>
+          <div class="kr"><span>Copy last output</span><span class="kc"><span class="k" data-mac="⌘⇧C" data-win="Ctrl+Shift+C">⌘⇧C</span></span></div>
+          <div class="kh">View</div>
+          <div class="kr"><span>Context rail</span><span class="kc"><span class="k" data-mac="⌘I" data-win="Ctrl+Shift+I">⌘I</span></span></div>
+          <div class="kr"><span>Focus mode</span><span class="kc"><span class="k" data-mac="⌘." data-win="Ctrl+Shift+.">⌘.</span></span></div>
+          <div class="kr"><span>Find</span><span class="kc"><span class="k" data-mac="⌘F" data-win="Ctrl+Shift+F">⌘F</span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+<b>Checklist the app is held to</b>
+<ol>
+<li><b>Input box pills.</b> One raised rounded box (#32302f, radius 10, inset from the pane edges): the "❯" line on top (orange, muted red #b8645a after a failure), and under it, inside the box, a row of pills: project (orange #e07b39, dark text), git branch with a change count (#3c3836, "✱2" in orange; no count when clean; no pill outside a repo), runtime (dark #282828, muted text: "node 25", "rust 1.98", …), and on Windows the WSL distribution. Nothing above the input box. Drawn by Kiln, so it is the same on every OS and shell.</li>
+<li><b>Header.</b> Dim breadcrumb on the left ("receipts › api"), branch plus change count on the right ("feat/auth ✱2", the ✱ count in #c4a35e).</li>
+<li><b>Focus mode (⌘.).</b> Sidebar and rail fold away; timeline and input box narrow to reading width (about 72% of the window, centred, capped near 100 columns); the header's right side shows how many things are running.</li>
+<li><b>Select commands from the keyboard (⌘↑ / ⌘↓; Ctrl+Shift+↑/↓ elsewhere).</b> Moves a selection between commands (hover background #2f2d2c and its actions shown), scrolling it into view. ⌘C or Enter copies it (paste-ready), Esc clears.</li>
+<li><b>Several commands at once.</b> ⇧-click (and ⇧⌘↑/↓) extends the selection; Copy then puts all of them in one paste-ready block, in order.</li>
+<li><b>Copy confirmation.</b> Every copy shows a small note above the input box for about 2.5 s: "⧉ Copied, ready to paste" (or "Copied raw output") with the first lines of what was copied, dim. Panel #1d2021, ring #504945, radius 10.</li>
+<li><b>Pinned commands stay in view.</b> Pinned blocks sit at the top of the timeline (header plus a few lines, quiet grey dot, "pinned · time"), visible while you work and scroll; click to expand; unpin from the hover actions.</li>
+<li><b>Find (⌘F).</b> A bar across the top of the timeline (#32302f, radius 8): "⌕ query" on the left, "2 of 5 · ⏎ next · ⇧⏎ previous · esc" dim on the right; matches highlighted in place.</li>
+<li><b>Palette (⌘K).</b> Results under quiet group headings (Commands, Projects, Sessions, Actions), dim detail on the right (shortcut, folder, "rerun · project"); no per-row type tags.</li>
+<li><b>Sidebar hint.</b> A dim "⌘K" (Ctrl+Shift+K) at the bottom of the sidebar; clicking it opens the palette.</li>
+<li><b>Shortcuts pop-up (⌘/).</b> Every shortcut, grouped, as key caps, filterable, built from the real key bindings.</li>
+</ol>
+Unchanged from what is built: the sidebar (projects with colour dots, sessions, Home group, muted status dots), command blocks with hover actions, split panes each with their own input box, the ⌘I rail, paste-ready copy format, notifications, SSH and production tints, Windows window controls and the &gt;_ mark.
+</div>
+
+<script>
+const w = document.getElementById('w');
+document.querySelectorAll('.ctl button[data-t]').forEach(b => b.addEventListener('click', () => {
+  const on = w.classList.toggle(b.dataset.t); b.classList.toggle('on', on);
+}));
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+  const os = b.dataset.os;
+  document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
+  w.classList.toggle('win', os === 'win');
+  document.querySelectorAll('.k').forEach(k => { k.textContent = k.dataset[os]; });
+  document.querySelectorAll('.wslpill').forEach(p => p.style.display = os === 'win' ? '' : 'none');
+}));
+document.querySelectorAll('.veil').forEach(v => v.addEventListener('click', () => {
+  w.classList.remove('pal', 'keys');
+  document.querySelectorAll('.ctl button[data-t="pal"], .ctl button[data-t="keys"]').forEach(b => b.classList.remove('on'));
+}));
+const toast = document.getElementById('toast'), pre = document.getElementById('toastPre');
+let timer;
+function clearSel() { document.querySelectorAll('.blk.sel').forEach(b => b.classList.remove('sel')); }
+function showToast(text) {
+  pre.textContent = text; toast.classList.add('show'); clearTimeout(timer);
+  timer = setTimeout(() => { toast.classList.remove('show'); clearSel(); }, 2600);
+}
+const one = "```console\n~/developer/receipts $ npm test\nFAIL auth.test.ts › rejects expired token\n  Expected 401, received 200\n# exit 1 · 12.4s\n```";
+const two = "```console\n~/developer/receipts $ ls src\nauth/  routes/  app.ts  auth.ts  db.ts\n# exit 0 · 0.0s\n\n~/developer/receipts $ npm test\nFAIL auth.test.ts › rejects expired token\n  Expected 401, received 200\n# exit 1 · 12.4s\n```";
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const sel = document.querySelectorAll('.blk.sel').length;
+  if (!sel) document.getElementById('b3').classList.add('sel');
+  showToast(sel > 1 ? two : one);
+});
+document.querySelectorAll('.cp').forEach(c => c.addEventListener('click', () => showToast(one)));
+document.getElementById('navBtn').addEventListener('click', () => { clearSel(); document.getElementById('b3').classList.add('sel'); });
+document.getElementById('multiBtn').addEventListener('click', () => { clearSel(); ['b2','b3'].forEach(id => document.getElementById(id).classList.add('sel')); });
+</script>
+</body>
+</html>
