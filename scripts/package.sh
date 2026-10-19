@@ -13,7 +13,9 @@ cd "$root"
 version="$(grep -m1 '^version' crates/kiln/Cargo.toml | cut -d'"' -f2)"
 out="$root/target/packages"
 rm -rf "$out"
-# The licences of everything in the binary, shipped inside each package.
+# The licences of everything in the binary, shipped inside each package. cargo-about reads
+# the crates offline, so fetch them first.
+cargo fetch --locked
 cargo about generate --frozen --fail -m crates/kiln/Cargo.toml about.hbs \
   -o target/THIRD_PARTY_LICENSES.md
 
