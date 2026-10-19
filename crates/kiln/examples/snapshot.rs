@@ -448,7 +448,7 @@ fn prompt(s: &mut Shots) {
 /// Phase 3: an update on offer, in the sidebar and the palette. (The offer is made up here;
 /// nothing is downloaded.)
 fn phase3(s: &mut Shots) {
-    let update = cargo_packager_updater::Update {
+    let update = kiln_update::Update {
         config: Default::default(),
         body: Some("Kiln 2026.10.26".into()),
         current_version: "2026.10.19".into(),
@@ -460,7 +460,7 @@ fn phase3(s: &mut Shots) {
         signature: String::new(),
         timeout: None,
         headers: Default::default(),
-        format: cargo_packager_updater::UpdateFormat::App,
+        format: kiln_update::UpdateFormat::App,
     };
     s.cx.update(|cx| {
         kiln::update::set_state(kiln::update::UpdateState::Available(Arc::new(update)), cx)

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/kiln", "crates/kiln_term"]
+members = ["crates/kiln", "crates/kiln_term", "crates/kiln_update"]
 
 [workspace.package]
 edition = "2024"
@@ -13,6 +13,7 @@ anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
 kiln_term = { path = "crates/kiln_term" }
+kiln_update = { path = "crates/kiln_update" }
 
 # The terminal engine. Stays an unmodified crates.io dependency so security
 # fixes arrive as version bumps.

@@ -89,7 +89,8 @@ jobs:
         include:
           - { name: macos-arm64, os: macos-15 }
           - { name: windows-x64, os: windows-2025 }
-          - { name: linux-x64, os: ubuntu-24.04 }
+          # The oldest supported Ubuntu: the AppImage and .deb then run on older glibc too.
+          - { name: linux-x64, os: ubuntu-22.04 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     defaults:
@@ -104,7 +105,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential pkg-config clang \
             libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev xvfb mesa-vulkan-drivers imagemagick
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev xvfb mesa-vulkan-drivers imagemagick \
+            squashfs-tools
 
       - name: Install Rust (from rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
@@ -194,6 +196,35 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" scripts/ci-smoke.sh "$(command -v kiln)"
           sudo apt-get remove -y kiln
 
+      - name: Start the AppImage (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          image=$(ls "$PWD"/target/packages/Kiln-*-x86_64.AppImage)
+          ls -la "$image"
+          # Mounted with FUSE where the runner allows it, else unpacked to a temporary folder.
+          if "$image" --version; then echo "started through FUSE"; else
+            APPIMAGE_EXTRACT_AND_RUN=1 "$image" --version && echo "started unpacked (no FUSE)"
+          fi
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a -s "-screen 0 1600x1000x24" scripts/ci-smoke.sh "$image"
+
+      - name: The updater accepts this signed build (macOS, Linux)
+        if: runner.os != 'Windows' && vars.KILN_UPDATE_PUBKEY != ''
+        timeout-minutes: 15
+        env:
+          KILN_E2E_PUBKEY: ${{ vars.KILN_UPDATE_PUBKEY }}
+        run: |
+          case "$RUNNER_OS" in
+            Linux) package=$(ls "$PWD"/target/packages/Kiln-*-x86_64.AppImage) ;;
+            macOS) package="$PWD/target/packages/Kiln.app.tar.gz" ;;
+          esac
+          if [ ! -f "$package.sig" ]; then
+            echo "::error::no signature next to $package (is the KILN_UPDATE_PRIVATE_KEY secret set?)"
+            exit 1
+          fi
+          KILN_E2E_PACKAGE="$package" cargo test --profile dist --locked -p kiln_update \
+            --test update -- --ignored --nocapture
+
       - name: Install and start (Windows, per-user installer)
         if: runner.os == 'Windows'
         timeout-minutes: 10
@@ -209,6 +240,8 @@ jobs:
           scripts/ci-smoke.ps1 -Kiln $exe.FullName
           Start-Process -Wait -FilePath (Join-Path $exe.DirectoryName "uninstall.exe") -ArgumentList "/S"
 
+      # The release files on their own, so they land flat in the release job's folder (with
+      # smoke/ in the same artifact they kept their target/packages/ prefix).
       - uses: actions/upload-artifact@v4
         with:
           name: kiln-${{ needs.plan.outputs.version }}-${{ matrix.name }}
@@ -218,13 +251,67 @@ jobs:
             target/packages/*.sig
             target/packages/*.exe
             target/packages/*.deb
-            smoke/
+            target/packages/*.AppImage
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ needs.plan.outputs.version }}-${{ matrix.name }}
+          path: smoke/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Writes latest.json from the signed update files and checks it the way the app would: every
+  # system is listed and every file's signature verifies against the release key. Runs on dry
+  # runs too, so a release is proven before anything is published.
+  manifest:
+    needs: [plan, package]
+    if: vars.KILN_UPDATE_ENDPOINT != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: kiln-${{ needs.plan.outputs.version }}-*
+          merge-multiple: true
+      - name: Write latest.json
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          BASE: ${{ vars.KILN_DOWNLOAD_BASE || format('{0}/{1}/releases/download/v{2}', github.server_url, github.repository, needs.plan.outputs.version) }}
+        run: |
+          ls -la dist
+          python3 scripts/update-manifest.py "$VERSION" "$BASE" dist > latest.json
+          cat latest.json
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-manifest
+      - name: Every update file verifies against KILN_UPDATE_PUBKEY
+        env:
+          KILN_E2E_MANIFEST: latest.json
+          KILN_E2E_DIR: dist
+          KILN_E2E_PUBKEY: ${{ vars.KILN_UPDATE_PUBKEY }}
+          KILN_E2E_PLATFORMS: macos-aarch64,windows-x86_64,linux-x86_64
+        run: |
+          cargo test --locked -p kiln_update --test update release_manifest_verifies \
+            -- --ignored --nocapture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifest-${{ needs.plan.outputs.version }}
+          path: latest.json
           if-no-files-found: error
           retention-days: 30
 
   release:
-    needs: [plan, package]
-    if: needs.plan.outputs.publish == 'true'
+    needs: [plan, package, manifest]
+    # Publishes only when asked, and only after the manifest checked out (or when the updater
+    # is not configured at all, so there is no manifest to check).
+    if: >-
+      always() && needs.plan.outputs.publish == 'true' && needs.package.result == 'success' &&
+      (needs.manifest.result == 'success' || needs.manifest.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -235,17 +322,16 @@ jobs:
           path: dist
           pattern: kiln-${{ needs.plan.outputs.version }}-*
           merge-multiple: true
-      - name: Update manifest (when the updater is configured)
-        if: vars.KILN_UPDATE_ENDPOINT != ''
-        env:
-          VERSION: ${{ needs.plan.outputs.version }}
-          BASE: ${{ vars.KILN_DOWNLOAD_BASE || format('{0}/{1}/releases/download/v{2}', github.server_url, github.repository, needs.plan.outputs.version) }}
-        run: python3 scripts/update-manifest.py "$VERSION" "$BASE" dist > dist/latest.json
+      - uses: actions/download-artifact@v4
+        if: needs.manifest.result == 'success'
+        with:
+          name: manifest-${{ needs.plan.outputs.version }}
+          path: dist
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          rm -rf dist/smoke
+          ls -la dist
           gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" \
             --title "Kiln $VERSION" --generate-notes

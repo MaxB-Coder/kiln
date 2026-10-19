@@ -199,3 +199,25 @@ Newest at the bottom.
   plugins, completion menus (the box grows upward) and the user's own zle hooks are untouched;
   outside Kiln nothing changes. Dim context sits inside the box on the right, and steps aside
   when the typed line would reach it. `[shell] prompt = "shell"` keeps the shell's own prompt.
+
+## After phase 3: the user's decisions (2026-10-19)
+
+- **No paid code signing.** The Developer ID, notarisation and Azure steps stay in the release
+  workflow but never run; the README explains the first launch on macOS and Windows.
+- **AppImage on Linux**, built by `scripts/linux/make-appimage.sh`: the stripped binary in an
+  AppDir, squashed with the distribution's `mksquashfs` (zstd), behind the AppImage project's
+  type2 runtime. The runtime is pinned to release 20251108 and its SHA-256 is checked before
+  use (a mismatch stops the build); Renovate proposes newer releases and the hash is updated by
+  hand. Not cargo-packager's AppImage step, which downloads its tools unpinned. Built on
+  Ubuntu 22.04 for older glibc. The `.deb` and tarball stay for manual installs.
+- **In-app updates on Linux** replace the AppImage the app runs from. Kiln reads `APPIMAGE` at
+  startup and removes the runtime's variables (`APPIMAGE`, `APPDIR`, `ARGV0`, `OWD`), so its
+  shells do not inherit them; after an update it restarts the AppImage, not the binary in the
+  old image. `latest.json` gets a signed `linux-x86_64` entry.
+- **`kiln_update`**: the updater's core (manifest, signature-checked download, install, where
+  to install) moved into its own crate without UI code, so the release workflow tests the
+  packages it has just built (`accepts_a_signed_release_build`) in seconds.
+- **Release artifacts** hold only the release files; the smoke output is a separate artifact.
+  With both in one artifact the files kept a `target/packages/` prefix, so the first published
+  run found no update files and stopped before creating the release.
+- **Renovate**: yes; the user installs the app. **WSL processes in the rail**: maybe later.

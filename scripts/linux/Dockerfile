@@ -3,7 +3,7 @@
 FROM rust:1.98.1-bookworm
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      clang pkg-config zsh git \
+      clang pkg-config zsh git squashfs-tools \
       libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
       libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers \
  && rm -rf /var/lib/apt/lists/*

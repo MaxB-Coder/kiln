@@ -2,7 +2,7 @@
 # Builds Kiln's installers for this platform into target/packages:
 #   macOS:   Kiln.app and Kiln-<version>-<arch>.dmg
 #   Windows: Kiln_<version>_x64-setup.exe (NSIS, per-user; run from Git Bash)
-#   Linux:   .deb and a .tar.gz
+#   Linux:   .deb, .tar.gz and .AppImage
 # With CARGO_PACKAGER_SIGN_PRIVATE_KEY (and _PASSWORD) set, cargo-packager also writes the
 # update archives and their .sig files the in-app updater checks.
 # Needs: cargo install cargo-packager --version 0.11.8 --locked
@@ -34,8 +34,8 @@ case "$(uname -s)" in
     ;;
   Linux)
     cargo packager --profile dist --formats deb
-    # A plain tarball too, for other distributions. (No AppImage yet: cargo-packager fetches
-    # its AppImage tools unpinned at build time; see notes/DECISIONS.md.)
+    # A plain tarball too, for other distributions. (cargo-packager's own AppImage step
+    # fetches its tools unpinned, so the AppImage is built below instead.)
     arch="$(uname -m)"
     stage="$(mktemp -d)"
     trap 'rm -rf "$stage"' EXIT
@@ -56,6 +56,12 @@ Categories=System;TerminalEmulator;
 Terminal=false
 DESKTOP
     tar -czf "$out/kiln-$version-linux-$arch.tar.gz" -C "$stage" "kiln-$version-linux-$arch"
+    # The AppImage: what the in-app updater replaces on Linux (signed for it when the update
+    # key is set). Its runtime is pinned and hash-checked (scripts/linux/make-appimage.sh).
+    image="$(scripts/linux/make-appimage.sh target/dist/kiln "$version" "$out")"
+    if [ -n "$image" ] && [ -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" ]; then
+      cargo packager signer sign "$image"
+    fi
     ;;
   MINGW* | MSYS* | CYGWIN*)
     cargo packager --profile dist --formats nsis

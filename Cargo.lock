@@ -3066,21 +3066,17 @@ name = "kiln"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "cargo-packager-updater",
  "env_logger",
  "futures",
  "gpui",
  "gpui_platform",
  "image",
  "kiln_term",
+ "kiln_update",
  "log",
- "reqwest",
- "semver",
  "serde",
  "serde_json",
- "tempfile",
  "toml 0.9.12+spec-1.1.0",
- "url",
 ]
 
 [[package]]
@@ -3094,6 +3090,22 @@ dependencies = [
  "log",
  "polling",
  "sysinfo 0.39.6",
+]
+
+[[package]]
+name = "kiln_update"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "cargo-packager-updater",
+ "log",
+ "minisign-verify",
+ "reqwest",
+ "semver",
+ "serde_json",
+ "tempfile",
+ "url",
 ]
 
 [[package]]

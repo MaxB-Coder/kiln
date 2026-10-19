@@ -87,6 +87,8 @@ fn attach_parent_console() {
 
 fn main() {
     let started = Instant::now();
+    // SAFETY: first thing in main; no other thread exists yet.
+    unsafe { kiln_update::take_appimage_env() };
     #[cfg(windows)]
     attach_parent_console();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();

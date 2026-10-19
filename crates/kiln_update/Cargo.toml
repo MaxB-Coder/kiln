@@ -1,0 +1,24 @@
+[package]
+name = "kiln_update"
+version = "0.0.1"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Kiln's updater core: signed release manifests, verified downloads, installs. No UI code."
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+# Downloads, minisign signature checks and the installs themselves.
+cargo-packager-updater = "0.2.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots"] }
+semver = "1"
+serde_json = "1"
+url = "2"
+
+[dev-dependencies]
+# Checks a release's signatures directly (the same library the updater uses).
+base64 = "0.22"
+minisign-verify = "0.2"
+tempfile = "3"

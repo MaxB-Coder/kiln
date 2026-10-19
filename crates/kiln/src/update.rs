@@ -1,146 +1,21 @@
-//! Updates: Kiln's only network use.
+//! The update offer in the app: a quiet line at the bottom of the sidebar and the first palette
+//! item when a newer version exists, the dialogs, and the daily check. Kiln's only network use.
 //!
 //! A release build carries the address of its release manifest and the public key its updates
 //! are signed with (`KILN_UPDATE_ENDPOINT`, `KILN_UPDATE_PUBKEY`, set by the release workflow).
-//! Builds without them never check. Kiln checks a minute after launch and then once a day,
-//! offers the update in the sidebar and the palette, and installs only when asked. The download
-//! is checked against the key before anything is replaced.
-//!
-//! Installing uses cargo-packager's updater: on macOS it swaps the app bundle, on Linux the
-//! AppImage, and on Windows it runs the new installer (Kiln closes for that). Builds that are
-//! not installed that way (a `cargo run`, a .deb) do not check.
+//! Builds without them never check. Kiln checks a minute after launch and then once a day, and
+//! installs only when asked. The checking, the signature check and the install itself are in
+//! the `kiln_update` crate.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context as _, bail};
-use cargo_packager_updater::{
-    Config as UpdaterConfig, RemoteRelease, Update, WindowsConfig, WindowsUpdateInstallMode,
-};
 use gpui::{App, Global, PromptLevel, Window};
-use semver::Version;
+use kiln_update::{Source, Update, Version, check, download_and_install, install_target};
 
 /// How long after launch the first check runs, and how often after that.
 const FIRST_CHECK: Duration = Duration::from_secs(60);
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
-/// A manifest is a few hundred bytes; anything much larger is not one.
-const MANIFEST_LIMIT: usize = 256 * 1024;
-
-/// Where to look and whose signature to trust, when this build has them.
-#[derive(Clone, Debug)]
-pub struct Source {
-    pub endpoint: url::Url,
-    pub pubkey: String,
-}
-
-impl Source {
-    /// The values built into this binary.
-    pub fn built_in() -> Option<Source> {
-        Source::new(
-            option_env!("KILN_UPDATE_ENDPOINT")?,
-            option_env!("KILN_UPDATE_PUBKEY")?,
-        )
-    }
-
-    /// An HTTPS manifest address and a minisign public key (base64, as cargo-packager writes
-    /// it). Plain HTTP is accepted only for this machine, for tests.
-    pub fn new(endpoint: &str, pubkey: &str) -> Option<Source> {
-        let endpoint = url::Url::parse(endpoint.trim()).ok()?;
-        let local = matches!(
-            endpoint.host_str(),
-            Some("127.0.0.1" | "localhost" | "[::1]")
-        );
-        if endpoint.scheme() != "https" && !(endpoint.scheme() == "http" && local) {
-            return None;
-        }
-        let pubkey = pubkey.trim();
-        (!pubkey.is_empty()).then(|| Source {
-            endpoint,
-            pubkey: pubkey.to_string(),
-        })
-    }
-}
-
-/// What the updater replaces: the app bundle (macOS), the AppImage (Linux) or the install
-/// folder (Windows). `None` when Kiln was not installed in a way it can update itself.
-pub fn install_target() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    if cfg!(target_os = "macos") {
-        // …/Kiln.app/Contents/MacOS/kiln
-        let bundle = exe.parent()?.parent()?.parent()?;
-        (bundle.extension()? == "app").then(|| bundle.to_path_buf())
-    } else if cfg!(windows) {
-        // The NSIS installer leaves its uninstaller next to the app.
-        let dir = exe.parent()?;
-        dir.join("uninstall.exe")
-            .is_file()
-            .then(|| dir.to_path_buf())
-    } else {
-        std::env::var_os("APPIMAGE").map(PathBuf::from)
-    }
-}
-
-/// Reads the manifest and returns the update when it is newer. Blocking.
-pub fn check(
-    source: &Source,
-    current: &Version,
-    install_to: PathBuf,
-) -> anyhow::Result<Option<Update>> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent(format!("Kiln/{current}"))
-        .build()?;
-    let response = client
-        .get(source.endpoint.clone())
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .context("reaching the update server")?;
-    if response.status() == reqwest::StatusCode::NO_CONTENT {
-        return Ok(None);
-    }
-    let response = response.error_for_status()?;
-    let body = response.bytes()?;
-    if body.len() > MANIFEST_LIMIT {
-        bail!("the update manifest is too large ({} bytes)", body.len());
-    }
-    let release: RemoteRelease =
-        serde_json::from_slice(&body).context("reading the update manifest")?;
-    if release.version <= *current {
-        return Ok(None);
-    }
-    let target = cargo_packager_updater::target().context("no updates for this platform")?;
-    Ok(Some(Update {
-        config: UpdaterConfig {
-            endpoints: vec![source.endpoint.clone()],
-            pubkey: source.pubkey.clone(),
-            windows: Some(WindowsConfig {
-                installer_args: None,
-                install_mode: Some(WindowsUpdateInstallMode::Passive),
-            }),
-        },
-        body: release.notes.clone(),
-        current_version: current.to_string(),
-        version: release.version.to_string(),
-        date: release.pub_date,
-        target: target.split('-').next().unwrap_or_default().to_string(),
-        extract_path: install_to,
-        download_url: release.download_url(&target)?.clone(),
-        signature: release.signature(&target)?.clone(),
-        timeout: Some(Duration::from_secs(600)),
-        headers: Default::default(),
-        format: release.format(&target)?,
-    }))
-}
-
-/// Downloads the update, checks its signature, and puts it in place. Blocking. On Windows the
-/// installer takes over and this process exits.
-pub fn download_and_install(update: &Update) -> anyhow::Result<()> {
-    // `download` refuses anything the key did not sign; only those bytes reach `install`.
-    let bytes = update.download().context("downloading the update")?;
-    update.install(bytes).context("installing the update")?;
-    Ok(())
-}
 
 /// The update shown in the app.
 #[derive(Clone, Default)]
@@ -270,31 +145,17 @@ pub fn install(window: &mut Window, cx: &mut App) {
             );
             cx.spawn(async move |cx| {
                 if answer.await == Ok(0) {
-                    cx.update(|cx| cx.restart());
+                    cx.update(|cx| {
+                        // An AppImage restarts as the AppImage, not as the binary in its image.
+                        if let Some(path) = kiln_update::restart_path() {
+                            cx.set_restart_path(path);
+                        }
+                        cx.restart()
+                    });
                 }
             })
             .detach();
         }
         UpdateState::None | UpdateState::Installing(_) => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sources_need_https_except_on_this_machine() {
-        assert!(Source::new("https://example.com/latest.json", "key").is_some());
-        assert!(Source::new("http://example.com/latest.json", "key").is_none());
-        assert!(Source::new("http://127.0.0.1:9/latest.json", "key").is_some());
-        assert!(Source::new("https://example.com/latest.json", " ").is_none());
-        assert!(Source::new("not a url", "key").is_none());
-    }
-
-    #[test]
-    fn dev_builds_do_not_update_themselves() {
-        // Tests run from target/, not from an installed app.
-        assert_eq!(install_target(), None);
     }
 }

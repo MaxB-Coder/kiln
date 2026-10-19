@@ -9,17 +9,22 @@ with ⌘⇧C. No AI, no telemetry: the only network use is checking for updates.
 
 ## Install
 
-Kiln has no public releases yet. Installers come from the Release workflow (Actions → Release →
-Run workflow) as workflow artifacts, or from `scripts/package.sh` on your own machine.
+Download from the [Releases](https://github.com/MaxB-Coder/kiln/releases) page (weekly), or
+build the installers with `scripts/package.sh`. Kiln does not use paid code signing, so each
+system asks once before the first launch:
 
 - **macOS** (Apple silicon, 13 or later): open the `.dmg` and drag Kiln to Applications. The
-  app is not notarised yet (that needs an Apple Developer account), so the first launch is
-  blocked: open System Settings → Privacy & Security and choose Open Anyway.
+  first launch is blocked: open System Settings → Privacy & Security and choose Open Anyway.
 - **Windows** (x64): run `Kiln_<version>_x64-setup.exe`. It installs for you only, without
-  administrator rights. It is not code-signed yet, so SmartScreen asks first: More info → Run
-  anyway. Kiln opens PowerShell; `kiln --wsl` opens your default WSL distribution.
-- **Linux** (x64): `sudo apt install ./kiln_<version>_amd64.deb`, or unpack the `.tar.gz`
-  anywhere. Wayland and X11 both work; Kiln draws its own title bar.
+  administrator rights. SmartScreen asks first: More info → Run anyway. Kiln opens
+  PowerShell; `kiln --wsl` opens your default WSL distribution.
+- **Linux** (x64): the AppImage runs anywhere and updates itself:
+  `chmod +x Kiln-<version>-x86_64.AppImage`, then run it (without FUSE:
+  `--appimage-extract-and-run`). Or `sudo apt install ./kiln_<version>_amd64.deb`, or unpack
+  the `.tar.gz`; those update through you, not in the app. Wayland and X11 both work.
+
+Kiln checks for a new version once a day and installs it only when you say yes (the app bundle
+on macOS, the installer on Windows, the AppImage on Linux).
 
 ## Build from source
 

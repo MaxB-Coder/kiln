@@ -52,6 +52,16 @@
       "labels": [
         "toolchain"
       ]
+    },
+    {
+      "description": "AppImage runtime bumps need their SHA-256 updated by hand.",
+      "matchDepNames": [
+        "AppImage/type2-runtime"
+      ],
+      "labels": [
+        "appimage",
+        "needs-hash"
+      ]
     }
   ],
   "customManagers": [
@@ -106,6 +116,19 @@
       "depNameTemplate": "PowerShell/PowerShell",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "The AppImage runtime (scripts/linux/make-appimage.sh). Its SHA-256 sits next to the version and must be updated by hand in the same PR: the build fails closed until it matches.",
+      "managerFilePatterns": [
+        "/^scripts/linux/make-appimage\\.sh$/"
+      ],
+      "matchStrings": [
+        "RUNTIME_VERSION=(?<currentValue>\\d{8})"
+      ],
+      "depNameTemplate": "AppImage/type2-runtime",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "regex:^(?<major>\\d{8})$"
     }
   ]
 }
