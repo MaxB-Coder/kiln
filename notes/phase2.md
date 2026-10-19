@@ -61,6 +61,11 @@ a small git project (`acme-web`) in a scratch folder, so the rail has something 
   warnings as errors, and the screenshots in `screenshots/linux-phase2/` (bash; python serves
   the demo there, since the image has no node).
 
+- CI ([run 39254173739](https://github.com/MaxB-Coder/kiln/actions/runs/39254173739), private):
+  all six jobs green on the final commit: macOS arm64, Linux x64, Windows x64 (tests and a
+  PowerShell session on ConPTY), a WSL Ubuntu session, clippy with warnings as errors, and
+  cargo-deny.
+
 Bug the Linux shots caught and fixed: opening the rail narrows the pane, the engine re-wraps
 the lines, and the row where a running command's output starts pointed into its own wrapped
 command line (the block began with `.0.0.1`, the end of `--bind 127.0.0.1`). The prompt,

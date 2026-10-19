@@ -120,3 +120,5 @@ Newest at the bottom.
 - **Headless scenario** advances GPUI's test clock with real time, so timers (the rail, saving)
   run as they do in the app; it saves state to a scratch file and turns the cursor blink off
   for stable pictures.
+- **CI skips pushes that only touch `notes/` or Markdown**, to save runner minutes (Windows
+  minutes count double on a private repo). Pull requests and the weekly run still build all.

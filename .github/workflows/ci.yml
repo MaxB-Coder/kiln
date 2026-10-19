@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    # Notes and screenshots alone do not need a build.
+    paths-ignore: ["notes/**", "**.md"]
   pull_request:
   workflow_dispatch:
   schedule:
