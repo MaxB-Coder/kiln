@@ -435,6 +435,14 @@ fn prompt(s: &mut Shots) {
     s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     s.pump(Duration::from_millis(800));
     s.shot("p5-home");
+    // `[shell] prompt = "shell"`: the shell's own prompt, inside the same box.
+    let mut config = config::current();
+    config.shell.prompt = config::PromptStyle::Shell;
+    config::set_current(config);
+    s.action(Box::new(kiln::NewSession));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.pump(Duration::from_millis(800));
+    s.shot("p6-shell-prompt");
 }
 
 /// Phase 3: an update on offer, in the sidebar and the palette. (The offer is made up here;

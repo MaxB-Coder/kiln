@@ -189,3 +189,13 @@ Newest at the bottom.
 - **Home** is not a project: sessions in the home folder sit under a quiet "Home" header (no
   colour dot) and are named after the running program, else the shell ("zsh", "zsh 2"),
   never "~". The breadcrumb reads "Home › zsh".
+- **The input box** is a raised, rounded box (`raised`, radius 10) inset 8 px from the pane, its
+  text lined up with the blocks above (blocks now sit 20 px in). It holds the shell's line:
+  inside Kiln the integration gives the shell a minimal prompt, `❯ ` in the accent, or in
+  `failed` after a failed command (startup files and Ctrl-C do not count). zsh and bash set it
+  last in their prompt hooks, PowerShell in its prompt function (`>` when the console is not
+  UTF-8). Starship users keep Starship, pointed at a generated one-character config
+  (`STARSHIP_CONFIG`, re-exported each prompt so it wins over their own setting). Line editors,
+  plugins, completion menus (the box grows upward) and the user's own zle hooks are untouched;
+  outside Kiln nothing changes. Dim context sits inside the box on the right, and steps aside
+  when the typed line would reach it. `[shell] prompt = "shell"` keeps the shell's own prompt.

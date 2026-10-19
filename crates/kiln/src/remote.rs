@@ -34,6 +34,14 @@ impl Tint {
         }
     }
 
+    /// The input box with the tint mixed in.
+    pub fn raised(self, p: &Palette) -> u32 {
+        match self {
+            Tint::Remote => theme::blend(p.raised, p.ansi[4], 0.10),
+            Tint::Production => theme::blend(p.raised, p.ansi[1], 0.13),
+        }
+    }
+
     /// Colour of the corner label.
     pub fn label_color(self, p: &Palette) -> u32 {
         match self {

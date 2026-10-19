@@ -110,6 +110,8 @@ pub struct SessionOptions {
     pub scrollback_lines: usize,
     /// Load Kiln's shell integration (blocks need it).
     pub shell_integration: bool,
+    /// Kiln's minimal prompt instead of the shell's own (needs the integration).
+    pub prompt: Option<integration::MinimalPrompt>,
 }
 
 impl Default for SessionOptions {
@@ -142,6 +144,7 @@ impl Default for SessionOptions {
             env,
             scrollback_lines: 10_000,
             shell_integration: true,
+            prompt: None,
         }
     }
 }
@@ -171,9 +174,12 @@ impl Session {
         let label = options.shell.clone();
         let integrated = options.shell_integration
             && match integration::default_dir().map(|dir| integration::install(&dir)) {
-                Some(Ok(installed)) => {
-                    integration::apply(&installed, &mut options.shell, &mut options.env)
-                }
+                Some(Ok(installed)) => integration::apply(
+                    &installed,
+                    &mut options.shell,
+                    &mut options.env,
+                    options.prompt,
+                ),
                 Some(Err(err)) => {
                     log::warn!("shell integration not installed: {err}");
                     false

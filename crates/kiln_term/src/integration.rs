@@ -25,9 +25,47 @@ const BASH_BOOTSTRAP: &str = r#"[ -n "$KILN_BASH_INTEGRATION" ] && . "$KILN_BASH
 /// Where the scripts were written.
 #[derive(Clone, Debug)]
 pub struct Installed {
+    pub dir: PathBuf,
     pub zsh_dir: PathBuf,
     pub bash: PathBuf,
     pub powershell: PathBuf,
+}
+
+/// Kiln's own prompt inside Kiln: "❯ " in `ok`, or in `failed` after a failed command
+/// (colours as 0xRRGGBB). The shell's line editor stays as it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MinimalPrompt {
+    pub ok: u32,
+    pub failed: u32,
+}
+
+impl MinimalPrompt {
+    fn rgb(color: u32) -> String {
+        format!(
+            "{};{};{}",
+            (color >> 16) & 0xff,
+            (color >> 8) & 0xff,
+            color & 0xff
+        )
+    }
+
+    /// A Starship config with only the prompt character, for users of Starship.
+    fn starship_config(&self) -> String {
+        format!(
+            "# Kiln's prompt inside Kiln: the character only. Outside Kiln your own\n\
+             # starship.toml applies. Written by Kiln; changes are overwritten.\n\
+             add_newline = false\n\
+             format = \"$character\"\n\
+             right_format = \"\"\n\
+             \n\
+             [character]\n\
+             success_symbol = \"[❯](#{ok:06x})\"\n\
+             error_symbol = \"[❯](#{failed:06x})\"\n\
+             vimcmd_symbol = \"[❮](#{ok:06x})\"\n",
+            ok = self.ok,
+            failed = self.failed,
+        )
+    }
 }
 
 /// The per-user folder for the scripts, versioned so upgrades never mix files.
@@ -59,20 +97,38 @@ pub fn install(dir: &Path) -> io::Result<Installed> {
     let powershell = dir.join("kiln.ps1");
     write_if_changed(&powershell, POWERSHELL)?;
     Ok(Installed {
+        dir: dir.to_path_buf(),
         zsh_dir,
         bash,
         powershell,
     })
 }
 
-/// Adjusts the command and environment so the shell loads the integration. Returns `false`
-/// for shells Kiln has no integration for.
+/// Adjusts the command and environment so the shell loads the integration (and, with
+/// `prompt`, shows Kiln's minimal prompt). Returns `false` for shells Kiln has no integration
+/// for.
 pub fn apply(
     installed: &Installed,
     shell: &mut ShellCommand,
     env: &mut HashMap<String, String>,
+    prompt: Option<MinimalPrompt>,
 ) -> bool {
     env.insert("KILN_SHELL_INTEGRATION".into(), "1".into());
+    if let Some(prompt) = prompt {
+        env.insert("KILN_PROMPT".into(), "kiln".into());
+        env.insert("KILN_PROMPT_OK".into(), MinimalPrompt::rgb(prompt.ok));
+        env.insert("KILN_PROMPT_FAIL".into(), MinimalPrompt::rgb(prompt.failed));
+        let path = installed.dir.join(format!(
+            "starship-{:06x}-{:06x}.toml",
+            prompt.ok, prompt.failed
+        ));
+        match write_if_changed(&path, &prompt.starship_config()) {
+            Ok(()) => {
+                env.insert("KILN_STARSHIP_CONFIG".into(), path_string(&path));
+            }
+            Err(err) => log::warn!("could not write the Starship prompt config: {err}"),
+        }
+    }
     match shell_kind(&shell.program).as_str() {
         "zsh" => {
             if let Ok(zdotdir) = std::env::var("ZDOTDIR") {
@@ -114,6 +170,10 @@ pub fn apply(
                 "KILN_BASH_INTEGRATION/p",
                 "PROMPT_COMMAND/u",
                 "KILN_SHELL_INTEGRATION/u",
+                "KILN_PROMPT/u",
+                "KILN_PROMPT_OK/u",
+                "KILN_PROMPT_FAIL/u",
+                "KILN_STARSHIP_CONFIG/p",
                 "TERM_PROGRAM/u",
                 "TERM_PROGRAM_VERSION/u",
                 "COLORTERM/u",
@@ -127,7 +187,15 @@ pub fn apply(
             true
         }
         _ => {
-            env.remove("KILN_SHELL_INTEGRATION");
+            for var in [
+                "KILN_SHELL_INTEGRATION",
+                "KILN_PROMPT",
+                "KILN_PROMPT_OK",
+                "KILN_PROMPT_FAIL",
+                "KILN_STARSHIP_CONFIG",
+            ] {
+                env.remove(var);
+            }
             false
         }
     }
@@ -224,12 +292,12 @@ mod tests {
 
         let mut env = HashMap::new();
         let mut zsh = ShellCommand::new("/bin/zsh", ["-l"]);
-        assert!(apply(&installed, &mut zsh, &mut env));
+        assert!(apply(&installed, &mut zsh, &mut env, None));
         assert_eq!(env["ZDOTDIR"], path_string(&installed.zsh_dir));
 
         let mut env = HashMap::new();
         let mut pwsh = ShellCommand::new("pwsh.exe", ["-NoLogo"]);
-        assert!(apply(&installed, &mut pwsh, &mut env));
+        assert!(apply(&installed, &mut pwsh, &mut env, None));
         assert_eq!(
             pwsh.args[1..3],
             ["-NoExit".to_string(), "-EncodedCommand".to_string()]
@@ -237,8 +305,28 @@ mod tests {
 
         let mut env = HashMap::new();
         let mut fish = ShellCommand::new("/opt/homebrew/bin/fish", ["-l"]);
-        assert!(!apply(&installed, &mut fish, &mut env));
+        assert!(!apply(&installed, &mut fish, &mut env, None));
         assert!(env.is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_minimal_prompt_brings_its_colours_and_a_starship_config() {
+        let dir = std::env::temp_dir().join(format!("kiln-prompt-{}", std::process::id()));
+        let installed = install(&dir).unwrap();
+        let mut env = HashMap::new();
+        let mut zsh = ShellCommand::new("/bin/zsh", ["-l"]);
+        let prompt = MinimalPrompt {
+            ok: 0xe07b39,
+            failed: 0xb8645a,
+        };
+        assert!(apply(&installed, &mut zsh, &mut env, Some(prompt)));
+        assert_eq!(env["KILN_PROMPT"], "kiln");
+        assert_eq!(env["KILN_PROMPT_OK"], "224;123;57");
+        assert_eq!(env["KILN_PROMPT_FAIL"], "184;100;90");
+        let starship = fs::read_to_string(&env["KILN_STARSHIP_CONFIG"]).unwrap();
+        assert!(starship.contains("format = \"$character\""));
+        assert!(starship.contains("[❯](#e07b39)"));
         let _ = fs::remove_dir_all(dir);
     }
 }

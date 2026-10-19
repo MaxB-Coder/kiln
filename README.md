@@ -48,7 +48,10 @@ libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev`.
 | Settings | ⌘, | Ctrl+Shift+, |
 
 Kiln loads its shell integration for zsh, bash and PowerShell by itself, without touching your
-startup files. Other shells (fish, nu) get a classic terminal.
+startup files. Other shells (fish, nu) get a classic terminal. Inside Kiln the prompt is a
+quiet `❯` in the input box (muted red after a failed command), with Starship given a
+one-character config; your line editor, plugins and completion stay as they are, and outside
+Kiln your prompt is unchanged. `[shell] prompt = "shell"` keeps your own prompt in Kiln too.
 
 ## Settings
 
@@ -58,6 +61,9 @@ option and its default; changes apply as you save. A few:
 ```toml
 font_size = 13.0
 notify_after_secs = 10          # notify when a long command finishes out of sight (0: off)
+
+[shell]
+prompt = "kiln"                 # a quiet ❯ in the input box; "shell" keeps your own prompt
 
 [window]
 restore = true                  # reopen the last sessions at launch

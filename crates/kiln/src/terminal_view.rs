@@ -51,8 +51,12 @@ fn alt_mode() -> AltMode {
 
 const CURSOR_BLINK: Duration = Duration::from_millis(600);
 
-/// Space around the grid, in points (same as the WezTerm config).
-pub const PADDING_X: f32 = 14.;
+/// Space around the grid, in points.
+pub const PADDING_X: f32 = 20.;
+/// The input box's margin from the pane's edges. Its inner padding is the rest of
+/// `PADDING_X`, so typed text lines up with the blocks above.
+const INPUT_INSET: f32 = 8.;
+const INPUT_RADIUS: f32 = 10.;
 pub const PADDING_TOP: f32 = 10.;
 pub const PADDING_BOTTOM: f32 = 8.;
 
@@ -1553,8 +1557,13 @@ impl Render for TerminalView {
         let entity: Entity<Self> = cx.entity();
 
         enum Layout {
-            Classic { top: usize, rows: usize },
-            Blocks { prompt: Option<(usize, usize)> },
+            Classic {
+                top: usize,
+                rows: usize,
+            },
+            Blocks {
+                prompt: Option<(usize, usize, usize, usize)>,
+            },
         }
         let layout = {
             let term = self.session.term().lock();
@@ -1575,7 +1584,13 @@ impl Render for TerminalView {
                 let prompt = (live.phase == Phase::Prompt).then(|| {
                     let top = live.prompt_top.unwrap_or(cursor_abs).min(cursor_abs);
                     let last = Self::last_used_row(&term, top, cursor_abs);
-                    (top, last - top + 1)
+                    // How far the first line's text reaches, so the context can step aside.
+                    let row = &grid[Line(top as i32 - history as i32)];
+                    let used = (0..grid.columns())
+                        .rev()
+                        .find(|&c| row[Column(c)].c != ' ')
+                        .map_or(0, |c| c + 1);
+                    (top, last - top + 1, used, grid.columns())
                 });
                 Layout::Blocks { prompt }
             }
@@ -1612,38 +1627,56 @@ impl Render for TerminalView {
                         list(self.list_state.clone(), cx.processor(Self::render_item)).size_full(),
                     ),
                 )
-                .when_some(prompt, |d, (top, rows)| {
+                .when_some(prompt, |d, (top, rows, used, columns)| {
+                    // The input: a raised, rounded box inset from the pane's edges, growing
+                    // upward with completion menus and second lines. Dim context (Node's
+                    // version, the WSL distribution) sits inside it on the right while the
+                    // typed line leaves room for it.
+                    let inner_x = PADDING_X - INPUT_INSET;
+                    let p = palette();
+                    let input_bg = self.tint().map_or(p.raised, |(tint, _)| tint.raised(&p));
+                    let context = self.context.clone().filter(|context| {
+                        let cells = context.chars().count() * 11 / 13 + 4;
+                        used + cells < columns
+                    });
                     d.child(
                         div()
                             .flex_none()
                             .w_full()
-                            .bg(theme::hsla(palette().bar))
-                            .px(px(PADDING_X))
-                            .pt(px(10.))
-                            .pb(px(10.))
-                            .relative()
-                            .child(LiveElement::new(
-                                entity,
-                                self.focus.clone(),
-                                LiveRole::Prompt,
-                                top,
-                                rows,
-                            ))
-                            .when_some(self.context.clone(), |d, context| {
-                                d.child(
-                                    div()
-                                        .absolute()
-                                        .top(px(10.))
-                                        .right(px(PADDING_X))
-                                        .h(self.metrics.line_height)
-                                        .flex()
-                                        .items_center()
-                                        .font_family(FONT_FAMILY)
-                                        .text_size(px(11.))
-                                        .text_color(theme::hsla(palette().muted))
-                                        .child(context),
-                                )
-                            }),
+                            .px(px(INPUT_INSET))
+                            .pt(px(6.))
+                            .pb(px(INPUT_INSET + 2.))
+                            .child(
+                                div()
+                                    .relative()
+                                    .w_full()
+                                    .rounded(px(INPUT_RADIUS))
+                                    .bg(theme::hsla(input_bg))
+                                    .px(px(inner_x))
+                                    .py(px(8.))
+                                    .child(LiveElement::new(
+                                        entity,
+                                        self.focus.clone(),
+                                        LiveRole::Prompt,
+                                        top,
+                                        rows,
+                                    ))
+                                    .when_some(context, |d, context| {
+                                        d.child(
+                                            div()
+                                                .absolute()
+                                                .top(px(8.))
+                                                .right(px(inner_x))
+                                                .h(self.metrics.line_height)
+                                                .flex()
+                                                .items_center()
+                                                .font_family(FONT_FAMILY)
+                                                .text_size(px(11.))
+                                                .text_color(theme::hsla(p.muted))
+                                                .child(context),
+                                        )
+                                    }),
+                            ),
                     )
                 })
                 .into_any_element(),

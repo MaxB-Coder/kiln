@@ -1,11 +1,15 @@
 # Kiln shell integration for PowerShell (pwsh 7 and Windows PowerShell 5.1).
 #
 # Marks the prompt, the command and its output (OSC 133) and reports the current folder
-# (OSC 7). Kiln loads it with -NoExit -Command; it keeps the user's own prompt.
+# (OSC 7). Kiln loads it with -NoExit -EncodedCommand. With KILN_PROMPT=kiln the prompt is
+# Kiln's minimal "❯ " (">" where the console is not UTF-8; Starship gets a one-character config
+# instead); otherwise the user's own prompt stays.
 
 if ($global:__KilnIntegrated) { return }
 $global:__KilnIntegrated = $true
 $global:__KilnRunning = $false
+# Whether the last command succeeded, for the prompt's colour (the profile does not count).
+$global:__KilnLastOk = $true
 $global:__KilnUserPrompt = $function:prompt
 
 function global:__KilnEncode([string] $s) {
@@ -25,11 +29,14 @@ function global:__KilnEncode([string] $s) {
 function global:prompt {
     $ok = $?
     $code = $global:LASTEXITCODE
+    $kiln = $env:KILN_PROMPT -eq 'kiln'
+    if ($kiln -and $env:KILN_STARSHIP_CONFIG) { $env:STARSHIP_CONFIG = $env:KILN_STARSHIP_CONFIG }
     $esc = [char]27
     $bel = [char]7
     $out = ''
     if ($global:__KilnRunning) {
         $exit = if ($ok) { 0 } elseif ($code) { $code } else { 1 }
+        $global:__KilnLastOk = $ok
         $out += "$esc]133;D;$exit$bel"
         $global:__KilnRunning = $false
     }
@@ -50,7 +57,15 @@ function global:prompt {
         $out += "$esc]1337;KilnTools=$(__KilnEncode $tools)$bel"
     }
     $out += "$esc]133;A$bel"
-    $out += & $global:__KilnUserPrompt
+    if ($kiln -and -not $env:STARSHIP_SHELL) {
+        $good = $global:__KilnLastOk
+        $rgb = if ($good) { $env:KILN_PROMPT_OK } else { $env:KILN_PROMPT_FAIL }
+        if (-not $rgb) { $rgb = if ($good) { '224;123;57' } else { '184;100;90' } }
+        $sym = if ([Console]::OutputEncoding.CodePage -eq 65001) { [string][char]0x276F } else { '>' }
+        $out += "$esc[38;2;${rgb}m$sym$esc[0m "
+    } else {
+        $out += & $global:__KilnUserPrompt
+    }
     $out += "$esc]133;B$bel"
     $global:LASTEXITCODE = $code
     $out

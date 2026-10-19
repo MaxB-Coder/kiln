@@ -140,3 +140,121 @@ fn pwsh_block() {
         assert_eq!(block.output_text(), "first\nsecond");
     }
 }
+
+/// A prompt's first cell: its glyph and colour.
+type PromptCell = (char, Option<(u8, u8, u8)>);
+
+/// Runs a shell with Kiln's minimal prompt and returns the prompt's first cell before and after
+/// a failing command.
+fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptCell; 2]> {
+    use kiln_term::engine::grid::Dimensions as _;
+    use kiln_term::engine::index::{Column, Line};
+    use kiln_term::engine::vte::ansi::Color;
+    use kiln_term::integration::MinimalPrompt;
+
+    if !Path::new(program).exists() {
+        eprintln!("skipping: {program} not installed");
+        return None;
+    }
+    let home = std::env::temp_dir().join(format!(
+        "kiln-prompt-home-{}-{}",
+        std::process::id(),
+        program.len()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    let mut env = SessionOptions::default().env;
+    env.insert("HOME".into(), home.to_string_lossy().into_owned());
+    env.insert("PS1".into(), "$ ".into());
+    env.insert("skip_global_compinit".into(), "1".into());
+    let options = SessionOptions {
+        shell: ShellCommand::new(program, args.iter().copied()),
+        working_directory: Some(home.clone()),
+        env,
+        prompt: Some(MinimalPrompt {
+            ok: 0xe07b39,
+            failed: 0xb8645a,
+        }),
+        ..Default::default()
+    };
+    let (tx, rx) = mpsc::channel();
+    let session = Session::spawn(options, SIZE, move |e| {
+        let _ = tx.send(e);
+    })
+    .unwrap();
+
+    let first_cell = |session: &Session| {
+        let term = session.term().lock();
+        let grid = term.grid();
+        let line = grid.cursor.point.line;
+        // The prompt starts at the beginning of the cursor's line.
+        let cell = &grid[Line(line.0)][Column(0)];
+        let rgb = match cell.fg {
+            Color::Spec(rgb) => Some((rgb.r, rgb.g, rgb.b)),
+            _ => None,
+        };
+        let _ = grid.columns();
+        (cell.c, rgb)
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut cells = Vec::new();
+    loop {
+        let event = rx
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|_| panic!("{program}: no prompt before timeout"));
+        if let SessionEvent::Mark(record) = event
+            && record.mark == Mark::InputStart
+        {
+            std::thread::sleep(Duration::from_millis(200));
+            cells.push(first_cell(&session));
+            match cells.len() {
+                // `false` fails in every shell here (PowerShell runs /usr/bin/false).
+                1 => session.write(b"false\r".to_vec()),
+                _ => return Some([cells[0], cells[1]]),
+            }
+        }
+    }
+}
+
+fn check_prompt(cells: [PromptCell; 2]) {
+    assert_eq!(cells[0], ('❯', Some((224, 123, 57))), "first prompt");
+    assert_eq!(cells[1], ('❯', Some((184, 100, 90))), "after a failure");
+}
+
+#[test]
+fn zsh_minimal_prompt() {
+    if let Some(cells) = minimal_prompt("/bin/zsh", &["-l"]) {
+        check_prompt(cells);
+    }
+}
+
+#[test]
+fn bash5_minimal_prompt() {
+    if let Some(cells) = minimal_prompt("/opt/homebrew/bin/bash", &["-l"]) {
+        check_prompt(cells);
+    }
+}
+
+#[test]
+fn bash3_minimal_prompt() {
+    if let Some(cells) = minimal_prompt("/bin/bash", &["-l"]) {
+        check_prompt(cells);
+    }
+}
+
+#[test]
+fn pwsh_minimal_prompt() {
+    let Some(pwsh) = [
+        "/usr/local/bin/pwsh",
+        "/opt/homebrew/bin/pwsh",
+        "/usr/bin/pwsh",
+    ]
+    .into_iter()
+    .find(|p| Path::new(p).exists()) else {
+        eprintln!("skipping: pwsh not installed");
+        return;
+    };
+    if let Some(cells) = minimal_prompt(pwsh, &["-NoLogo", "-NoProfile"]) {
+        check_prompt(cells);
+    }
+}

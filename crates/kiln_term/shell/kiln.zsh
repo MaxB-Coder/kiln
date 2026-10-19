@@ -2,12 +2,16 @@
 #
 # Marks the prompt, the command and its output (OSC 133) and reports the current folder
 # (OSC 7), so Kiln can show each command as a block. Loaded automatically by Kiln; it changes
-# nothing about how the shell behaves.
+# nothing about how the shell behaves, except that with KILN_PROMPT=kiln the prompt is Kiln's
+# minimal "❯ " (in KILN_PROMPT_OK, or KILN_PROMPT_FAIL after a failed command; Starship gets a
+# one-character config instead). The line editor, completion and plugins stay as they are.
 
 [[ -o interactive ]] || return 0
 (( ${+_KILN_INTEGRATED} )) && return 0
 typeset -g _KILN_INTEGRATED=1
 typeset -gi _kiln_running=0
+# The last command's exit status, for the prompt's colour (startup files do not count).
+typeset -gi _kiln_last=0
 
 # Percent-encodes $1 into REPLY (for OSC 7 and the command line).
 _kiln_urlencode() {
@@ -26,7 +30,12 @@ _kiln_urlencode() {
 
 _kiln_precmd() {
   local -i ret=$?
+  # Starship reads its config each time it draws, so this wins over the user's own setting.
+  if [[ ${KILN_PROMPT-} == kiln && -n ${KILN_STARSHIP_CONFIG-} ]]; then
+    export STARSHIP_CONFIG=$KILN_STARSHIP_CONFIG
+  fi
   if (( _kiln_running )); then
+    _kiln_last=$ret
     printf '\e]133;D;%d\a' $ret
     _kiln_running=0
   fi
@@ -52,6 +61,13 @@ _kiln_precmd() {
 }
 
 _kiln_wrap_prompt() {
+  if [[ ${KILN_PROMPT-} == kiln && -z ${STARSHIP_SHELL-} ]]; then
+    local color=${KILN_PROMPT_OK:-224;123;57}
+    # Ctrl-C (130) is not a failure.
+    (( _kiln_last != 0 && _kiln_last != 130 )) && color=${KILN_PROMPT_FAIL:-184;100;90}
+    PS1=$'%{\e[38;2;'"$color"$'m%}❯%{\e[0m%} '
+    RPS1= RPROMPT=
+  fi
   if [[ $PS1 != *$'\e]133;A'* ]]; then
     PS1=$'%{\e]133;A\a%}'"${PS1}"$'%{\e]133;B\a%}'
   fi

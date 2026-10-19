@@ -3,12 +3,16 @@
 # Kiln exports PROMPT_COMMAND so bash sources this file at the first prompt. It marks the
 # prompt, the command and its output (OSC 133) and reports the current folder (OSC 7).
 # Commands are marked through PS0 (bash 4.4 and later); older bash still gets prompts.
+# With KILN_PROMPT=kiln the prompt is Kiln's minimal "❯ " (Starship gets a one-character
+# config instead); readline and completion are untouched.
 
 if [[ -n "${_KILN_INTEGRATED-}" ]]; then
   return 0 2>/dev/null || true
 fi
 _KILN_INTEGRATED=1
 _kiln_first=1
+# The last command's exit status, for the prompt's colour (startup files do not count).
+_kiln_last=0
 
 # Remove the bootstrap from PROMPT_COMMAND; keep whatever the user's startup files added.
 _kiln_user_pc=${PROMPT_COMMAND//"[ -n \"\$KILN_BASH_INTEGRATION\" ] && . \"\$KILN_BASH_INTEGRATION\""/}
@@ -29,7 +33,11 @@ _kiln_urlencode() {
 
 _kiln_prompt_command() {
   local ret=$?
+  if [[ ${KILN_PROMPT-} == kiln && -n ${KILN_STARSHIP_CONFIG-} ]]; then
+    export STARSHIP_CONFIG=$KILN_STARSHIP_CONFIG
+  fi
   if [[ -z $_kiln_first ]]; then
+    _kiln_last=$ret
     printf '\e]133;D;%d\a' "$ret"
   fi
   _kiln_first=
@@ -69,8 +77,18 @@ elif [[ -z "$(trap -p DEBUG)" ]]; then
   trap '_kiln_debug' DEBUG
 fi
 
-# Runs last in PROMPT_COMMAND: from here on, the next command is the user's.
-_kiln_arm() { _kiln_at_prompt=1; }
+# Runs last in PROMPT_COMMAND (after any prompt theme): sets Kiln's prompt, then from here on
+# the next command is the user's.
+_kiln_arm() {
+  if [[ ${KILN_PROMPT-} == kiln && -z ${STARSHIP_SHELL-} ]]; then
+    local color=${KILN_PROMPT_OK:-224;123;57}
+    if [[ ${_kiln_last-0} != 0 && ${_kiln_last-0} != 130 ]]; then
+      color=${KILN_PROMPT_FAIL:-184;100;90}
+    fi
+    PS1='\[\e]133;A\a\]\[\e[38;2;'"$color"'m\]❯\[\e[0m\] \[\e]133;B\a\]'
+  fi
+  _kiln_at_prompt=1
+}
 PROMPT_COMMAND="_kiln_prompt_command${_kiln_user_pc:+;$_kiln_user_pc};_kiln_arm"
 unset _kiln_user_pc
 _kiln_prompt_command

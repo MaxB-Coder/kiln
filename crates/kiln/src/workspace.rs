@@ -166,6 +166,13 @@ impl Workspace {
         }
         options.scrollback_lines = config.scrollback;
         options.shell_integration = config.shell.integration.unwrap_or(true);
+        if config.shell.prompt == config::PromptStyle::Kiln {
+            let p = theme::palette();
+            options.prompt = Some(kiln_term::integration::MinimalPrompt {
+                ok: p.accent,
+                failed: p.failed,
+            });
+        }
         options
     }
 
