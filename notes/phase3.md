@@ -79,3 +79,36 @@ The update offer, shown with a made-up update (screenshots `phase3/`):
   universal build is possible if you need one.
 - Linux AppImage and Linux in-app updates (see DECISIONS: unpinned build tools).
 - The installers by hand on real Windows and Linux desktops.
+
+## After phase 3 (2026-10-19)
+
+The user's decisions (QUESTIONS, "Answered"): no paid signing; Renovate yes; AppImage yes; WSL
+processes in the rail maybe later. Then three fixes, each committed and pushed with CI green:
+
+- **Home** (d5dc235): sessions in the home folder sit under a quiet "Home" header and are named
+  after their program or shell ("zsh", "zsh 2"). Shots: `screenshots/home/`.
+- **Input box** (163c399): a raised, rounded box with Kiln's minimal `❯` prompt (red after a
+  failed command), context inside on the right; Starship gets a one-character config inside
+  Kiln only; `[shell] prompt = "shell"` keeps the shell's own. Shots, before and after
+  (failed command, second line, completion menu, Home, shell prompt):
+  `screenshots/prompt/`.
+- **AppImage and in-app updates on Linux** (192b6c6 to the Windows fix): see DECISIONS.
+
+Why the first published release (run 39283583524) failed: the package jobs did sign the update
+files, but uploading them in one artifact with `smoke/` kept their `target/packages/` prefix,
+so the release job found no files at the top of `dist`. Fixed by separate artifacts. The dry
+runs that proved the fix found two more problems, also fixed: the Windows installer is
+`kiln_<version>_x64-setup.exe` (lowercase), which the manifest script never matched, so no
+release had a Windows update entry; and the Linux job's cache restored tools built for a newer
+glibc.
+
+Proof, release dry run [39309436489](https://github.com/MaxB-Coder/kiln/actions/runs/39309436489)
+(no publish; CI on the same commit:
+[39309435705](https://github.com/MaxB-Coder/kiln/actions/runs/39309435705), green):
+
+- `latest.json` lists all three systems, and every file verifies against `KILN_UPDATE_PUBKEY`:
+  `Kiln.app.tar.gz` (11.3 MB), `kiln_2026.10.19_x64-setup.exe` (7.2 MB),
+  `Kiln-2026.10.19-x86_64.AppImage` (18.2 MB).
+- The AppImage (built on Ubuntu 22.04) starts through FUSE (`kiln 2026.10.19`), draws its first
+  frame, and the updater accepts the signed AppImage and installs it over a stand-in copy; on
+  macOS it does the same with the signed app archive. Windows installs per user and starts.
