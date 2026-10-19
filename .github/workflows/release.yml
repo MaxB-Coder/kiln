@@ -104,7 +104,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential pkg-config clang \
             libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev xvfb mesa-vulkan-drivers
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev xvfb mesa-vulkan-drivers imagemagick
 
       - name: Install Rust (from rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
@@ -113,8 +113,10 @@ jobs:
         with:
           shared-key: release-${{ matrix.name }}
 
-      - name: Install cargo-packager
-        run: cargo install cargo-packager --version 0.11.8 --locked
+      - name: Install cargo-packager and cargo-about
+        run: |
+          cargo install cargo-packager --version 0.11.8 --locked
+          cargo install cargo-about --version 0.9.2 --locked --features cli
 
       - name: Set the version
         run: python3 scripts/set-version.py "${{ needs.plan.outputs.version }}" || python scripts/set-version.py "${{ needs.plan.outputs.version }}"

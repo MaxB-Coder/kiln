@@ -1,0 +1,33 @@
+# Third-party licences
+
+Kiln is built from the open-source software below. Their licences ask that these notices
+travel with it.
+
+## Fonts
+
+Kiln embeds JetBrains Mono (SIL Open Font License 1.1) as patched by Nerd Fonts (MIT). Both
+licences are in the files `JetBrainsMono-OFL.txt` and `NerdFonts-LICENSE` next to this one.
+
+## Code
+
+Kiln's PTY loop is adapted from alacritty_terminal (Apache-2.0, © the Alacritty authors).
+GPUI's platform crates (gpui_macos, gpui_windows, gpui_linux, gpui_platform and the like) come
+from the same repository as `gpui` below (github.com/zed-industries/zed) under the same
+Apache-2.0 licence.
+
+## Rust crates
+
+{{#each overview}}
+- {{{name}}}: {{count}} crates
+{{/each}}
+
+{{#each licenses}}
+### {{{name}}}
+
+Used by: {{#each used_by}}{{crate.name}} {{crate.version}}{{#unless @last}}, {{/unless}}{{/each}}
+
+```text
+{{{text}}}
+```
+
+{{/each}}

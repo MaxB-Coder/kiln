@@ -122,3 +122,47 @@ Newest at the bottom.
   for stable pictures.
 - **CI skips pushes that only touch `notes/` or Markdown**, to save runner minutes (Windows
   minutes count double on a private repo). Pull requests and the weekly run still build all.
+
+## Phase 3
+
+- **Installers** come from cargo-packager (MIT/Apache, CrabNebula), configured in
+  `crates/kiln/Cargo.toml`, so the version has one source. `scripts/package.sh` builds:
+  macOS `Kiln.app` and a dmg made with `hdiutil` (cargo-packager's dmg step downloads a
+  create-dmg script at build time; not in the release path); Windows a per-user NSIS installer
+  (no admin rights, and the updater can replace it quietly); Linux a `.deb` and a tarball.
+- **No AppImage yet**: cargo-packager downloads linuxdeploy's AppImage plugin from a moving
+  "continuous" release with no hash check. A release pipeline must not run an unpinned tool.
+  So Linux has no in-app updates for now (they need an AppImage); see QUESTIONS.
+- **Signing without paid accounts**: macOS builds are ad hoc signed (Gatekeeper asks on first
+  launch); Windows builds are unsigned (SmartScreen asks). The release workflow switches on
+  Developer ID signing with notarisation, and Azure Trusted Signing, as soon as their
+  secrets exist. Neither has run yet (no accounts).
+- **Versions are dates** (`2026.10.26`): weekly releases, plain semver for the updater, and a
+  dev build (0.0.1) is always older than any release. One release per day at most.
+- **Releases publish only on request**: a manual run builds, installs and starts the
+  installers on all three systems and keeps them as artifacts; ticking "publish" (or setting
+  the repository variable `KILN_RELEASES=on` for the weekly run) creates the GitHub release.
+- **Updates** use cargo-packager-updater for the download, the minisign signature check and the
+  install, but Kiln checks the manifest itself: the crate's check sets `SSL_CERT_FILE` and
+  `SSL_CERT_DIR` process-wide on Linux at run time, which every shell Kiln starts would
+  inherit (breaking TLS for programs on distributions where that path does not exist) and which
+  races other threads reading the environment. The manifest is limited to 256 KB, HTTPS only.
+- **When updates run**: only in builds that carry an update address and key (set by the release
+  workflow from repository variables) and that were installed by a Kiln installer (an app
+  bundle, the NSIS install folder, an AppImage). First check a minute after launch, then daily.
+  The offer is a quiet line at the bottom of the sidebar and the first palette item; nothing
+  installs without a yes. On Windows the installer takes over and Kiln closes, and the dialog
+  says so first. After an install, Kiln offers to restart; sessions reopen in their folders.
+- **Where updates come from is open**: the private repository's release files need a GitHub
+  login, so the updater cannot read them. `KILN_DOWNLOAD_BASE` and `KILN_UPDATE_ENDPOINT` point
+  elsewhere when the repository stays private; see QUESTIONS.
+- **Licences travel with the app**: cargo-about writes `THIRD_PARTY_LICENSES.md` (all crates in
+  the binary, from their own licence files, offline) and every package carries it with the
+  font licences. Kiln's own crates are skipped until it has a licence.
+- **App icon**: a kiln's arch with the prompt glowing inside, in the palette's colours
+  (`assets/icon/kiln.svg`; PNG, icns and ico made from it).
+- **Daily security check**: `security.yml` runs the RustSec advisories check every day, so a
+  new advisory against a shipped crate fails a run (GitHub emails about failed scheduled runs)
+  without waiting for a push. Renovate (once installed) opens the fix.
+- **Renovate** now also bumps the Rust toolchain, cargo-packager and cargo-about, and the test
+  image's PowerShell. GPUI and the engine keep their own rules.

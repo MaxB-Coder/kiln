@@ -75,7 +75,7 @@ long command running while a pane changed width.
 ## On macOS, notifications need the app bundle
 
 GPUI only posts notifications from an app bundle; a bare `cargo run` binary skips them
-quietly. `scripts/bundle-macos.sh` makes `Kiln.app`. The first notification asks for
+quietly. `scripts/package.sh` makes `Kiln.app` (in phase 2 this was `scripts/bundle-macos.sh`). The first notification asks for
 permission (a macOS prompt); I did not answer it for you.
 
 ## Not done or not verified

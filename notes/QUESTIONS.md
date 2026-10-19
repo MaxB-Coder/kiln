@@ -1,37 +1,72 @@
 # Questions for the user
 
-Collected during the autonomous build; raised at the end of the project.
+Collected during the autonomous build (phases 0–3), for the end of the project.
+
+## Decisions that are yours
+
+1. **Licence.** Kiln has none yet, so nobody else may use the code. MIT or Apache-2.0 (or
+   both, like most Rust projects) fit its dependencies; the bundled code and fonts are
+   Apache-2.0, OFL and MIT. Once chosen: a `LICENSE` file and `license` in the Cargo.toml files
+   (cargo-about then lists Kiln itself too).
+2. **Publishing releases.** Nothing is published. The Release workflow builds, installs and
+   tests the installers on all three systems and keeps them as artifacts. To publish: run it
+   with "publish" ticked, or set the repository variable `KILN_RELEASES=on` for weekly
+   releases. Releases of a private repository are private too.
+3. **Where updates come from.** The updater needs files it can download without a GitHub login.
+   Either make the repository public (the defaults then just work), or host `latest.json` and
+   the files elsewhere and set `KILN_UPDATE_ENDPOINT` and `KILN_DOWNLOAD_BASE`. Then make the
+   update key (`cargo packager signer generate --path kiln-update.key`; keep the private key
+   safe and off this repository), and set `KILN_UPDATE_PUBKEY` (variable) and
+   `KILN_UPDATE_PRIVATE_KEY` (+ `_PASSWORD`) (secrets). Without these, builds never check.
+4. **Code signing costs money**, so I left it off:
+   - macOS: Apple Developer Program (99 USD a year) for Developer ID signing and notarisation.
+     Until then the first launch needs Privacy & Security → Open Anyway.
+   - Windows: Azure Trusted Signing (about 10 USD a month) or another certificate. Until then
+     SmartScreen warns.
+   The release workflow already has the steps; they run once the secrets exist (names in
+   `.github/workflows/release.yml`). They have never run, so expect a fix or two the first time.
+5. **Linux updates.** In-app updates on Linux need an AppImage, and cargo-packager's AppImage
+   tools are downloaded unpinned. If you want them, I can add an AppImage step with pinned,
+   hash-checked tools.
+6. **Renovate**: install the Renovate GitHub app on the repository; its config is ready
+   (GPUI, the engine, Rust, cargo-packager, Actions, security fixes at any time).
 
 ## Needs a real Windows or Linux machine
 
-- Windows 11 PC: `kiln.exe` (PowerShell), `kiln.exe --wsl`, key repeat in nvim
-  (GPUI zed#61469), Alt+key in the shell (zed#62404), mouse wheel in `less` (zed#64695),
-  window controls, Ctrl+Shift shortcuts, high-DPI scaling.
-- Linux desktop: GNOME on Wayland (client-side title bar), KDE/X11, fractional scaling.
-- Notifications on Windows (toasts need an app identity; the installer in phase 3 registers
-  it) and on Linux desktops.
-- WSL: the rail cannot see processes inside Linux. Worth fixing later with a small helper run
-  through `wsl.exe`, if you use the rail there.
+- Windows 11: the installer by hand, `kiln.exe` (PowerShell), `kiln.exe --wsl`, key repeat in
+  nvim (GPUI zed#61469), Alt+key in the shell (zed#62404), mouse wheel in `less` (zed#64695),
+  window controls, Ctrl+Shift shortcuts, high-DPI scaling, notifications (toasts), an update.
+- Linux desktop: GNOME on Wayland (Kiln's own title bar), KDE and X11, fractional scaling,
+  notifications, the `.deb` from the menu.
+- WSL: the rail cannot see processes inside Linux. A small helper run through `wsl.exe` could
+  fix that, if you use the rail there.
 
 ## Needs you on this Mac
 
-- Phase 1 was checked with headless renders (real shells and real rendering, no display): the
-  screen was locked while I worked. Please try it by hand: mouse selection across blocks,
-  hover actions, the palette and find with the keyboard, splits, ⌘B, ⌘T.
+Most visuals were checked headless (real shells, real rendering, no display), because the
+screen was locked or the test window sat behind your work, where macOS stops drawing.
 
-- Phase 2 by hand: ⌘I and ⌘. from the keyboard, clicking a changed file in the rail (diff in
-  a split), clicking a port (the dialog), quitting with sessions open and starting again
-  (restore), and a project from ⌘K.
-- Notifications: run `scripts/bundle-macos.sh`, open `target/release/Kiln.app`, run
-  `sleep 12` and switch to another app. macOS asks once whether Kiln may notify you; that
-  choice is yours, so I left it alone.
+- By hand: mouse selection across blocks, the hover actions, the title-bar drag, IME and dead
+  keys (Option+E, E), ⌘C / ⌘V end to end, ⌘I and ⌘., clicking a changed file in the rail (diff
+  split) and a port (its dialog), quitting with sessions open and starting again, ⌘K projects.
+- The packaged app: `scripts/package.sh`, then open `target/packages/Kiln.app` (or the dmg).
+  Notifications only work from the app: run `sleep 12`, switch to another app. macOS asks once
+  whether Kiln may notify you; that is your choice, so I never answered it.
+- Keystroke latency against WezTerm: `bench/LATENCY.md` (my tools may not type into WezTerm).
 
-- ⌘C / ⌘V end to end, dead keys (Option+E then E), and the keystroke latency procedure in
-  `bench/LATENCY.md` (my tools may not touch the clipboard or type into WezTerm).
+## Things I installed or left behind on this Mac
 
-## Repository and accounts
+- Tools: Rust toolchains (rustup), `cargo-packager`, `cargo-about` (in `~/.cargo/bin`),
+  `actionlint`, `colima` and `docker` (Homebrew). The colima VM is stopped; its `kiln-linux`
+  image and two cargo cache volumes take disk space (`docker image rm kiln-linux`,
+  `docker volume rm kiln-cargo-registry kiln-cargo-git` with colima running).
+- `npx` fetched Renovate's config validator into the npm cache once (to check
+  `renovate.json`).
+- A demo project's `.nvmrc` made mise start installing Node 26.12.0 (phase 2); it was stopped
+  before anything was installed. Left: an empty `~/Library/Caches/mise/node/26.12.0` folder.
+- Kiln's own folders: `~/Library/Application Support/Kiln` (logs, saved sessions) and
+  `~/Library/Caches/kiln` (shell integration).
 
-- ~~Push to `MaxB-Coder/kiln`?~~ Answered 2026-10-18: yes, pushing to the private repo is allowed.
-- Install the Renovate GitHub app on the repo.
-- Choose a licence (none yet). Third-party code inside Kiln: alacritty's PTY loop (Apache-2.0,
-  attributed); fonts (OFL + MIT).
+## Answered
+
+- Push to `MaxB-Coder/kiln`: yes, the private repository (2026-10-18).

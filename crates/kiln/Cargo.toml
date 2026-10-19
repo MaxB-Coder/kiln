@@ -61,6 +61,12 @@ icons = ["../../assets/icon/kiln.icns", "../../assets/icon/kiln.ico", "../../ass
 outDir = "../../target/packages"
 beforePackagingCommand = "cargo build --release --locked -p kiln"
 binaries = [{ path = "kiln", main = true }]
+# Licences that must travel with the app (scripts/package.sh writes the first one).
+resources = [
+  "../../target/THIRD_PARTY_LICENSES.md",
+  "../../assets/fonts/JetBrainsMono-OFL.txt",
+  "../../assets/fonts/NerdFonts-LICENSE",
+]
 
 [package.metadata.packager.macos]
 minimumSystemVersion = "13.0"

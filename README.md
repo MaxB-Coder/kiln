@@ -1,0 +1,107 @@
+# Kiln
+
+A calm terminal for macOS, Windows (PowerShell and WSL) and Linux. Each command becomes a block
+you can copy, rerun, pin or open as a log; the prompt stays your shell's own (autosuggestions,
+highlighting and fzf keep working); and the last output copies as a paste-ready Markdown block
+with ⌘⇧C. No AI, no telemetry: the only network use is checking for updates.
+
+![Kiln](notes/screenshots/phase2/13-rail.png)
+
+## Install
+
+Kiln has no public releases yet. Installers come from the Release workflow (Actions → Release →
+Run workflow) as workflow artifacts, or from `scripts/package.sh` on your own machine.
+
+- **macOS** (Apple silicon, 13 or later): open the `.dmg` and drag Kiln to Applications. The
+  app is not notarised yet (that needs an Apple Developer account), so the first launch is
+  blocked: open System Settings → Privacy & Security and choose Open Anyway.
+- **Windows** (x64): run `Kiln_<version>_x64-setup.exe`. It installs for you only, without
+  administrator rights. It is not code-signed yet, so SmartScreen asks first: More info → Run
+  anyway. Kiln opens PowerShell; `kiln --wsl` opens your default WSL distribution.
+- **Linux** (x64): `sudo apt install ./kiln_<version>_amd64.deb`, or unpack the `.tar.gz`
+  anywhere. Wayland and X11 both work; Kiln draws its own title bar.
+
+## Build from source
+
+Rust installs itself from `rust-toolchain.toml` through rustup.
+
+```bash
+cargo run --release -p kiln
+```
+
+Linux needs `pkg-config clang libfontconfig-dev libfreetype-dev libwayland-dev
+libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev`.
+
+## Use
+
+| | macOS | Windows and Linux |
+| --- | --- | --- |
+| New session / split right | ⌘T / ⌘D | Ctrl+Shift+T / Ctrl+Shift+D |
+| Command palette (actions, sessions, projects, past commands) | ⌘K | Ctrl+Shift+K |
+| Find | ⌘F | Ctrl+Shift+F |
+| Copy the last output, fenced / raw | ⌘⇧C / ⌘⌥C | Ctrl+Shift+C (with no selection) / Ctrl+Shift+Alt+C |
+| Context rail: changes, processes, ports, runtimes, session | ⌘I | Ctrl+Shift+I |
+| Focus mode | ⌘. | Ctrl+Shift+. |
+| Sidebar | ⌘B | Ctrl+Shift+B |
+| Sessions 1–9, next, previous | ⌘1–9, ⌘⇧], ⌘⇧[ | Ctrl+Alt+1–9, Ctrl+Tab, Ctrl+Shift+Tab |
+| Text size | ⌘= ⌘- ⌘0 | Ctrl+Shift+= - 0 |
+| Settings | ⌘, | Ctrl+Shift+, |
+
+Kiln loads its shell integration for zsh, bash and PowerShell by itself, without touching your
+startup files. Other shells (fish, nu) get a classic terminal.
+
+## Settings
+
+`~/.config/kiln/kiln.toml` (`%APPDATA%\Kiln\kiln.toml` on Windows). ⌘, opens it with every
+option and its default; changes apply as you save. A few:
+
+```toml
+font_size = 13.0
+notify_after_secs = 10          # notify when a long command finishes out of sight (0: off)
+
+[window]
+restore = true                  # reopen the last sessions at launch
+
+[tints]
+production = ["*prod*"]         # ssh hosts that get the red tint
+
+[updates]
+check = true                    # once a day; nothing installs without asking
+
+[projects."~/code/app"]
+color = "#83a598"
+```
+
+## Privacy and security
+
+- No telemetry. Release builds check for updates once a day when they know where to look;
+  updates are signed (minisign) and checked before anything is replaced, and install only when
+  you choose to. `[updates] check = false` turns this off.
+- Programs may set the clipboard, never read it (OSC 52 reads are off). Opening a port from
+  the rail asks first.
+- Entering a folder never runs a repository's hooks or fsmonitor (git status runs with them
+  off).
+- Logs, saved sessions and shell-integration scripts are private to your user.
+- Notifications show only a command's program and first argument.
+
+## Development
+
+```bash
+cargo test --workspace
+cargo run -p kiln --example snapshot -- /tmp/shots phase2   # headless screenshots
+scripts/linux-check.sh                                       # Linux build and tests in a container
+scripts/package.sh                                           # installers for this platform
+```
+
+`PLAN.md` is the plan; `notes/` has each phase's report, the decisions made along the way
+(`DECISIONS.md`) and open questions (`QUESTIONS.md`).
+
+Releases: `.github/workflows/release.yml` builds, installs and starts the installers on all
+three systems and publishes only when asked. Its header lists the optional settings: update
+address and key, Developer ID signing and notarisation, Azure Trusted Signing.
+
+## Licence
+
+Not chosen yet. Kiln bundles JetBrains Mono (SIL OFL 1.1) with Nerd Fonts patches (MIT), and
+adapts alacritty_terminal's PTY loop (Apache-2.0); every package carries
+`THIRD_PARTY_LICENSES.md` with the licences of all the crates in the binary.

@@ -6,12 +6,16 @@
 # With CARGO_PACKAGER_SIGN_PRIVATE_KEY (and _PASSWORD) set, cargo-packager also writes the
 # update archives and their .sig files the in-app updater checks.
 # Needs: cargo install cargo-packager --version 0.11.8 --locked
+#        cargo install cargo-about --version 0.9.2 --locked --features cli
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 version="$(grep -m1 '^version' crates/kiln/Cargo.toml | cut -d'"' -f2)"
 out="$root/target/packages"
 rm -rf "$out"
+# The licences of everything in the binary, shipped inside each package.
+cargo about generate --frozen --fail -m crates/kiln/Cargo.toml about.hbs \
+  -o target/THIRD_PARTY_LICENSES.md
 
 case "$(uname -s)" in
   Darwin)
@@ -36,6 +40,8 @@ case "$(uname -s)" in
     mkdir -p "$dir"
     cp target/release/kiln "$dir/kiln"
     cp assets/icon/kiln-256.png "$dir/kiln.png"
+    cp target/THIRD_PARTY_LICENSES.md assets/fonts/JetBrainsMono-OFL.txt \
+      assets/fonts/NerdFonts-LICENSE "$dir/"
     cat > "$dir/kiln.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application

@@ -84,15 +84,14 @@
     },
     {
       "customType": "regex",
-      "description": "cargo-packager, installed by version in the release workflow and scripts",
+      "description": "cargo-packager and cargo-about, installed by version in the release workflow and scripts",
       "managerFilePatterns": [
         "/^\\.github/workflows/release\\.yml$/",
         "/^scripts/package\\.sh$/"
       ],
       "matchStrings": [
-        "cargo-packager --version (?<currentValue>\\d+\\.\\d+\\.\\d+)"
+        "cargo install (?<depName>cargo-packager|cargo-about) --version (?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],
-      "depNameTemplate": "cargo-packager",
       "datasourceTemplate": "crate"
     },
     {

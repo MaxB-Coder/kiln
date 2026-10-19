@@ -188,7 +188,7 @@ Other platforms (GitHub runners, software rendering, so only correctness):
 ## How to run it
 
 ```bash
-scripts/bundle-macos.sh release && open target/release/Kiln.app
+scripts/package.sh && open target/packages/Kiln.app   # (phase 0: scripts/bundle-macos.sh)
 target/release/kiln --cols 120 --rows 36 -- /bin/zsh -l
 python3 bench/compare.py --runs 8
 ```
