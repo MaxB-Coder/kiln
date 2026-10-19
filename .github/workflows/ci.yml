@@ -29,10 +29,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { name: macos-arm64, os: macos-15 }
-          - { name: windows-x64, os: windows-2025 }
-          - { name: linux-x64, os: ubuntu-24.04 }
+        # Pushes build on Linux only: on a private repository macOS minutes count ten times
+        # and Windows twice, and a full run per push used up the monthly allowance. Pull
+        # requests, the weekly run and manual runs build all three.
+        include: ${{ fromJSON(github.event_name == 'push' && '[{"name":"linux-x64","os":"ubuntu-24.04"}]' || '[{"name":"macos-arm64","os":"macos-15"},{"name":"windows-x64","os":"windows-2025"},{"name":"linux-x64","os":"ubuntu-24.04"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:

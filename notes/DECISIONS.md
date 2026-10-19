@@ -166,3 +166,9 @@ Newest at the bottom.
   without waiting for a push. Renovate (once installed) opens the fix.
 - **Renovate** now also bumps the Rust toolchain, cargo-packager and cargo-about, and the test
   image's PowerShell. GPUI and the engine keep their own rules.
+- **CI on pushes is Linux only** (build, tests, lint, deny). On 2026-10-19 the account's
+  GitHub Actions allowance for private repositories ran out (macOS minutes count ten times,
+  Windows twice; a full run cost about 150 minutes and a release dry run about 170). Pull
+  requests, the weekly run and manual runs still build macOS and Windows. Undo this if the
+  repository goes public (public repositories have no minute limit).
+- **Installers use a `dist` profile** (release minus debug line tables; symbol names kept).

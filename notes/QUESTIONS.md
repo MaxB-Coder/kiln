@@ -4,6 +4,12 @@ Collected during the autonomous build (phases 0–3), for the end of the project
 
 ## Decisions that are yours
 
+0. **GitHub Actions minutes ran out** (2026-10-19). GitHub now refuses to start jobs on this
+   account ("spending limit" / "Billing & plans"); nothing was charged. My test runs used the
+   monthly allowance: private repositories bill macOS minutes ten times and Windows twice. The
+   allowance comes back with the next billing month. To lift it sooner or for good: make the
+   repository public (no minute limit, and the updater could then use its release files), or
+   raise the spending limit (costs money). Meanwhile pushes build on Linux only (DECISIONS).
 1. **Licence.** Kiln has none yet, so nobody else may use the code. MIT or Apache-2.0 (or
    both, like most Rust projects) fit its dependencies; the bundled code and fonts are
    Apache-2.0, OFL and MIT. Once chosen: a `LICENSE` file and `license` in the Cargo.toml files
