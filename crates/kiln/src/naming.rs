@@ -1,6 +1,7 @@
 //! Short names for projects and sessions, used in the sidebar, the palette and the header:
-//! the project is its repository or folder name ("acme-web", "~" for home), and a session is the
-//! subfolder it is in, else the program it runs, else the project's name. Repeats get a number.
+//! the project is its repository or folder name ("acme-web"; "Home" for the home folder), and a
+//! session is the subfolder it is in, else the program it runs, else the project's name (in the
+//! home folder: the shell's name). Repeats get a number ("zsh 2").
 
 use std::path::Path;
 
@@ -23,14 +24,19 @@ fn home() -> String {
         .unwrap_or_default()
 }
 
-/// "kiln" for a repository, "~" for the home folder, "other" when there is no folder.
+/// Whether `path` is the home folder.
+pub fn is_home(path: &str) -> bool {
+    let home = home();
+    !home.is_empty() && same(path, &home)
+}
+
+/// "kiln" for a repository, "Home" for the home folder, "other" when there is no folder.
 pub fn project_name(root: Option<&str>) -> String {
     let Some(root) = root.filter(|r| !r.is_empty()) else {
         return "other".into();
     };
-    let home = home();
-    if !home.is_empty() && same(root, &home) {
-        return "~".into();
+    if is_home(root) {
+        return "Home".into();
     }
     Path::new(root)
         .file_name()
@@ -58,10 +64,11 @@ fn base_label(facts: &SessionFacts) -> String {
     if let Some(program) = facts.program.as_ref().filter(|p| !p.is_empty()) {
         return program.clone();
     }
-    if facts.project.is_some() {
-        return project_name(facts.project.as_deref());
+    match facts.project.as_deref() {
+        // The home folder is not a project: a session there is named after its shell.
+        Some(project) if !is_home(project) => project_name(Some(project)),
+        _ => facts.shell.clone(),
     }
-    facts.shell.clone()
 }
 
 /// Labels for sessions in sidebar order. Within a project, a repeated label gets a number
@@ -170,6 +177,17 @@ mod tests {
     }
 
     #[test]
+    fn home_sessions_are_named_after_their_program_or_shell() {
+        let home = home();
+        let labels = session_labels(&[
+            facts(Some(&home), Some(&home), None),
+            facts(Some(&home), Some(&home), Some("node")),
+            facts(Some(&home), Some(&home), None),
+        ]);
+        assert_eq!(labels, ["zsh", "node", "zsh 2"]);
+    }
+
+    #[test]
     fn repeats_are_numbered_within_a_project() {
         let labels = session_labels(&[
             facts(Some("/code/a"), Some("/code/a/api"), None),
@@ -183,7 +201,7 @@ mod tests {
     #[test]
     fn projects_and_breadcrumbs() {
         assert_eq!(project_name(Some("/code/kiln")), "kiln");
-        assert_eq!(project_name(Some(&home())), "~");
+        assert_eq!(project_name(Some(&home())), "Home");
         assert_eq!(project_name(None), "other");
         assert_eq!(breadcrumb(Some("/code/acme-web"), "api"), "acme-web › api");
         assert_eq!(breadcrumb(Some("/code/acme-web"), "acme-web"), "acme-web");
@@ -195,7 +213,7 @@ mod tests {
             breadcrumb(Some("/code/acme-web"), "api 2"),
             "acme-web › api 2"
         );
-        assert_eq!(breadcrumb(Some(&home()), "~"), "~");
+        assert_eq!(breadcrumb(Some(&home()), "zsh"), "Home › zsh");
         assert_eq!(breadcrumb(None, "fish"), "fish");
     }
 

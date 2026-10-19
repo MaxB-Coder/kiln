@@ -3,7 +3,7 @@
 //! Uses GPUI's headless app context with the real text system and the real GPU renderer, and
 //! real shells on real PTYs, so the pictures show Kiln as it behaves; no display is needed.
 //!
-//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2|phase3]
+//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2|phase3|prompt]
 //! (default: notes/screenshots/phase1, scenario phase1)
 
 use std::path::PathBuf;
@@ -169,14 +169,15 @@ fn main() {
     } else {
         std::env::current_dir().unwrap()
     };
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut tabs = vec![serde_json::json!({ "panes": [start.to_string_lossy()], "focused": 0 })];
+    if scenario == "prompt" {
+        // A second session in the home folder, for the sidebar's Home group.
+        tabs.push(serde_json::json!({ "panes": [home], "focused": 0 }));
+    }
     let saved = serde_json::json!({
         "version": 1,
-        "window": {
-            "sidebar": true,
-            "rail": false,
-            "active": 0,
-            "tabs": [{ "panes": [start.to_string_lossy()], "focused": 0 }]
-        },
+        "window": { "sidebar": true, "rail": false, "active": 0, "tabs": tabs },
         "projects": []
     });
     std::fs::write(&state_file, saved.to_string()).unwrap();
@@ -208,6 +209,12 @@ fn main() {
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "prompt" {
+        prompt(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        println!("done");
+        return;
+    }
     if scenario == "phase3" {
         phase3(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -398,6 +405,36 @@ fn phase2(s: &mut Shots) {
     s.pump(Duration::from_millis(400));
     s.shot("20-windows-chrome-with-rail");
     unsafe { std::env::remove_var("KILN_CHROME") };
+}
+
+/// The input box: the prompt, after a failure, with a second line, with a completion menu, and
+/// the sidebar's Home group.
+fn prompt(s: &mut Shots) {
+    s.run("echo hello", Duration::from_secs(5));
+    s.shot("p1-prompt");
+    s.run("ls /does-not-exist", Duration::from_secs(5));
+    s.shot("p2-failed");
+    // A command over two lines: the shell waits for the rest.
+    s.type_only("for i in 1 2 3; do\r");
+    s.pump(Duration::from_millis(600));
+    s.type_only("echo $i");
+    s.pump(Duration::from_millis(600));
+    s.shot("p3-multiline");
+    s.type_only("\x03");
+    s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
+    s.pump(Duration::from_millis(400));
+    // A completion menu.
+    s.type_only("ls crates/kiln/s\t\t");
+    s.pump(Duration::from_millis(1200));
+    s.shot("p4-completion");
+    s.type_only("\x03");
+    s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
+    s.pump(Duration::from_millis(400));
+    // The session in the home folder.
+    s.action(Box::new(kiln::SelectSession2));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.pump(Duration::from_millis(800));
+    s.shot("p5-home");
 }
 
 /// Phase 3: an update on offer, in the sidebar and the palette. (The offer is made up here;

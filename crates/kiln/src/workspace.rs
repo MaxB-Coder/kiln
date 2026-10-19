@@ -1021,9 +1021,11 @@ impl Workspace {
             // (a shell without integration, or one still starting).
             let name = naming::project_name(root.as_deref());
             let root = root.map(PathBuf::from).unwrap_or_default();
-            // Projects (folders in git) get their colour; home and loose folders do not.
-            let color = (!root.as_os_str().is_empty() && root.join(".git").exists())
-                .then(|| state::project_color(&root.to_string_lossy(), &config::current()));
+            // Projects (folders in git) get their colour; Home and loose folders do not.
+            let color = (!root.as_os_str().is_empty()
+                && !naming::is_home(&root.to_string_lossy())
+                && root.join(".git").exists())
+            .then(|| state::project_color(&root.to_string_lossy(), &config::current()));
             list = list.child(
                 div()
                     .pt(px(12.))

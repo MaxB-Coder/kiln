@@ -186,3 +186,6 @@ Newest at the bottom.
 - **Block actions** appear over the end of a hovered block's header instead of reserving room
   in every header, so commands only truncate when they really do not fit next to their timing.
 - **Pinned blocks** get a dim dot: orange stays for things to act on.
+- **Home** is not a project: sessions in the home folder sit under a quiet "Home" header (no
+  colour dot) and are named after the running program, else the shell ("zsh", "zsh 2"),
+  never "~". The breadcrumb reads "Home › zsh".
