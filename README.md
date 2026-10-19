@@ -15,7 +15,7 @@ system asks once before the first launch:
 
 - **macOS** (Apple silicon, 13 or later): open the `.dmg` and drag Kiln to Applications. The
   first launch is blocked: open System Settings → Privacy & Security and choose Open Anyway.
-- **Windows** (x64): run `Kiln_<version>_x64-setup.exe`. It installs for you only, without
+- **Windows** (x64): run `kiln_<version>_x64-setup.exe`. It installs for you only, without
   administrator rights. SmartScreen asks first: More info → Run anyway. Kiln opens
   PowerShell; `kiln --wsl` opens your default WSL distribution.
 - **Linux** (x64): the AppImage runs anywhere and updates itself:

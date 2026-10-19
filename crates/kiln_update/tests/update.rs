@@ -169,6 +169,9 @@ fn reads_the_manifest_the_release_script_writes() {
     write("Kiln.app.tar.gz", ARCHIVE);
     write("Kiln.app.tar.gz.sig", ARCHIVE_SIG.as_bytes());
     write("Kiln-2026.10.26-x86_64.AppImage", APPIMAGE);
+    // The real name cargo-packager gives the Windows installer (any signed bytes will do here).
+    write("kiln_2026.10.26_x64-setup.exe", APPIMAGE);
+    write("kiln_2026.10.26_x64-setup.exe.sig", APPIMAGE_SIG.as_bytes());
     write(
         "Kiln-2026.10.26-x86_64.AppImage.sig",
         APPIMAGE_SIG.as_bytes(),
@@ -209,6 +212,14 @@ fn reads_the_manifest_the_release_script_writes() {
     assert!(matches!(
         release.format("linux-x86_64").unwrap(),
         UpdateFormat::AppImage
+    ));
+    assert_eq!(
+        release.download_url("windows-x86_64").unwrap().as_str(),
+        "https://example.com/kiln/kiln_2026.10.26_x64-setup.exe"
+    );
+    assert!(matches!(
+        release.format("windows-x86_64").unwrap(),
+        UpdateFormat::Nsis
     ));
 }
 

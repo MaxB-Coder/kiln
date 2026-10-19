@@ -221,3 +221,7 @@ Newest at the bottom.
   With both in one artifact the files kept a `target/packages/` prefix, so the first published
   run found no update files and stopped before creating the release.
 - **Renovate**: yes; the user installs the app. **WSL processes in the rail**: maybe later.
+- **The Windows update entry** was missing from every manifest: cargo-packager names the
+  installer after the package (`kiln_<version>_x64-setup.exe`), and the manifest script looked
+  for `Kiln_*`. The manifest check now requires all three systems, so a missing one fails the
+  run before anything is published.

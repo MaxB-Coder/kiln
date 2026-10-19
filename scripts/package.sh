@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds Kiln's installers for this platform into target/packages:
 #   macOS:   Kiln.app and Kiln-<version>-<arch>.dmg
-#   Windows: Kiln_<version>_x64-setup.exe (NSIS, per-user; run from Git Bash)
+#   Windows: kiln_<version>_x64-setup.exe (NSIS, per-user; run from Git Bash)
 #   Linux:   .deb, .tar.gz and .AppImage
 # With CARGO_PACKAGER_SIGN_PRIVATE_KEY (and _PASSWORD) set, cargo-packager also writes the
 # update archives and their .sig files the in-app updater checks.

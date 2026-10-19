@@ -5,7 +5,7 @@ Usage: scripts/update-manifest.py VERSION BASE_URL DIR > latest.json
   VERSION   the release version (2026.10.26)
   BASE_URL  where the files will be downloadable (no trailing slash)
   DIR       the folder holding the update files and their .sig files:
-            Kiln.app.tar.gz (macOS, Apple silicon), Kiln_*-setup.exe (Windows x64),
+            Kiln.app.tar.gz (macOS, Apple silicon), kiln_*_x64-setup.exe (Windows x64),
             Kiln-*-x86_64.AppImage (Linux x64)
 Only platforms whose files are present are listed.
 """
@@ -20,7 +20,8 @@ version, base, folder = sys.argv[1], sys.argv[2].rstrip("/"), Path(sys.argv[3])
 # Updater platform key -> (file pattern, updater format)
 PLATFORMS = {
     "macos-aarch64": ("Kiln.app.tar.gz", "app"),
-    "windows-x86_64": ("Kiln_*_x64-setup.exe", "nsis"),
+    # cargo-packager names the installer after the package: kiln_<version>_x64-setup.exe.
+    "windows-x86_64": ("[Kk]iln_*_x64-setup.exe", "nsis"),
     "linux-x86_64": ("Kiln-*-x86_64.AppImage", "appimage"),
 }
 
