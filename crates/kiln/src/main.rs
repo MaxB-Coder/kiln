@@ -91,8 +91,28 @@ fn main() {
     config::set_current(config);
 
     gpui_platform::application().run(move |cx: &mut App| {
+        cx.set_app_identity("dev.kiln.Kiln", "Kiln");
         grid_paint::load_embedded_fonts(cx);
         bind_keys(cx);
+        // A clicked notification brings back the session it came from.
+        cx.on_system_notification_response(|response, cx| {
+            let Some((window_id, tab_id)) = kiln::workspace::parse_notification_tag(&response.tag)
+            else {
+                return;
+            };
+            for handle in cx.windows() {
+                if handle.window_id().as_u64() != window_id {
+                    continue;
+                }
+                if let Some(handle) = handle.downcast::<Workspace>() {
+                    let _ = handle.update(cx, |workspace, window, cx| {
+                        workspace.activate_tab_id(tab_id, window, cx);
+                        window.activate_window();
+                    });
+                }
+            }
+            cx.activate(true);
+        });
         cx.on_action(|_: &Quit, cx| cx.quit());
         let new_window_args = args.clone();
         cx.on_action(move |_: &NewWindow, cx| {
@@ -151,6 +171,8 @@ fn main() {
                 items: vec![
                     MenuItem::action("Command Palette", CommandPaletteToggle),
                     MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                    MenuItem::action("Toggle Context Rail", ToggleRail),
+                    MenuItem::action("Focus Mode", ToggleFocusMode),
                     MenuItem::separator(),
                     MenuItem::action("Bigger", ZoomIn),
                     MenuItem::action("Smaller", ZoomOut),
@@ -188,6 +210,8 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new(&k("]"), FocusNextPane, None),
         KeyBinding::new(&k("["), FocusPrevPane, None),
         KeyBinding::new(&k("b"), ToggleSidebar, None),
+        KeyBinding::new(&k("i"), ToggleRail, None),
+        KeyBinding::new(&k("."), ToggleFocusMode, None),
         KeyBinding::new(&k("f"), Find, None),
         KeyBinding::new(&k("k"), CommandPaletteToggle, None),
         KeyBinding::new(&k("p"), CommandPaletteToggle, None),

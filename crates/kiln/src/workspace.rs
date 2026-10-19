@@ -19,6 +19,7 @@ use crate::copy;
 use crate::grid_paint::{CellMetrics, FONT_FAMILY};
 use crate::logs;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteItem, PaletteTarget};
+use crate::rail::Rail;
 use crate::search::Match;
 use crate::terminal_view::{PaneEvent, PaneStatus, TerminalView};
 use crate::text_input::{TextInput, TextInputEvent};
@@ -27,8 +28,8 @@ use crate::{
     ClosePane, CloseWindow, CommandPaletteToggle, CopyLastOutput, CopyLastOutputRaw, EditConfig,
     Find, FocusNextPane, FocusPrevPane, NewSession, NewWindow, NextSession, PrevSession, Quit,
     SelectSession1, SelectSession2, SelectSession3, SelectSession4, SelectSession5, SelectSession6,
-    SelectSession7, SelectSession8, SelectSession9, SplitRight, ToggleSidebar, ZoomIn, ZoomOut,
-    ZoomReset,
+    SelectSession7, SelectSession8, SelectSession9, SplitRight, ToggleFocusMode, ToggleRail,
+    ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 
 /// Height of the strip at the top that holds the window controls.
@@ -48,6 +49,8 @@ struct Tab {
     id: u64,
     panes: Vec<Pane>,
     focused: usize,
+    /// A bell, or a long command that finished out of sight; cleared when the session is shown.
+    attention: bool,
 }
 
 struct SearchBar {
@@ -63,6 +66,9 @@ pub struct Workspace {
     active: usize,
     next_tab_id: u64,
     sidebar_open: bool,
+    pub(crate) rail: Option<Rail>,
+    /// ⌘.: only the focused pane, no sidebar or rail.
+    focus_mode: bool,
     search: Option<SearchBar>,
     palette: Option<(Entity<CommandPalette>, Subscription)>,
     metrics: CellMetrics,
@@ -90,6 +96,8 @@ impl Workspace {
             active: 0,
             next_tab_id: 1,
             sidebar_open: config.window.sidebar,
+            rail: None,
+            focus_mode: false,
             search: None,
             palette: None,
             metrics,
@@ -101,6 +109,15 @@ impl Workspace {
             _config_watch: Task::ready(()),
         };
         this._config_watch = this.watch_config(window, cx);
+        cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active()
+                && let Some(tab) = this.tabs.get_mut(this.active)
+                && std::mem::take(&mut tab.attention)
+            {
+                cx.notify();
+            }
+        })
+        .detach();
         this.new_tab(None, None, window, cx);
         this
     }
@@ -189,6 +206,7 @@ impl Workspace {
                 id,
                 panes: vec![pane],
                 focused: 0,
+                attention: false,
             },
         );
         self.activate(insert_at, window, cx);
@@ -204,10 +222,11 @@ impl Workspace {
             .and_then(|v| v.read(cx).cwd().map(PathBuf::from))
     }
 
-    fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
+    fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(view) = self.focused_view() {
             window.focus(&view.focus_handle(cx), cx);
         }
+        self.refresh_rail(cx);
     }
 
     fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -215,6 +234,7 @@ impl Workspace {
             return;
         }
         self.active = index;
+        self.tabs[index].attention = false;
         self.close_search(window, cx);
         self.focus_active(window, cx);
         self.update_title(window, cx);
@@ -227,7 +247,7 @@ impl Workspace {
         }
     }
 
-    fn split_right(
+    pub(crate) fn split_right(
         &mut self,
         cwd: Option<PathBuf>,
         shell: Option<ShellCommand>,
@@ -315,6 +335,74 @@ impl Workspace {
                 window,
                 cx,
             ),
+            PaneEvent::Bell => {
+                if !self.in_sight(view, window) {
+                    self.set_attention(view, cx);
+                }
+            }
+            PaneEvent::LongCommandFinished {
+                command,
+                duration,
+                exit_code,
+                cwd,
+            } => {
+                if !self.in_sight(view, window)
+                    && let Some(tab_id) = self.set_attention(view, cx)
+                {
+                    let failed = exit_code.is_some_and(|code| code != 0 && code != 130);
+                    let mut body = match exit_code {
+                        Some(code) if failed => format!(
+                            "Failed with exit {code} after {}",
+                            copy::duration_label(*duration)
+                        ),
+                        _ => format!("Finished in {}", copy::duration_label(*duration)),
+                    };
+                    if let Some(cwd) = cwd {
+                        body.push_str(&format!(" · {}", copy::short_folder(cwd)));
+                    }
+                    cx.show_system_notification(gpui::SystemNotification {
+                        tag: notification_tag(window.window_handle().window_id().as_u64(), tab_id)
+                            .into(),
+                        title: notification_title(command).into(),
+                        body: body.into(),
+                        actions: Vec::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Whether the pane is on screen and the window is in front.
+    fn in_sight(&self, view: &Entity<TerminalView>, window: &Window) -> bool {
+        window.is_window_active()
+            && self.tabs.get(self.active).is_some_and(|tab| {
+                tab.panes
+                    .iter()
+                    .enumerate()
+                    .any(|(i, pane)| &pane.view == view && (!self.focus_mode || i == tab.focused))
+            })
+    }
+
+    /// Marks the pane's session for attention; returns the session's id.
+    fn set_attention(
+        &mut self,
+        view: &Entity<TerminalView>,
+        cx: &mut Context<Self>,
+    ) -> Option<u64> {
+        let tab = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.panes.iter().any(|pane| &pane.view == view))?;
+        tab.attention = true;
+        cx.notify();
+        Some(tab.id)
+    }
+
+    /// Shows the session with this id (a clicked notification).
+    pub fn activate_tab_id(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.tabs.iter().position(|tab| tab.id == id) {
+            self.focus_mode = false;
+            self.activate(index, window, cx);
         }
     }
 
@@ -470,6 +558,8 @@ impl Workspace {
             Box::new(CopyLastOutputRaw),
         );
         action("Toggle sidebar", "Mod+B", Box::new(ToggleSidebar));
+        action("Toggle context rail", "Mod+I", Box::new(ToggleRail));
+        action("Focus mode", "Mod+.", Box::new(ToggleFocusMode));
         action("Close pane", "Mod+W", Box::new(ClosePane));
         action("Next session", "Mod+Shift+]", Box::new(NextSession));
         action("Previous session", "Mod+Shift+[", Box::new(PrevSession));
@@ -758,8 +848,10 @@ impl Workspace {
             })
             .unwrap_or(PaneStatus::Idle);
         let dot = match status {
-            PaneStatus::Running => Some(p.ok),
             PaneStatus::Failed => Some(p.failed),
+            // Something to look at: the bell rang, or a long command finished out of sight.
+            _ if tab.attention => Some(p.accent),
+            PaneStatus::Running => Some(p.ok),
             PaneStatus::Idle => None,
         };
         let group: SharedString = format!("session-{}", tab.id).into();
@@ -835,11 +927,12 @@ impl Workspace {
 
     fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette();
-        let leading = if chrome() == Chrome::Mac && !self.sidebar_open && !window.is_fullscreen() {
-            TRAFFIC_LIGHTS_WIDTH
-        } else {
-            px(10.)
-        };
+        let leading =
+            if chrome() == Chrome::Mac && !self.sidebar_visible() && !window.is_fullscreen() {
+                TRAFFIC_LIGHTS_WIDTH
+            } else {
+                px(10.)
+            };
         let title = self
             .focused_view()
             .map(|v| v.read(cx).title())
@@ -861,7 +954,7 @@ impl Workspace {
                     window.start_window_move();
                 }
             })
-            .when(chrome() != Chrome::Mac && !self.sidebar_open, |d| {
+            .when(chrome() != Chrome::Mac && !self.sidebar_visible(), |d| {
                 d.child(app_mark())
             })
             .child(
@@ -878,10 +971,18 @@ impl Workspace {
                     .text_ellipsis()
                     .child(SharedString::from(title)),
             )
-            .when(chrome() != Chrome::Mac, |d| {
+            .when(chrome() != Chrome::Mac && !self.rail_visible(), |d| {
                 d.child(window_controls(window))
             })
             .into_any_element()
+    }
+
+    fn sidebar_visible(&self) -> bool {
+        self.sidebar_open && !self.focus_mode
+    }
+
+    pub(crate) fn rail_visible(&self) -> bool {
+        self.rail.is_some() && !self.focus_mode
     }
 
     fn render_search_bar(&self) -> Option<AnyElement> {
@@ -934,10 +1035,13 @@ impl Workspace {
                 .child(format!("Kiln could not start the shell: {message}"))
                 .into_any_element();
         };
-        let several = tab.panes.len() > 1;
+        let several = tab.panes.len() > 1 && !self.focus_mode;
         let mut row = div().size_full().flex().flex_row().gap(PANE_GAP);
         for (i, pane) in tab.panes.iter().enumerate() {
             let focused = i == tab.focused;
+            if self.focus_mode && !focused {
+                continue;
+            }
             let view = pane.view.clone();
             row = row.child(
                 div()
@@ -957,6 +1061,7 @@ impl Workspace {
                             {
                                 tab.focused = index;
                                 this.update_title(window, cx);
+                                this.refresh_rail(cx);
                                 cx.notify();
                             }
                         }),
@@ -966,6 +1071,29 @@ impl Workspace {
         }
         row.into_any_element()
     }
+}
+
+/// Identifies a session in a system notification, so a click can bring it back.
+pub fn notification_tag(window: u64, tab: u64) -> String {
+    format!("kiln:{window}:{tab}")
+}
+
+pub fn parse_notification_tag(tag: &str) -> Option<(u64, u64)> {
+    let mut parts = tag.strip_prefix("kiln:")?.split(':');
+    let window = parts.next()?.parse().ok()?;
+    let tab = parts.next()?.parse().ok()?;
+    Some((window, tab))
+}
+
+/// The program and its first argument ("cargo test"): notifications can show on a locked
+/// screen, and the rest of a command line may hold secrets.
+fn notification_title(command: &str) -> String {
+    let words: Vec<&str> = command.split_whitespace().take(2).collect();
+    let mut title = words.join(" ");
+    if title.chars().count() > 40 {
+        title = title.chars().take(39).collect::<String>() + "…";
+    }
+    title
 }
 
 /// Which platform's window chrome to draw.
@@ -1003,7 +1131,7 @@ fn app_mark() -> AnyElement {
 
 /// Minimize, maximize and close, Windows 11 style (also used on Linux when the app draws its
 /// own title bar).
-fn window_controls(window: &Window) -> AnyElement {
+pub(crate) fn window_controls(window: &Window) -> AnyElement {
     let p = palette();
     // Codicon glyphs from the embedded Nerd Font.
     let maximized = window.is_maximized();
@@ -1138,7 +1266,14 @@ fn resize_edges(window: &Window) -> Option<AnyElement> {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette();
-        let sidebar = self.sidebar_open.then(|| self.render_sidebar(window, cx));
+        let sidebar = self
+            .sidebar_visible()
+            .then(|| self.render_sidebar(window, cx));
+        let rail = if self.rail_visible() {
+            self.render_rail(window, cx)
+        } else {
+            None
+        };
         let titlebar = self.render_titlebar(window, cx);
         let panes = self.render_panes(cx);
         let search = self.render_search_bar();
@@ -1211,7 +1346,21 @@ impl Render for Workspace {
                 this.activate(last, w, cx)
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
+                this.focus_mode = false;
                 this.sidebar_open = !this.sidebar_open;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleRail, window, cx| {
+                if this.focus_mode && this.rail.is_some() {
+                    this.focus_mode = false;
+                    cx.notify();
+                } else {
+                    this.focus_mode = false;
+                    this.toggle_rail(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFocusMode, _, cx| {
+                this.focus_mode = !this.focus_mode;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &Find, window, cx| this.open_search(window, cx)))
@@ -1240,7 +1389,27 @@ impl Render for Workspace {
                             .when_some(search, |d, s| d.child(s)),
                     ),
             )
+            .when_some(rail, |d, rail| d.child(rail))
             .when_some(palette_overlay, |d, overlay| d.child(overlay))
             .when_some(resize_edges(window), |d, edges| d.child(edges))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notification_tags_round_trip_and_titles_stay_short() {
+        assert_eq!(
+            parse_notification_tag(&notification_tag(7, 42)),
+            Some((7, 42))
+        );
+        assert_eq!(parse_notification_tag("other"), None);
+        assert_eq!(
+            notification_title("curl -H 'Authorization: Bearer abc' https://x"),
+            "curl -H"
+        );
+        assert_eq!(notification_title("cargo test --workspace"), "cargo test");
     }
 }

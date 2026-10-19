@@ -11,6 +11,8 @@ pub mod grid_paint;
 pub mod live_element;
 pub mod logs;
 pub mod palette;
+pub mod rail;
+pub mod remote;
 pub mod search;
 pub mod terminal_view;
 pub mod text_input;
@@ -42,6 +44,8 @@ actions!(
         SelectSession8,
         SelectSession9,
         ToggleSidebar,
+        ToggleRail,
+        ToggleFocusMode,
         Find,
         CommandPaletteToggle,
         ZoomIn,

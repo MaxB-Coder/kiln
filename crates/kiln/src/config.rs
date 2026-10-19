@@ -20,9 +20,40 @@ pub struct Config {
     pub cursor_blink: bool,
     /// macOS: Option sends Esc+key (like Alt elsewhere) instead of composing characters.
     pub option_as_alt: bool,
+    /// Commands running at least this long notify you when they finish out of sight.
+    pub notify_after_secs: u64,
     pub shell: ShellConfig,
     pub window: WindowConfig,
     pub theme: ThemeConfig,
+    pub tints: TintConfig,
+    /// Per-project settings, keyed by the project's folder ("~/code/app" works).
+    pub projects: std::collections::BTreeMap<String, ProjectConfig>,
+}
+
+/// Background tints for panes connected to other machines.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TintConfig {
+    /// Tint panes running ssh (or mosh) to another machine.
+    pub remote: bool,
+    /// Hosts that get the production tint (red). `*` matches anything; case-insensitive.
+    pub production: Vec<String>,
+}
+
+impl Default for TintConfig {
+    fn default() -> Self {
+        Self {
+            remote: true,
+            production: vec!["*prod*".into()],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ProjectConfig {
+    /// The project's colour in the sidebar, as "#rrggbb".
+    pub color: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -71,9 +102,12 @@ impl Default for Config {
             scrollback: 10_000,
             cursor_blink: true,
             option_as_alt: false,
+            notify_after_secs: 10,
             shell: ShellConfig::default(),
             window: WindowConfig::default(),
             theme: ThemeConfig::default(),
+            tints: TintConfig::default(),
+            projects: Default::default(),
         }
     }
 }
@@ -123,11 +157,36 @@ impl Config {
     }
 }
 
-fn parse_hex(value: &str) -> Option<u32> {
+pub fn parse_hex(value: &str) -> Option<u32> {
     let hex = value.strip_prefix('#')?;
     (hex.len() == 6)
         .then(|| u32::from_str_radix(hex, 16).ok())
         .flatten()
+}
+
+/// Whether `host` matches one of the glob patterns (`*` matches anything; case-insensitive).
+pub fn host_matches(patterns: &[String], host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    patterns
+        .iter()
+        .any(|pattern| glob(&pattern.to_ascii_lowercase(), &host))
+}
+
+fn glob(pattern: &str, text: &str) -> bool {
+    match pattern.split_once('*') {
+        None => pattern == text,
+        Some((head, rest)) => {
+            let Some(text) = text.strip_prefix(head) else {
+                return false;
+            };
+            if rest.is_empty() {
+                return true;
+            }
+            (0..=text.len())
+                .filter(|&i| text.is_char_boundary(i))
+                .any(|i| glob(rest, &text[i..]))
+        }
+    }
 }
 
 pub fn config_path() -> Option<PathBuf> {
@@ -188,6 +247,9 @@ scrollback = 10000
 cursor_blink = true
 # macOS only: Option sends Esc+key instead of composing characters like é.
 option_as_alt = false
+# Commands that run at least this long notify you when they finish while you look elsewhere
+# (0 turns it off).
+notify_after_secs = 10
 
 [shell]
 # program = "/bin/zsh"
@@ -199,6 +261,16 @@ option_as_alt = false
 columns = 120
 rows = 36
 sidebar = true
+
+[tints]
+# Panes running ssh or mosh to another machine get a blue tint.
+remote = true
+# Hosts matching these get a red tint instead ("*" matches anything).
+production = ["*prod*"]
+
+# Per project, keyed by folder:
+# [projects."~/developer/kiln"]
+# color = "#e07b39"
 
 [theme]
 # Any palette colour, as "#rrggbb":
@@ -222,6 +294,16 @@ mod tests {
     #[test]
     fn template_parses_to_the_defaults() {
         assert_eq!(parse(TEMPLATE).unwrap(), Config::default());
+    }
+
+    #[test]
+    fn production_patterns_match_hosts() {
+        let tints = TintConfig::default();
+        assert!(host_matches(&tints.production, "db.prod.example.com"));
+        assert!(host_matches(&tints.production, "PROD-1"));
+        assert!(!host_matches(&tints.production, "staging.example.com"));
+        assert!(host_matches(&["*.internal".into()], "a.b.internal"));
+        assert!(!host_matches(&["*.internal".into()], "internal.com"));
     }
 
     #[test]

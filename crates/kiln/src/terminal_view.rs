@@ -116,9 +116,35 @@ pub enum PaneEvent {
     Exited,
     /// "Open log" on a block: the workspace shows the file in a split.
     OpenLog(PathBuf),
+    /// The program rang the terminal bell.
+    Bell,
+    /// A command that ran at least `notify_after_secs` finished.
+    LongCommandFinished {
+        command: String,
+        duration: Duration,
+        exit_code: Option<i32>,
+        cwd: Option<String>,
+    },
 }
 
 impl EventEmitter<PaneEvent> for TerminalView {}
+
+/// The folder and the runtimes on PATH that the input bar's context was computed for.
+type ContextKey = (Option<String>, Vec<(String, String)>);
+
+/// Facts about a pane's session, for the rail.
+#[derive(Clone, Debug)]
+pub struct SessionInfo {
+    pub shell: String,
+    pub pid: Option<u32>,
+    pub columns: usize,
+    pub lines: usize,
+    pub started: Instant,
+    pub commands: usize,
+    pub last_exit: Option<i32>,
+    /// The host of a running ssh or mosh command.
+    pub remote_host: Option<String>,
+}
 
 pub struct TerminalView {
     pub(crate) session: Session,
@@ -145,7 +171,7 @@ pub struct TerminalView {
     cwd: Option<String>,
     /// Dim context in the input bar ("node 22.3.0", "WSL · Ubuntu").
     context: Option<String>,
-    context_for: Option<(Option<String>, Vec<(String, String)>)>,
+    context_for: Option<ContextKey>,
     runtimes: Vec<(String, String)>,
     _context_task: Option<Task<()>>,
     started: Instant,
@@ -295,8 +321,9 @@ impl TerminalView {
                     cx.emit(PaneEvent::Exited);
                     return;
                 }
+                SessionEvent::Term(TermEvent::Bell) => cx.emit(PaneEvent::Bell),
                 SessionEvent::Term(
-                    TermEvent::Bell | TermEvent::MouseCursorDirty | TermEvent::CursorBlinkingChange,
+                    TermEvent::MouseCursorDirty | TermEvent::CursorBlinkingChange,
                 ) => {}
                 SessionEvent::Mark(record) => {
                     log::debug!("mark {record:?}");
@@ -305,6 +332,19 @@ impl TerminalView {
                     }
                 }
                 SessionEvent::Block(block) => {
+                    let notify_after = crate::config::current().notify_after_secs;
+                    if notify_after > 0
+                        && !block.startup
+                        && !block.command.is_empty()
+                        && block.duration >= Duration::from_secs(notify_after)
+                    {
+                        cx.emit(PaneEvent::LongCommandFinished {
+                            command: block.command.clone(),
+                            duration: block.duration,
+                            exit_code: block.exit_code,
+                            cwd: block.cwd.clone(),
+                        });
+                    }
                     if block.clears_timeline() {
                         self.blocks.retain(|b| b.pinned.get());
                         cleared = true;
@@ -410,6 +450,36 @@ impl TerminalView {
             .filter(|b| !b.block.startup && !b.block.command.is_empty())
             .map(|b| b.block.command.clone())
             .collect()
+    }
+
+    pub fn session_info(&self) -> SessionInfo {
+        let size = self.session.size();
+        SessionInfo {
+            shell: self.session.shell().label(),
+            pid: self.session.pid(),
+            columns: size.columns,
+            lines: size.lines,
+            started: self.started,
+            commands: self.commands().len(),
+            last_exit: self.session.live().last_exit,
+            remote_host: self.remote_host(),
+        }
+    }
+
+    /// The tint for a pane connected to another machine, with its host.
+    pub fn tint(&self) -> Option<(crate::remote::Tint, String)> {
+        let host = self.remote_host()?;
+        let tint = crate::remote::Tint::for_host(&host, &crate::config::current().tints)?;
+        Some((tint, host))
+    }
+
+    /// The machine the running command is connected to (`ssh`, `mosh`).
+    pub fn remote_host(&self) -> Option<String> {
+        let live = self.session.live();
+        if live.phase != Phase::Running {
+            return None;
+        }
+        live.command.as_deref().and_then(crate::remote::remote_host)
     }
 
     // ----- startup benchmark and latency trace ----------------------------------------------
@@ -1538,13 +1608,32 @@ impl Render for TerminalView {
                 .into_any_element(),
         };
 
+        let p = palette();
+        let tint = self.tint();
+        let tint_label = tint.as_ref().map(|(tint, host)| {
+            div()
+                .absolute()
+                .top(px(6.))
+                .right(px(PADDING_X))
+                .px(px(8.))
+                .py(px(2.))
+                .rounded(px(5.))
+                .bg(theme::hsla(theme::blend(tint.background(&p), p.bar, 0.5)))
+                .font_family(FONT_FAMILY)
+                .text_size(px(11.))
+                .text_color(theme::hsla(tint.label_color(&p)))
+                .child(tint.label(host))
+        });
+
         div()
             .id("terminal")
             .key_context("Terminal")
             .track_focus(&self.focus)
             .size_full()
             .relative()
-            .bg(theme::hsla(palette().bg))
+            .bg(theme::hsla(
+                tint.as_ref().map_or(p.bg, |(tint, _)| tint.background(&p)),
+            ))
             .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::copy_last_output))
@@ -1566,6 +1655,7 @@ impl Render for TerminalView {
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
             .child(sizer)
             .child(content)
+            .when_some(tint_label, |d, label| d.child(label))
     }
 }
 

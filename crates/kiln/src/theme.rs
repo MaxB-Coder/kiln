@@ -71,6 +71,16 @@ pub fn rgb_to_hsla(rgb: Rgb) -> Hsla {
     .into()
 }
 
+/// `base` with `amount` (0–1) of `over` mixed in.
+pub fn blend(base: u32, over: u32, amount: f32) -> u32 {
+    let channel = |shift: u32| {
+        let a = ((base >> shift) & 0xff) as f32;
+        let b = ((over >> shift) & 0xff) as f32;
+        ((a + (b - a) * amount).round() as u32).min(255) << shift
+    };
+    channel(16) | channel(8) | channel(0)
+}
+
 pub fn rgb_from_hex(hex: u32) -> Rgb {
     Rgb {
         r: (hex >> 16) as u8,
