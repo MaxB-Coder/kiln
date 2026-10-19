@@ -49,14 +49,23 @@ a small git project (`acme-web`) in a scratch folder, so the rail has something 
 
 ## Tests
 
-- 49 tests in all. New in this phase: ssh and mosh parsing, production patterns, colour
+- 50 tests in all. New in this phase: ssh and mosh parsing, production patterns, colour
   mixing, notification tags and titles, state merging and JSON compatibility, project colours,
   labels, git status parsing, runtime versions, and the process watcher on a real child
-  process. The phase 1 shell tests (zsh, bash 5, bash 3.2, PowerShell) still pass.
+  process, and marks following reflowed text. The phase 1 shell tests (zsh, bash 5,
+  bash 3.2, PowerShell) still pass.
 - macOS: tests, clippy and the phase 1 and phase 2 scenarios. Startup unchanged: 274 ms to the
   first frame with the prompt (phase 0: 310 ms). A benchmark run does not save or restore
   sessions.
-- Linux container: see the CI section.
+- Linux container (`scripts/linux-check.sh`, now runs both scenarios): tests, clippy with
+  warnings as errors, and the screenshots in `screenshots/linux-phase2/` (bash; python serves
+  the demo there, since the image has no node).
+
+Bug the Linux shots caught and fixed: opening the rail narrows the pane, the engine re-wraps
+the lines, and the row where a running command's output starts pointed into its own wrapped
+command line (the block began with `.0.0.1`, the end of `--bind 127.0.0.1`). The prompt,
+input and output marks now move with the text on every resize. Before the fix this hit any
+long command running while a pane changed width.
 
 ## On macOS, notifications need the app bundle
 
