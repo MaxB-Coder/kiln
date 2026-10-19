@@ -292,8 +292,9 @@ jobs:
           shared-key: release-manifest
       - name: Every update file verifies against KILN_UPDATE_PUBKEY
         env:
-          KILN_E2E_MANIFEST: latest.json
-          KILN_E2E_DIR: dist
+          # Absolute: cargo runs the test from the crate's folder.
+          KILN_E2E_MANIFEST: ${{ github.workspace }}/latest.json
+          KILN_E2E_DIR: ${{ github.workspace }}/dist
           KILN_E2E_PUBKEY: ${{ vars.KILN_UPDATE_PUBKEY }}
           KILN_E2E_PLATFORMS: macos-aarch64,windows-x86_64,linux-x86_64
         run: |

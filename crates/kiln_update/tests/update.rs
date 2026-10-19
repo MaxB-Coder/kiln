@@ -281,8 +281,19 @@ fn accepts_a_signed_release_build() {
 fn release_manifest_verifies() {
     use base64::Engine as _;
     let var = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name}"));
-    let manifest = std::fs::read(var("KILN_E2E_MANIFEST")).unwrap();
-    let dir = PathBuf::from(var("KILN_E2E_DIR"));
+    // Relative paths are from the repository root (cargo runs tests from the crate's folder).
+    let path = |name: &str| {
+        let path = PathBuf::from(var(name));
+        if path.is_relative() {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(path)
+        } else {
+            path
+        }
+    };
+    let manifest = std::fs::read(path("KILN_E2E_MANIFEST")).expect("the manifest");
+    let dir = path("KILN_E2E_DIR");
     let decode = |text: &str| {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(text.trim())
