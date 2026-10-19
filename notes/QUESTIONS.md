@@ -35,14 +35,17 @@ screen was locked or the test window sat behind your work, where macOS stops dra
 
 ## Things I installed or left behind on this Mac
 
-- Tools: Rust toolchains (rustup), `cargo-packager`, `cargo-about` (in `~/.cargo/bin`),
-  `actionlint`, `colima` and `docker` (Homebrew). The colima VM is stopped; its `kiln-linux`
-  image and two cargo cache volumes take disk space (`docker image rm kiln-linux`,
-  `docker volume rm kiln-cargo-registry kiln-cargo-git` with colima running).
+- Tools kept: the Rust toolchain Kiln builds with (rustup), `cargo-packager`, `cargo-about`
+  (in `~/.cargo/bin`) and `actionlint` (Homebrew).
+- Removed on 2026-10-19 at the user's request: the colima VM with its `kiln-linux` image and
+  cargo cache volumes (`~/.colima`), the `colima`, `lima` and `docker` Homebrew packages, and
+  the Windows and Linux std targets of the 1.98.1 toolchain. Linux builds and screenshots now
+  run in CI.
 - `npx` fetched Renovate's config validator into the npm cache once (to check
   `renovate.json`).
 - A demo project's `.nvmrc` made mise start installing Node 26.12.0 (phase 2); it was stopped
-  before anything was installed. Left: an empty `~/Library/Caches/mise/node/26.12.0` folder.
+  before anything was installed. The empty `~/Library/Caches/mise/node/26.12.0` folder it left
+  was removed.
 - Kiln's own folders: `~/Library/Application Support/Kiln` (logs, saved sessions) and
   `~/Library/Caches/kiln` (shell integration).
 
