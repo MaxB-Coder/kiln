@@ -72,3 +72,51 @@ Newest at the bottom.
 - **`--background`** opens Kiln without taking focus (used for every test launch, so a test
   window never catches the user's typing).
 - **Find also matches command lines** in block headers, highlighted in place.
+
+## Phase 2
+
+- **Rail** (⌘I / Ctrl+Shift+I): 280 px on the right, full height, for the focused pane. On
+  Windows and Linux the window controls move to its top while it is open. It reads every 2 s
+  in the background while open, and right away when the focus moves; nothing is read while it
+  is closed. Up to 14 changed files and 12 processes, then "N more".
+- **Changes** come from `git status --porcelain=v2` with `core.fsmonitor=false`,
+  `GIT_OPTIONAL_LOCKS=0` and no prompts: entering a folder must never run a repository's
+  hooks or tools. Clicking a file pages `git diff HEAD -- file` (untracked: against
+  `/dev/null`) in a split with `less -R`, kept open for short diffs; paths are passed as
+  arguments, never pasted into shell text. The pane closes when the pager quits.
+- **Ports**: clicking one asks with a system dialog before opening `http://localhost:PORT`,
+  because the plan says links ask first.
+- **Processes** are the tree under the pane's shell (sysinfo); ports are the TCP listeners
+  those processes own (listeners), IPv4 and IPv6 on one port shown once.
+- **Notifications**: after `notify_after_secs` (default 10; 0 turns them off), only when the
+  pane is out of sight: the window is not in front, the session is not shown, or focus mode
+  hides the pane. Title: program and first argument only. Body: finished or failed (with exit
+  code), the duration and the folder. Clicking one brings the window and session back. No
+  sound, and Ctrl-C (exit 130) counts as finished, not failed.
+- **Attention dot** in the sidebar: orange (the plan keeps orange for things to act on), from
+  a bell or a long command finishing out of sight; cleared when the session is shown. A
+  failed command's red dot wins. A bell in a pane you are looking at does nothing.
+- **Focus mode** (⌘. / Ctrl+Shift+.) hides the sidebar, the rail and the session's other
+  panes. ⌘B or ⌘I leave it.
+- **Tints** come from the running command line: `ssh`, `autossh`, `mosh` (options with values,
+  `ssh://` URLs and IPv6 handled). Remote: 10% of the palette's blue mixed into the
+  background. Production: 13% of its red, for hosts matching `[tints] production` (globs,
+  case-insensitive, default `["*prod*"]`). A small label at the top right names the host.
+  `[tints] remote = false` keeps only the production tint.
+- **Saved state**: `state.json` in Kiln's data folder (macOS Application Support, Windows
+  LocalAppData, Linux XDG state), private and written atomically, checked every 2 s and on
+  quit, written only when something changed. It keeps the window that changed last (folders,
+  splits, sidebar, rail) and one layout per git project (24 kept). One-off panes (diffs, logs,
+  the config editor) are not saved. Closing the last session saves an empty window, so the
+  next launch starts fresh. `--fresh` or `[window] restore = false` skips restoring; a given
+  program (`kiln -- prog`) and `--bench-startup` never restore or save.
+- **Projects** are git roots, with links resolved on macOS and Linux (`/var` and
+  `/private/var` are one project); Windows paths are left as they are. The palette lists
+  them; choosing one shows its open session, else reopens its saved layout, else starts a
+  session at its root.
+- **Project colours**: picked from eight muted palette colours by a stable hash (FNV-1a) of
+  the folder, never the orange accent; `[projects."~/path"] color = "#rrggbb"` overrides.
+  Home and loose folders get no colour.
+- **Headless scenario** advances GPUI's test clock with real time, so timers (the rail, saving)
+  run as they do in the app; it saves state to a scratch file and turns the cursor blink off
+  for stable pictures.

@@ -301,7 +301,23 @@ fn phase2(s: &mut Shots) {
     s.run("git --no-pager log --oneline", Duration::from_secs(5));
 
     // 13. The rail: the dev server's process and port, the changes, node, the session.
-    s.type_only("node src/server.js\r");
+    // The demo's dev server; machines without node serve the folder with python instead.
+    let has = |program: &str| {
+        std::process::Command::new(program)
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let server = if has("node") {
+        "node src/server.js"
+    } else if has("python3") {
+        "python3 -m http.server 4173 --bind 127.0.0.1"
+    } else {
+        "sleep 30"
+    };
+    s.type_only(&format!("{server}\r"));
     s.pump(Duration::from_millis(2500));
     s.action(Box::new(kiln::ToggleRail));
     s.pump(Duration::from_millis(2500));

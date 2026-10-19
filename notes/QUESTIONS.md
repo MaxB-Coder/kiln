@@ -8,12 +8,23 @@ Collected during the autonomous build; raised at the end of the project.
   (GPUI zed#61469), Alt+key in the shell (zed#62404), mouse wheel in `less` (zed#64695),
   window controls, Ctrl+Shift shortcuts, high-DPI scaling.
 - Linux desktop: GNOME on Wayland (client-side title bar), KDE/X11, fractional scaling.
+- Notifications on Windows (toasts need an app identity; the installer in phase 3 registers
+  it) and on Linux desktops.
+- WSL: the rail cannot see processes inside Linux. Worth fixing later with a small helper run
+  through `wsl.exe`, if you use the rail there.
 
 ## Needs you on this Mac
 
 - Phase 1 was checked with headless renders (real shells and real rendering, no display): the
   screen was locked while I worked. Please try it by hand: mouse selection across blocks,
   hover actions, the palette and find with the keyboard, splits, ⌘B, ⌘T.
+
+- Phase 2 by hand: ⌘I and ⌘. from the keyboard, clicking a changed file in the rail (diff in
+  a split), clicking a port (the dialog), quitting with sessions open and starting again
+  (restore), and a project from ⌘K.
+- Notifications: run `scripts/bundle-macos.sh`, open `target/release/Kiln.app`, run
+  `sleep 12` and switch to another app. macOS asks once whether Kiln may notify you; that
+  choice is yours, so I left it alone.
 
 - ⌘C / ⌘V end to end, dead keys (Option+E then E), and the keystroke latency procedure in
   `bench/LATENCY.md` (my tools may not touch the clipboard or type into WezTerm).

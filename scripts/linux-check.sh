@@ -16,4 +16,5 @@ docker run --rm \
     cargo test --workspace --locked
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo run --locked -p kiln --example snapshot -- notes/screenshots/linux
+    cargo run --locked -p kiln --example snapshot -- notes/screenshots/linux-phase2 phase2
   '

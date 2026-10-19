@@ -131,12 +131,15 @@ impl Workspace {
         if !saved.is_some_and(|saved| this.restore(saved, window, cx)) {
             this.new_tab(None, None, window, cx);
         }
-        this._state_watch = this.watch_state(window, cx);
-        cx.on_app_quit(|this, cx| {
-            this.save_state(cx);
-            async {}
-        })
-        .detach();
+        // A benchmark run leaves the saved sessions alone.
+        if !bench_startup {
+            this._state_watch = this.watch_state(window, cx);
+            cx.on_app_quit(|this, cx| {
+                this.save_state(cx);
+                async {}
+            })
+            .detach();
+        }
         this
     }
 
@@ -312,7 +315,9 @@ impl Workspace {
             self.tabs.remove(t);
             if self.tabs.is_empty() {
                 // The last session closed: next launch starts fresh.
-                self.save_state(cx);
+                if !self.bench_startup {
+                    self.save_state(cx);
+                }
                 window.remove_window();
                 return;
             }
