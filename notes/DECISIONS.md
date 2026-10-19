@@ -225,3 +225,12 @@ Newest at the bottom.
   installer after the package (`kiln_<version>_x64-setup.exe`), and the manifest script looked
   for `Kiln_*`. The manifest check now requires all three systems, so a missing one fails the
   run before anything is published.
+- **Keyboard shortcuts pop-up** (⌘/, Ctrl+Shift+/; also ⌘K and the macOS Help menu): built
+  each time from the keymap in effect, so it lists exactly what is bound on that platform.
+  `keymap.rs` holds the bindings (registered by `main`) and one table giving each bound action
+  its name, section and order; a test fails when a bound action has no entry, or does not
+  appear exactly once with its keys. Keys read the platform's way (⌘⇧ glyphs in Apple's order on
+  macOS, "Ctrl+Shift+D" elsewhere; the Windows chrome preview uses the Windows bindings). The
+  filter matches names and keys ("split", "⌘D", "cmd+d", "ctrl+shift+d"). The palette's
+  shortcut hints now come from the keymap too: several were wrong on Windows and Linux
+  (Next session showed Ctrl+Shift+] where the binding is Ctrl+Tab).

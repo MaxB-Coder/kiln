@@ -39,8 +39,12 @@ libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev`.
 
 ## Use
 
+Every shortcut, with a filter: **⌘/** (Ctrl+Shift+/ on Windows and Linux), also in ⌘K and,
+on macOS, the Help menu. The ones you will use most:
+
 | | macOS | Windows and Linux |
 | --- | --- | --- |
+| All keyboard shortcuts | ⌘/ | Ctrl+Shift+/ |
 | New session / split right | ⌘T / ⌘D | Ctrl+Shift+T / Ctrl+Shift+D |
 | Command palette (actions, sessions, projects, past commands) | ⌘K | Ctrl+Shift+K |
 | Find | ⌘F | Ctrl+Shift+F |

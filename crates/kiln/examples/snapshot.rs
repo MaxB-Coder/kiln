@@ -3,7 +3,7 @@
 //! Uses GPUI's headless app context with the real text system and the real GPU renderer, and
 //! real shells on real PTYs, so the pictures show Kiln as it behaves; no display is needed.
 //!
-//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2|phase3|prompt]
+//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2|phase3|prompt|shortcuts]
 //! (default: notes/screenshots/phase1, scenario phase1)
 
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ use gpui::{
 };
 use kiln::config::{self, Config};
 use kiln::grid_paint::{self, CellMetrics};
+use kiln::keymap;
 use kiln::terminal_view::TerminalView;
 use kiln::workspace::Workspace;
 
@@ -190,6 +191,8 @@ fn main() {
     );
     cx.allow_parking();
     cx.update(|cx| grid_paint::load_embedded_fonts(cx));
+    // The app's own key bindings, as main registers them.
+    cx.update(|cx| cx.bind_keys(keymap::bindings(keymap::KeyStyle::current())));
     config::set_current(Config {
         // Short, so the phase 2 scenario can show a finished command's attention dot.
         notify_after_secs: 2,
@@ -209,6 +212,12 @@ fn main() {
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "shortcuts" {
+        shortcuts(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        println!("done");
+        return;
+    }
     if scenario == "prompt" {
         prompt(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -405,6 +414,61 @@ fn phase2(s: &mut Shots) {
     s.pump(Duration::from_millis(400));
     s.shot("20-windows-chrome-with-rail");
     unsafe { std::env::remove_var("KILN_CHROME") };
+}
+
+/// The keyboard shortcuts pop-up: all of it, filtered by name and by keys, the Windows chrome
+/// preview with the Windows and Linux bindings, and a narrow window (one column).
+fn shortcuts(s: &mut Shots) {
+    s.run("echo hello", Duration::from_secs(5));
+    // Opened with its keys, through the keymap, like a person would.
+    s.keystroke("cmd-/");
+    s.shot("s1-all");
+    s.type_into_field("split");
+    s.shot("s2-filter-name");
+    s.keystroke("backspace backspace backspace backspace backspace");
+    s.type_into_field("cmd+d");
+    s.shot("s3-filter-keys");
+    // The same keys close it; Esc too.
+    let open = |s: &mut Shots| {
+        s.cx.update(|cx| s.window.read(cx).unwrap().shortcuts_open())
+    };
+    assert!(open(s), "⌘/ opened the shortcuts");
+    s.keystroke("cmd-/");
+    assert!(!open(s), "⌘/ closes the shortcuts again");
+    s.keystroke("cmd-/");
+    assert!(open(s));
+    s.keystroke("escape");
+    assert!(!open(s), "Esc closes the shortcuts");
+
+    // The Windows preview: its chrome, and the bindings Windows and Linux get.
+    // SAFETY: only this thread reads the variable (in the next render).
+    unsafe { std::env::set_var("KILN_CHROME", "windows") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::Pc));
+    });
+    s.keystroke("ctrl-shift-/");
+    s.shot("s4-windows-preview");
+    s.type_into_field("ctrl+shift+d");
+    s.shot("s5-windows-filter-keys");
+    s.keystroke("escape");
+    unsafe { std::env::remove_var("KILN_CHROME") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::current()));
+    });
+
+    // A narrow window: one column.
+    let narrow =
+        s.cx.open_window(size(px(640.), px(720.)), |window, cx| {
+            let metrics = CellMetrics::measure(px(13.), window);
+            cx.new(|cx| Workspace::new(None, metrics, false, true, Instant::now(), window, cx))
+        })
+        .unwrap();
+    s.window = narrow;
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.action(Box::new(kiln::ToggleShortcuts));
+    s.shot("s6-narrow");
 }
 
 /// The input box: the prompt, after a failure, with a second line, with a completion menu, and

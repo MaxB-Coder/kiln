@@ -7,8 +7,8 @@
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds,
-    WindowDecorations, WindowOptions, point, px, size,
+    App, AppContext as _, Bounds, Menu, MenuItem, TitlebarOptions, WindowBounds, WindowDecorations,
+    WindowOptions, point, px, size,
 };
 use kiln::grid_paint::{self, CellMetrics};
 use kiln::terminal_view::{PADDING_BOTTOM, PADDING_TOP, PADDING_X};
@@ -189,6 +189,11 @@ fn main() {
                 ],
                 disabled: false,
             },
+            Menu {
+                name: "Help".into(),
+                items: vec![MenuItem::action("Keyboard Shortcuts", ToggleShortcuts)],
+                disabled: false,
+            },
         ]);
 
         open_window(args.clone(), started, cx);
@@ -202,74 +207,7 @@ fn main() {
 }
 
 fn bind_keys(cx: &mut App) {
-    // Every ⌘ shortcut on macOS is Ctrl+Shift on Windows and Linux.
-    #[cfg(target_os = "macos")]
-    let primary = "cmd";
-    #[cfg(not(target_os = "macos"))]
-    let primary = "ctrl-shift";
-    let k = |keys: &str| format!("{primary}-{keys}");
-
-    let terminal = Some("Terminal");
-    cx.bind_keys([
-        KeyBinding::new(&k("c"), Copy, terminal),
-        KeyBinding::new(&k("v"), Paste, terminal),
-        KeyBinding::new(&k("a"), SelectAll, terminal),
-        KeyBinding::new(&k("alt-c"), CopyLastOutputRaw, terminal),
-        KeyBinding::new(&k("n"), NewWindow, None),
-        KeyBinding::new(&k("t"), NewSession, None),
-        KeyBinding::new(&k("w"), ClosePane, None),
-        KeyBinding::new(&k("d"), SplitRight, None),
-        KeyBinding::new(&k("]"), FocusNextPane, None),
-        KeyBinding::new(&k("["), FocusPrevPane, None),
-        KeyBinding::new(&k("b"), ToggleSidebar, None),
-        KeyBinding::new(&k("i"), ToggleRail, None),
-        KeyBinding::new(&k("."), ToggleFocusMode, None),
-        KeyBinding::new(&k("f"), Find, None),
-        KeyBinding::new(&k("k"), CommandPaletteToggle, None),
-        KeyBinding::new(&k("p"), CommandPaletteToggle, None),
-        KeyBinding::new(&k(","), EditConfig, None),
-        KeyBinding::new(&k("q"), Quit, None),
-        KeyBinding::new(&k("="), ZoomIn, None),
-        KeyBinding::new(&k("-"), ZoomOut, None),
-        KeyBinding::new(&k("0"), ZoomReset, None),
-        KeyBinding::new("shift-pageup", ScrollPageUp, terminal),
-        KeyBinding::new("shift-pagedown", ScrollPageDown, terminal),
-        KeyBinding::new("shift-home", ScrollToTop, terminal),
-        KeyBinding::new("shift-end", ScrollToBottom, terminal),
-    ]);
-
-    #[cfg(target_os = "macos")]
-    cx.bind_keys([
-        // ⌘⇧C: last output as a fenced block. Elsewhere Ctrl+Shift+C covers it (the selection,
-        // or the last output when nothing is selected).
-        KeyBinding::new("cmd-shift-c", CopyLastOutput, terminal),
-        KeyBinding::new("cmd-shift-]", NextSession, None),
-        KeyBinding::new("cmd-shift-[", PrevSession, None),
-        KeyBinding::new("cmd-1", SelectSession1, None),
-        KeyBinding::new("cmd-2", SelectSession2, None),
-        KeyBinding::new("cmd-3", SelectSession3, None),
-        KeyBinding::new("cmd-4", SelectSession4, None),
-        KeyBinding::new("cmd-5", SelectSession5, None),
-        KeyBinding::new("cmd-6", SelectSession6, None),
-        KeyBinding::new("cmd-7", SelectSession7, None),
-        KeyBinding::new("cmd-8", SelectSession8, None),
-        KeyBinding::new("cmd-9", SelectSession9, None),
-    ]);
-    #[cfg(not(target_os = "macos"))]
-    cx.bind_keys([
-        KeyBinding::new("shift-insert", Paste, terminal),
-        KeyBinding::new("ctrl-tab", NextSession, None),
-        KeyBinding::new("ctrl-shift-tab", PrevSession, None),
-        KeyBinding::new("ctrl-alt-1", SelectSession1, None),
-        KeyBinding::new("ctrl-alt-2", SelectSession2, None),
-        KeyBinding::new("ctrl-alt-3", SelectSession3, None),
-        KeyBinding::new("ctrl-alt-4", SelectSession4, None),
-        KeyBinding::new("ctrl-alt-5", SelectSession5, None),
-        KeyBinding::new("ctrl-alt-6", SelectSession6, None),
-        KeyBinding::new("ctrl-alt-7", SelectSession7, None),
-        KeyBinding::new("ctrl-alt-8", SelectSession8, None),
-        KeyBinding::new("ctrl-alt-9", SelectSession9, None),
-    ]);
+    cx.bind_keys(kiln::keymap::bindings(kiln::keymap::KeyStyle::current()));
 }
 
 fn open_window(args: Args, started: Instant, cx: &mut App) {

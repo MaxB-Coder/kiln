@@ -17,11 +17,13 @@ use kiln_term::{GridSize, SessionOptions, ShellCommand};
 use crate::config::{self, Config};
 use crate::copy;
 use crate::grid_paint::{CellMetrics, FONT_FAMILY};
+use crate::keymap::{self, KeyStyle};
 use crate::logs;
 use crate::naming;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteItem, PaletteTarget};
 use crate::rail::Rail;
 use crate::search::Match;
+use crate::shortcuts::{ShortcutsEvent, ShortcutsView};
 use crate::state::{self, TabState, WindowState};
 use crate::terminal_view::{PaneEvent, PaneStatus, TerminalView};
 use crate::text_input::{TextInput, TextInputEvent};
@@ -31,7 +33,7 @@ use crate::{
     Find, FocusNextPane, FocusPrevPane, InstallUpdate, NewSession, NewWindow, NextSession,
     PrevSession, Quit, SelectSession1, SelectSession2, SelectSession3, SelectSession4,
     SelectSession5, SelectSession6, SelectSession7, SelectSession8, SelectSession9, SplitRight,
-    ToggleFocusMode, ToggleRail, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
+    ToggleFocusMode, ToggleRail, ToggleShortcuts, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 
 /// Height of the strip at the top that holds the window controls.
@@ -79,6 +81,7 @@ pub struct Workspace {
     focus_mode: bool,
     search: Option<SearchBar>,
     palette: Option<(Entity<CommandPalette>, Subscription)>,
+    shortcuts: Option<(Entity<ShortcutsView>, Subscription)>,
     metrics: CellMetrics,
     started: Instant,
     bench_startup: bool,
@@ -114,6 +117,7 @@ impl Workspace {
             focus_mode: false,
             search: None,
             palette: None,
+            shortcuts: None,
             metrics,
             started,
             bench_startup,
@@ -533,6 +537,34 @@ impl Workspace {
 
     // ----- palette --------------------------------------------------------------------------
 
+    /// Whether the shortcuts pop-up is open.
+    pub fn shortcuts_open(&self) -> bool {
+        self.shortcuts.is_some()
+    }
+
+    /// The shortcuts pop-up: opens over everything, closes with the same keys, Esc or a click
+    /// outside.
+    fn toggle_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcuts.take().is_some() {
+            self.focus_active(window, cx);
+            cx.notify();
+            return;
+        }
+        self.palette = None;
+        let style = key_style();
+        let rows = keymap::live_rows(cx, style);
+        let view = cx.new(|cx| ShortcutsView::new(rows, style, window, cx));
+        let events = cx.subscribe_in(&view, window, |this, _, event, window, cx| match event {
+            ShortcutsEvent::Dismiss => {
+                this.shortcuts = None;
+                this.focus_active(window, cx);
+                cx.notify();
+            }
+        });
+        self.shortcuts = Some((view, events));
+        cx.notify();
+    }
+
     fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette.take().is_some() {
             self.focus_active(window, cx);
@@ -572,49 +604,34 @@ impl Workspace {
     fn palette_items(&mut self, cx: &App) -> Vec<PaletteItem> {
         let names = self.session_names(cx);
         let mut items = Vec::new();
-        let shortcut = |keys: &str| -> String {
-            if cfg!(target_os = "macos") {
-                keys.replace("Mod+", "⌘")
-                    .replace("Shift+", "⇧")
-                    .replace("Alt+", "⌥")
-            } else {
-                keys.replace("Mod+", "Ctrl+Shift+")
-                    .replace("Shift+Shift+", "Shift+")
-            }
-        };
-        let mut action = |label: &str, keys: &str, action: Box<dyn Action>| {
+        // Keys come from the keymap in effect, so they are always the ones that work.
+        let style = key_style();
+        let mut action = |label: &str, action: Box<dyn Action>| {
             items.push(PaletteItem {
                 label: label.into(),
-                detail: shortcut(keys),
+                detail: keymap::keys_for(&*action, cx, style),
                 kind: "action",
                 target: PaletteTarget::Action(action),
             })
         };
-        action("New session", "Mod+T", Box::new(NewSession));
-        action("Split right", "Mod+D", Box::new(SplitRight));
-        action("Find", "Mod+F", Box::new(Find));
-        action(
-            "Copy last output (fenced)",
-            "Mod+Shift+C",
-            Box::new(CopyLastOutput),
-        );
-        action(
-            "Copy last output (raw)",
-            "Mod+Alt+C",
-            Box::new(CopyLastOutputRaw),
-        );
-        action("Toggle sidebar", "Mod+B", Box::new(ToggleSidebar));
-        action("Toggle context rail", "Mod+I", Box::new(ToggleRail));
-        action("Focus mode", "Mod+.", Box::new(ToggleFocusMode));
-        action("Close pane", "Mod+W", Box::new(ClosePane));
-        action("Next session", "Mod+Shift+]", Box::new(NextSession));
-        action("Previous session", "Mod+Shift+[", Box::new(PrevSession));
-        action("Bigger text", "Mod+=", Box::new(ZoomIn));
-        action("Smaller text", "Mod+-", Box::new(ZoomOut));
-        action("Reset text size", "Mod+0", Box::new(ZoomReset));
-        action("Edit config", "Mod+,", Box::new(EditConfig));
-        action("New window", "Mod+N", Box::new(NewWindow));
-        action("Quit Kiln", "Mod+Q", Box::new(Quit));
+        action("New session", Box::new(NewSession));
+        action("Split right", Box::new(SplitRight));
+        action("Find", Box::new(Find));
+        action("Copy last output (fenced)", Box::new(CopyLastOutput));
+        action("Copy last output (raw)", Box::new(CopyLastOutputRaw));
+        action("Keyboard shortcuts", Box::new(ToggleShortcuts));
+        action("Toggle sidebar", Box::new(ToggleSidebar));
+        action("Toggle context rail", Box::new(ToggleRail));
+        action("Focus mode", Box::new(ToggleFocusMode));
+        action("Close pane", Box::new(ClosePane));
+        action("Next session", Box::new(NextSession));
+        action("Previous session", Box::new(PrevSession));
+        action("Bigger text", Box::new(ZoomIn));
+        action("Smaller text", Box::new(ZoomOut));
+        action("Reset text size", Box::new(ZoomReset));
+        action("Edit config", Box::new(EditConfig));
+        action("New window", Box::new(NewWindow));
+        action("Quit Kiln", Box::new(Quit));
         if let Some(label) = crate::update::state(cx).label() {
             items.insert(
                 0,
@@ -1434,6 +1451,16 @@ fn notification_title(command: &str) -> String {
     title
 }
 
+/// How keys are written: the Mac way under the Mac chrome, else "Ctrl+Shift+D" (follows the
+/// `KILN_CHROME` preview, so the Windows preview shows Windows keys).
+pub fn key_style() -> KeyStyle {
+    if chrome() == Chrome::Mac {
+        KeyStyle::Mac
+    } else {
+        KeyStyle::Pc
+    }
+}
+
 /// Which platform's window chrome to draw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Chrome {
@@ -1635,6 +1662,27 @@ impl Render for Workspace {
                 .child(palette.clone())
         });
 
+        let shortcuts_overlay = self.shortcuts.as_ref().map(|(view, _)| {
+            div()
+                .id("shortcuts-scrim")
+                .absolute()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(24.))
+                .bg(gpui::black().opacity(0.35))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.shortcuts = None;
+                        this.focus_active(window, cx);
+                        cx.notify();
+                    }),
+                )
+                .child(view.clone())
+        });
+
         div()
             .id("workspace")
             .key_context("Workspace")
@@ -1702,6 +1750,9 @@ impl Render for Workspace {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &Find, window, cx| this.open_search(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
+                this.toggle_shortcuts(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &CommandPaletteToggle, window, cx| {
                 this.toggle_palette(window, cx)
             }))
@@ -1730,6 +1781,7 @@ impl Render for Workspace {
             )
             .when_some(rail, |d, rail| d.child(rail))
             .when_some(palette_overlay, |d, overlay| d.child(overlay))
+            .when_some(shortcuts_overlay, |d, overlay| d.child(overlay))
             .when_some(resize_edges(window), |d, edges| d.child(edges))
     }
 }

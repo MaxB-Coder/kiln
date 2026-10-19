@@ -8,6 +8,7 @@ pub mod context;
 pub mod copy;
 pub mod git;
 pub mod grid_paint;
+pub mod keymap;
 pub mod live_element;
 pub mod logs;
 pub mod naming;
@@ -15,6 +16,7 @@ pub mod palette;
 pub mod rail;
 pub mod remote;
 pub mod search;
+pub mod shortcuts;
 pub mod state;
 pub mod terminal_view;
 pub mod text_input;
@@ -51,6 +53,7 @@ actions!(
         ToggleFocusMode,
         Find,
         CommandPaletteToggle,
+        ToggleShortcuts,
         ZoomIn,
         ZoomOut,
         ZoomReset,
