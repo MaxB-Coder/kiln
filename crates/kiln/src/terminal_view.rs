@@ -466,6 +466,33 @@ impl TerminalView {
         }
     }
 
+    /// The program the running command started ("node"), or the host for ssh and mosh.
+    pub fn running_program(&self) -> Option<String> {
+        if let Some(host) = self.remote_host() {
+            return Some(host);
+        }
+        let live = self.session.live();
+        if live.phase != Phase::Running {
+            return None;
+        }
+        let command = live.command?;
+        // Skip `VAR=value` prefixes.
+        let word = command
+            .split_whitespace()
+            .find(|w| !w.contains('=') || w.starts_with('-'))?;
+        Some(
+            std::path::Path::new(word)
+                .file_name()?
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+
+    /// The shell's name ("zsh").
+    pub fn shell_label(&self) -> String {
+        self.session.shell().label()
+    }
+
     /// The tint for a pane connected to another machine, with its host.
     pub fn tint(&self) -> Option<(crate::remote::Tint, String)> {
         let host = self.remote_host()?;
@@ -1293,7 +1320,13 @@ impl TerminalView {
             copy::duration_label(block.duration)
         };
 
+        let hovered = self.hovered_block == Some(block.id);
+        let surface = {
+            let p = palette();
+            self.tint().map_or(p.bg, |(tint, _)| tint.background(&p))
+        };
         let header = div()
+            .relative()
             .flex()
             .flex_row()
             .items_center()
@@ -1310,24 +1343,39 @@ impl TerminalView {
                         .bg(theme::hsla(palette().failed)),
                 )
             })
+            // Pinned is a state, not something to act on: a quiet dot, not the accent.
             .when(pinned, |d| {
                 d.child(
                     div()
                         .flex_none()
                         .size(px(6.))
                         .rounded_full()
-                        .bg(theme::hsla(palette().accent)),
+                        .bg(theme::hsla(palette().fg_dim)),
                 )
             })
             .child(div().flex_1().min_w_0().child(title))
-            .when(!block.startup, |d| {
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(small)
+                    .text_color(theme::hsla(palette().muted))
+                    .child(meta),
+            )
+            // The actions cover the end of the header while the block is hovered, so they take
+            // no room from the command the rest of the time.
+            .when(!block.startup && hovered, |d| {
                 d.child(
                     div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .h_full()
                         .flex()
                         .flex_row()
+                        .items_center()
                         .gap(px(6.))
-                        .invisible()
-                        .group_hover(group.clone(), |s| s.visible())
+                        .pl(px(16.))
+                        .bg(theme::hsla(surface))
                         .child(action("Copy", ix, cx, |this, ix, cx| {
                             this.copy_block(ix, false, cx)
                         }))
@@ -1344,14 +1392,7 @@ impl TerminalView {
                             this.open_log(ix, cx)
                         })),
                 )
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(small)
-                    .text_color(theme::hsla(palette().muted))
-                    .child(meta),
-            );
+            });
 
         let id = block.id;
         let dimmed = !latest && !pinned && self.hovered_block != Some(id);

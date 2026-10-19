@@ -6,7 +6,7 @@
 //! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2|phase3]
 //! (default: notes/screenshots/phase1, scenario phase1)
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -162,7 +162,24 @@ fn main() {
         std::env::temp_dir().join(format!("kiln-snapshot-{}.json", std::process::id()));
     // SAFETY: no other thread runs yet.
     unsafe { std::env::set_var("KILN_STATE_FILE", &state_file) };
-    let project = std::env::current_dir().unwrap();
+    // Kiln opens the way it does after a restart: one saved session, whose shell starts in its
+    // folder (nothing is typed to get there).
+    let start = if scenario == "phase2" {
+        demo_project()
+    } else {
+        std::env::current_dir().unwrap()
+    };
+    let saved = serde_json::json!({
+        "version": 1,
+        "window": {
+            "sidebar": true,
+            "rail": false,
+            "active": 0,
+            "tabs": [{ "panes": [start.to_string_lossy()], "focused": 0 }]
+        },
+        "projects": []
+    });
+    std::fs::write(&state_file, saved.to_string()).unwrap();
 
     let text_system = gpui_platform::current_platform(true).text_system();
     let mut cx = HeadlessAppContext::with_platform(
@@ -183,7 +200,7 @@ fn main() {
     let window = cx
         .open_window(size(px(1180.), px(720.)), |window, cx| {
             let metrics = CellMetrics::measure(px(13.), window);
-            cx.new(|cx| Workspace::new(None, metrics, false, false, Instant::now(), window, cx))
+            cx.new(|cx| Workspace::new(None, metrics, false, true, Instant::now(), window, cx))
         })
         .unwrap();
     let mut s = Shots { cx, window, out };
@@ -203,10 +220,6 @@ fn main() {
         println!("done");
         return;
     }
-    s.run(
-        &format!("cd {}", shell_quote(&project)),
-        Duration::from_secs(5),
-    );
     s.shot("01-prompt");
 
     // 2. A few blocks: listing, git, a failure.
@@ -299,11 +312,6 @@ fn main() {
 
 /// Phase 2: the context rail, focus mode, tints, attention, projects and restored sessions.
 fn phase2(s: &mut Shots) {
-    let demo = demo_project();
-    s.run(
-        &format!("cd {}", shell_quote(&demo)),
-        Duration::from_secs(5),
-    );
     s.run("git --no-pager log --oneline", Duration::from_secs(5));
 
     // 13. The rail: the dev server's process and port, the changes, node, the session.
@@ -465,8 +473,4 @@ fn demo_project() -> PathBuf {
     git(&["add", "docs/deploy.md"]);
     std::fs::remove_file(root.join("README.md")).unwrap();
     root
-}
-
-fn shell_quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }

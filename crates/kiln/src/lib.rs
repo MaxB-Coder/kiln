@@ -10,6 +10,7 @@ pub mod git;
 pub mod grid_paint;
 pub mod live_element;
 pub mod logs;
+pub mod naming;
 pub mod palette;
 pub mod rail;
 pub mod remote;

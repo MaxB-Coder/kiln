@@ -172,3 +172,17 @@ Newest at the bottom.
   requests, the weekly run and manual runs still build macOS and Windows. Undo this if the
   repository goes public (public repositories have no minute limit).
 - **Installers use a `dist` profile** (release minus debug line tables; symbol names kept).
+
+## Polish
+
+- **Names** (`naming.rs`): a project is its repository or folder name (`~` for home, "other"
+  before a folder is known). A session is its subfolder relative to the project, else the
+  program it runs (the host for ssh), else the project's name; repeats within a project get a
+  number ("api 2"). The sidebar, the palette and the header use the same labels; the palette
+  adds the full folder as dim detail. The OS window title is the breadcrumb.
+- **Header**: a dim breadcrumb on the left ("acme-web › api"; the project alone when the session
+  is named after it) and the branch on the right, read from `.git/HEAD` (no git process), at
+  most 3 s old.
+- **Block actions** appear over the end of a hovered block's header instead of reserving room
+  in every header, so commands only truncate when they really do not fit next to their timing.
+- **Pinned blocks** get a dim dot: orange stays for things to act on.

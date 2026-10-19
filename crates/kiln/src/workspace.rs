@@ -18,6 +18,7 @@ use crate::config::{self, Config};
 use crate::copy;
 use crate::grid_paint::{CellMetrics, FONT_FAMILY};
 use crate::logs;
+use crate::naming;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteItem, PaletteTarget};
 use crate::rail::Rail;
 use crate::search::Match;
@@ -39,6 +40,8 @@ const SIDEBAR_WIDTH: Pixels = px(220.);
 /// Room for the macOS traffic lights when the sidebar is hidden.
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(78.);
 const PANE_GAP: Pixels = px(10.);
+/// Space after the branch at the right end of the title strip (the panes' own padding).
+const PANE_GAP_RIGHT: f32 = 14.;
 
 struct Pane {
     view: Entity<TerminalView>,
@@ -80,8 +83,11 @@ pub struct Workspace {
     started: Instant,
     bench_startup: bool,
     shell_override: Option<ShellCommand>,
-    /// Git root (or folder) per working directory, for grouping sessions by project.
-    projects: HashMap<String, PathBuf>,
+    /// Per working directory as reported: the folder with links resolved, and its project (git
+    /// root, else the folder itself).
+    projects: HashMap<String, (PathBuf, PathBuf)>,
+    /// The checked-out branch per project root, re-read every few seconds.
+    branches: HashMap<PathBuf, (Instant, Option<String>)>,
     start_error: Option<String>,
     _config_watch: Task<()>,
     _state_watch: Task<()>,
@@ -113,6 +119,7 @@ impl Workspace {
             bench_startup,
             shell_override,
             projects: HashMap::new(),
+            branches: HashMap::new(),
             start_error: None,
             _config_watch: Task::ready(()),
             _state_watch: Task::ready(()),
@@ -266,9 +273,10 @@ impl Workspace {
         cx.notify();
     }
 
-    fn update_title(&self, window: &mut Window, cx: &App) {
-        if let Some(view) = self.focused_view() {
-            window.set_window_title(&view.read(cx).title());
+    fn update_title(&mut self, window: &mut Window, cx: &App) {
+        let title = self.focused_breadcrumb(cx);
+        if !title.is_empty() {
+            window.set_window_title(&title);
         }
     }
 
@@ -554,7 +562,8 @@ impl Workspace {
         cx.notify();
     }
 
-    fn palette_items(&self, cx: &App) -> Vec<PaletteItem> {
+    fn palette_items(&mut self, cx: &App) -> Vec<PaletteItem> {
+        let names = self.session_names(cx);
         let mut items = Vec::new();
         let shortcut = |keys: &str| -> String {
             if cfg!(target_os = "macos") {
@@ -612,12 +621,20 @@ impl Workspace {
         }
 
         for (index, tab) in self.tabs.iter().enumerate() {
-            let Some(view) = tab.panes.get(tab.focused).map(|p| p.view.read(cx)) else {
+            let Some(pane) = tab.panes.get(tab.focused) else {
                 continue;
             };
+            let cwd = pane
+                .view
+                .read(cx)
+                .cwd()
+                .map(str::to_string)
+                .or_else(|| pane.start_cwd.clone());
+            // The sidebar's label; the full folder as the dim detail.
+            let label = names.get(index).map(|(_, l)| l.clone()).unwrap_or_default();
             items.push(PaletteItem {
-                label: view.title(),
-                detail: view.cwd().map(copy::short_folder).unwrap_or_default(),
+                label,
+                detail: cwd.as_deref().map(copy::short_folder).unwrap_or_default(),
                 kind: "session",
                 target: PaletteTarget::Session(index),
             });
@@ -759,8 +776,13 @@ impl Workspace {
 
     /// The project a folder belongs to: its git root, else the folder itself.
     fn project_of(&mut self, cwd: &str) -> PathBuf {
-        if let Some(root) = self.projects.get(cwd) {
-            return root.clone();
+        self.resolve(cwd).1
+    }
+
+    /// The folder with links resolved, and its project.
+    fn resolve(&mut self, cwd: &str) -> (PathBuf, PathBuf) {
+        if let Some(found) = self.projects.get(cwd) {
+            return found.clone();
         }
         // Resolve links, so /var/… and /private/var/… are one project. (Not on Windows, where
         // it would turn C:\… into \\?\C:\….)
@@ -773,9 +795,73 @@ impl Workspace {
             .ancestors()
             .find(|dir| dir.join(".git").exists())
             .map(Path::to_path_buf)
-            .unwrap_or(path);
-        self.projects.insert(cwd.to_string(), root.clone());
-        root
+            .unwrap_or_else(|| path.clone());
+        self.projects
+            .insert(cwd.to_string(), (path.clone(), root.clone()));
+        (path, root)
+    }
+
+    /// Each session's project and short label, in sidebar order (see `naming`).
+    pub(crate) fn session_names(&mut self, cx: &App) -> Vec<(Option<String>, String)> {
+        let mut facts = Vec::with_capacity(self.tabs.len());
+        for index in 0..self.tabs.len() {
+            let (cwd, program, shell) = {
+                let tab = &self.tabs[index];
+                match tab.panes.get(tab.focused) {
+                    Some(pane) => {
+                        let view = pane.view.read(cx);
+                        (
+                            view.cwd()
+                                .map(str::to_string)
+                                .or_else(|| pane.start_cwd.clone()),
+                            view.running_program(),
+                            view.shell_label(),
+                        )
+                    }
+                    None => (None, None, String::new()),
+                }
+            };
+            let (cwd, project) = match cwd {
+                Some(cwd) => {
+                    let (path, root) = self.resolve(&cwd);
+                    (
+                        Some(path.to_string_lossy().into_owned()),
+                        Some(root.to_string_lossy().into_owned()),
+                    )
+                }
+                None => (None, None),
+            };
+            facts.push(naming::SessionFacts {
+                project,
+                cwd,
+                program,
+                shell,
+            });
+        }
+        let labels = naming::session_labels(&facts);
+        facts.into_iter().map(|f| f.project).zip(labels).collect()
+    }
+
+    /// The branch checked out in a project, from `.git/HEAD`, at most a few seconds old.
+    fn branch(&mut self, root: &Path) -> Option<String> {
+        if let Some((read, branch)) = self.branches.get(root)
+            && read.elapsed() < Duration::from_secs(3)
+        {
+            return branch.clone();
+        }
+        let branch = naming::git_branch(root);
+        self.branches
+            .insert(root.to_path_buf(), (Instant::now(), branch.clone()));
+        branch
+    }
+
+    /// "acme-web › api" for the focused session.
+    fn focused_breadcrumb(&mut self, cx: &App) -> String {
+        let names = self.session_names(cx);
+        names
+            .get(self.active)
+            .map(|(project, label)| naming::breadcrumb(project.as_deref(), label))
+            .unwrap_or_default()
     }
 
     // ----- saved sessions and project spaces ------------------------------------------------
@@ -920,40 +1006,21 @@ impl Workspace {
         let p = palette();
         let fullscreen = window.is_fullscreen();
         // Group sessions by project, in order of first appearance.
-        let mut groups: Vec<(PathBuf, Vec<usize>)> = Vec::new();
-        for index in 0..self.tabs.len() {
-            let cwd = {
-                let tab = &self.tabs[index];
-                tab.panes
-                    .get(tab.focused)
-                    .and_then(|pane| pane.view.read(cx).cwd().map(str::to_string))
-            };
-            let project = cwd.map(|cwd| self.project_of(&cwd)).unwrap_or_default();
-            match groups.iter_mut().find(|(root, _)| *root == project) {
+        let names = self.session_names(cx);
+        let mut groups: Vec<(Option<String>, Vec<usize>)> = Vec::new();
+        for (index, (project, _)) in names.iter().enumerate() {
+            match groups.iter_mut().find(|(root, _)| root == project) {
                 Some((_, tabs)) => tabs.push(index),
-                None => groups.push((project, vec![index])),
+                None => groups.push((project.clone(), vec![index])),
             }
         }
 
         let mut list = div().flex().flex_col().gap(px(2.));
         for (root, tabs) in groups {
-            let home = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .unwrap_or_default();
-            let name = if !home.is_empty() && root == Path::new(&home) {
-                "~".to_string()
-            } else {
-                root.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| {
-                        if root.as_os_str().is_empty() {
-                            // No folder reported (a shell without integration, or one still starting).
-                            "other".into()
-                        } else {
-                            copy::short_folder(&root.to_string_lossy())
-                        }
-                    })
-            };
+            // The repository or folder name; "~" for home; "other" when no folder is known yet
+            // (a shell without integration, or one still starting).
+            let name = naming::project_name(root.as_deref());
+            let root = root.map(PathBuf::from).unwrap_or_default();
             // Projects (folders in git) get their colour; home and loose folders do not.
             let color = (!root.as_os_str().is_empty() && root.join(".git").exists())
                 .then(|| state::project_color(&root.to_string_lossy(), &config::current()));
@@ -980,7 +1047,8 @@ impl Workspace {
                     .child(SharedString::from(name)),
             );
             for index in tabs {
-                list = list.child(self.render_session_row(index, cx));
+                let label = names[index].1.clone();
+                list = list.child(self.render_session_row(index, label, cx));
             }
         }
 
@@ -1075,12 +1143,15 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_session_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_session_row(
+        &self,
+        index: usize,
+        title: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = palette();
         let tab = &self.tabs[index];
         let active = index == self.active;
-        let view = tab.panes.get(tab.focused).map(|pane| pane.view.read(cx));
-        let title = view.map(|v| v.title()).unwrap_or_default();
         // A session's status is the busiest of its panes.
         let status = tab
             .panes
@@ -1170,7 +1241,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette();
         let leading =
             if chrome() == Chrome::Mac && !self.sidebar_visible() && !window.is_fullscreen() {
@@ -1178,10 +1249,13 @@ impl Workspace {
             } else {
                 px(10.)
             };
-        let title = self
-            .focused_view()
-            .map(|v| v.read(cx).title())
-            .unwrap_or_default();
+        // A dim breadcrumb on the left ("acme-web › api") and the branch on the right.
+        let title = self.focused_breadcrumb(cx);
+        let branch = self
+            .focused_cwd(cx)
+            .map(|cwd| self.project_of(&cwd.to_string_lossy()))
+            .filter(|root| root.join(".git").exists())
+            .and_then(|root| self.branch(&root));
         div()
             .id("titlebar")
             .flex_none()
@@ -1206,8 +1280,6 @@ impl Workspace {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .flex()
-                    .justify_center()
                     .font_family(FONT_FAMILY)
                     .text_size(px(11.))
                     .text_color(theme::hsla(p.muted))
@@ -1216,6 +1288,18 @@ impl Workspace {
                     .text_ellipsis()
                     .child(SharedString::from(title)),
             )
+            .when_some(branch, |d, branch| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .pl(px(12.))
+                        .pr(px(PANE_GAP_RIGHT))
+                        .font_family(FONT_FAMILY)
+                        .text_size(px(11.))
+                        .text_color(theme::hsla(p.muted))
+                        .child(format!("\u{e0a0} {branch}")),
+                )
+            })
             .when(chrome() != Chrome::Mac && !self.rail_visible(), |d| {
                 d.child(window_controls(window))
             })
