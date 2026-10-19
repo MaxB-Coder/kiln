@@ -77,6 +77,9 @@ screen was locked or the test window sat behind your work, where macOS stops dra
 
 - Actions minutes and visibility (item 0): the repository is public (2026-10-19), so CI builds
   all three systems on every push again, without minute limits.
+- Updates and releases (items 2 and 3): the repository is public, so the default download
+  address works. The signing key is yours to make and keep: `./scripts/setup-updates.sh` does
+  the key, the GitHub secrets and variables, weekly releases and the first release.
 - Licence (item 1): MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`); `pty_loop.rs` stays
   Apache-2.0 only, as it is adapted from alacritty_terminal. Both licences ship in every package.
 

@@ -100,6 +100,10 @@ Releases: `.github/workflows/release.yml` builds, installs and starts the instal
 three systems and publishes only when asked. Its header lists the optional settings: update
 address and key, Developer ID signing and notarisation, Azure Trusted Signing.
 
+To turn on signed in-app updates and weekly releases, run `./scripts/setup-updates.sh` once. It
+makes the update-signing key, stores it as GitHub secrets, sets the update address and public
+key, and walks you through backing the key up.
+
 ## Licence
 
 Kiln is licensed under either of
