@@ -1,7 +1,8 @@
 //! The PTY read/write loop.
 //!
 //! Adapted from `alacritty_terminal/src/event_loop.rs` (Apache-2.0, Copyright The Alacritty
-//! Project). Kiln runs its own copy for one reason: it feeds the engine up to each
+//! Project). Because of that, this file is licensed under Apache-2.0 only (see LICENSE-APACHE),
+//! not the MIT OR Apache-2.0 choice that covers the rest of Kiln. Kiln runs its own copy for one reason: it feeds the engine up to each
 //! shell-integration mark and records the cursor position there (see `marks`). The engine
 //! itself is used unmodified.
 //!

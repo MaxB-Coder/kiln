@@ -75,4 +75,9 @@ screen was locked or the test window sat behind your work, where macOS stops dra
 
 ## Answered
 
+- Actions minutes and visibility (item 0): the repository is public (2026-10-19), so CI builds
+  all three systems on every push again, without minute limits.
+- Licence (item 1): MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`); `pty_loop.rs` stays
+  Apache-2.0 only, as it is adapted from alacritty_terminal. Both licences ship in every package.
+
 - Push to `MaxB-Coder/kiln`: yes, the private repository (2026-10-18).

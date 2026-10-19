@@ -102,6 +102,17 @@ address and key, Developer ID signing and notarisation, Azure Trusted Signing.
 
 ## Licence
 
-Not chosen yet. Kiln bundles JetBrains Mono (SIL OFL 1.1) with Nerd Fonts patches (MIT), and
-adapts alacritty_terminal's PTY loop (Apache-2.0); every package carries
-`THIRD_PARTY_LICENSES.md` with the licences of all the crates in the binary.
+Kiln is licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. One file is the exception: `crates/kiln_term/src/pty_loop.rs` is adapted from
+alacritty_terminal's event loop and stays under Apache-2.0 only.
+
+Unless you explicitly state otherwise, any contribution you submit for inclusion in Kiln, as
+defined in the Apache-2.0 licence, is dual licensed as above, without any additional terms.
+
+Kiln bundles JetBrains Mono (SIL OFL 1.1) with Nerd Fonts patches (MIT). Every package carries
+both Kiln licences, the font licences, and `THIRD_PARTY_LICENSES.md` with the licences of all
+the crates in the binary.

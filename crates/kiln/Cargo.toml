@@ -3,6 +3,8 @@ name = "kiln"
 version = "0.0.1"
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Kiln terminal app"
 
 [dependencies]
@@ -63,6 +65,8 @@ beforePackagingCommand = "cargo build --profile dist --locked -p kiln"
 binaries = [{ path = "kiln", main = true }]
 # Licences that must travel with the app (scripts/package.sh writes the first one).
 resources = [
+  "../../LICENSE-MIT",
+  "../../LICENSE-APACHE",
   "../../target/THIRD_PARTY_LICENSES.md",
   "../../assets/fonts/JetBrainsMono-OFL.txt",
   "../../assets/fonts/NerdFonts-LICENSE",
