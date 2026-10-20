@@ -42,6 +42,9 @@ const SIDEBAR_WIDTH: Pixels = px(220.);
 /// Room for the macOS traffic lights when the sidebar is hidden.
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(78.);
 const PANE_GAP: Pixels = px(10.);
+/// Focus mode's reading width: this share of the window, at most this many columns.
+const READING_SHARE: f32 = 0.72;
+const READING_COLUMNS: f32 = 100.;
 /// Space after the branch at the right end of the title strip (the panes' own padding).
 const PANE_GAP_RIGHT: f32 = 14.;
 
@@ -1013,11 +1016,23 @@ impl Workspace {
     }
 
     /// Saves the sessions every two seconds when they changed.
+    /// Saves the sessions every two seconds when they changed, and re-reads the focused pane's
+    /// branch and changes every six (files change outside the shell too).
     fn watch_state(&self, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn_in(window, async move |this, cx| {
+            let mut tick = 0u32;
             loop {
                 cx.background_executor().timer(Duration::from_secs(2)).await;
-                if this.update(cx, |this, cx| this.save_state(cx)).is_err() {
+                tick = tick.wrapping_add(1);
+                let updated = this.update(cx, |this, cx| {
+                    this.save_state(cx);
+                    if tick % 3 == 0
+                        && let Some(view) = this.focused_view()
+                    {
+                        view.update(cx, |view, cx| view.refresh_git(cx));
+                    }
+                });
+                if updated.is_err() {
                     break;
                 }
             }
@@ -1275,13 +1290,54 @@ impl Workspace {
             } else {
                 px(10.)
             };
-        // A dim breadcrumb on the left ("acme-web › api") and the branch on the right.
+        // A dim breadcrumb on the left ("acme-web › api"); on the right the branch and its
+        // change count, or in focus mode how many things are running.
         let title = self.focused_breadcrumb(cx);
-        let branch = self
-            .focused_cwd(cx)
-            .map(|cwd| self.project_of(&cwd.to_string_lossy()))
-            .filter(|root| root.join(".git").exists())
-            .and_then(|root| self.branch(&root));
+        let git = self
+            .focused_view()
+            .and_then(|view| view.read(cx).git().cloned());
+        let branch = match &git {
+            Some(git) => Some((
+                git.branch.clone().unwrap_or_else(|| "detached".into()),
+                git.changes,
+            )),
+            // Before the first read: the branch from .git/HEAD, without a count.
+            None => self
+                .focused_cwd(cx)
+                .map(|cwd| self.project_of(&cwd.to_string_lossy()))
+                .filter(|root| root.join(".git").exists())
+                .and_then(|root| self.branch(&root))
+                .map(|branch| (branch, 0)),
+        };
+        let running = self.running_count(cx);
+        let right: Option<AnyElement> = if self.focus_mode {
+            (running > 0).then(|| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().size(px(5.)).rounded_full().bg(theme::hsla(p.ok)))
+                    .child(format!("{running} running"))
+                    .into_any_element()
+            })
+        } else {
+            branch.map(|(branch, changes)| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(6.))
+                    .child(format!("\u{e0a0} {branch}"))
+                    .when(changes > 0, |d| {
+                        d.child(
+                            div()
+                                .text_color(theme::hsla(p.modified))
+                                .child(format!("✱{changes}")),
+                        )
+                    })
+                    .into_any_element()
+            })
+        };
         div()
             .id("titlebar")
             .flex_none()
@@ -1314,7 +1370,7 @@ impl Workspace {
                     .text_ellipsis()
                     .child(SharedString::from(title)),
             )
-            .when_some(branch, |d, branch| {
+            .when_some(right, |d, right| {
                 d.child(
                     div()
                         .flex_none()
@@ -1323,13 +1379,22 @@ impl Workspace {
                         .font_family(FONT_FAMILY)
                         .text_size(px(11.))
                         .text_color(theme::hsla(p.muted))
-                        .child(format!("\u{e0a0} {branch}")),
+                        .child(right),
                 )
             })
             .when(chrome() != Chrome::Mac && !self.rail_visible(), |d| {
                 d.child(window_controls(window))
             })
             .into_any_element()
+    }
+
+    /// Panes with a command running, in every session.
+    fn running_count(&self, cx: &App) -> usize {
+        self.tabs
+            .iter()
+            .flat_map(|tab| tab.panes.iter())
+            .filter(|pane| pane.view.read(cx).status() == PaneStatus::Running)
+            .count()
     }
 
     fn sidebar_visible(&self) -> bool {
@@ -1376,7 +1441,7 @@ impl Workspace {
         )
     }
 
-    fn render_panes(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_panes(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(tab) = self.tabs.get(self.active) else {
             let p = palette();
             let message = self
@@ -1391,7 +1456,20 @@ impl Workspace {
                 .into_any_element();
         };
         let several = tab.panes.len() > 1 && !self.focus_mode;
-        let mut row = div().size_full().flex().flex_row().gap(PANE_GAP);
+        // Focus mode: the pane narrows to reading width, centred: about 72% of the window,
+        // and never wider than about 100 columns.
+        let reading = self.focus_mode.then(|| {
+            let window_w = f32::from(window.viewport_size().width);
+            let columns = f32::from(self.metrics.cell_width) * READING_COLUMNS
+                + 2. * crate::terminal_view::PADDING_X;
+            px((window_w * READING_SHARE).min(columns))
+        });
+        let mut row = div()
+            .size_full()
+            .flex()
+            .flex_row()
+            .justify_center()
+            .gap(PANE_GAP);
         for (i, pane) in tab.panes.iter().enumerate() {
             let focused = i == tab.focused;
             if self.focus_mode && !focused {
@@ -1401,7 +1479,10 @@ impl Workspace {
             row = row.child(
                 div()
                     .id(("pane", i))
-                    .flex_1()
+                    .map(|d| match reading {
+                        Some(width) => d.flex_none().w(width),
+                        None => d.flex_1(),
+                    })
                     .min_w_0()
                     .h_full()
                     .relative()
@@ -1640,7 +1721,7 @@ impl Render for Workspace {
             None
         };
         let titlebar = self.render_titlebar(window, cx);
-        let panes = self.render_panes(cx);
+        let panes = self.render_panes(window, cx);
         let search = self.render_search_bar();
         let palette_overlay = self.palette.as_ref().map(|(palette, _)| {
             div()

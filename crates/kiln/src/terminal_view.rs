@@ -173,8 +173,12 @@ pub struct TerminalView {
     search_highlights: SearchHighlights,
     title: Option<String>,
     cwd: Option<String>,
-    /// Dim context in the input bar ("node 22.3.0", "WSL · Ubuntu").
-    context: Option<String>,
+    /// The WSL distribution's label ("WSL · Ubuntu"), for the input box's pills.
+    wsl: Option<String>,
+    /// Branch and changes for the input box and the header; `None` outside a repository.
+    git: Option<crate::pills::GitSummary>,
+    git_busy: bool,
+    git_again: bool,
     context_for: Option<ContextKey>,
     runtimes: Vec<(String, String)>,
     _context_task: Option<Task<()>>,
@@ -261,7 +265,10 @@ impl TerminalView {
             search_highlights: SearchHighlights::default(),
             title: None,
             cwd: None,
-            context: None,
+            wsl: None,
+            git: None,
+            git_busy: false,
+            git_again: false,
             context_for: None,
             runtimes: Vec::new(),
             _context_task: None,
@@ -283,6 +290,7 @@ impl TerminalView {
 
     fn handle_events(&mut self, batch: Vec<SessionEvent>, _: &mut Window, cx: &mut Context<Self>) {
         let mut cleared = false;
+        let mut git_dirty = false;
         for event in batch {
             match event {
                 SessionEvent::Term(TermEvent::Wakeup) => {
@@ -332,6 +340,9 @@ impl TerminalView {
                 SessionEvent::Mark(record) => {
                     log::debug!("mark {record:?}");
                     if let Mark::Cwd { path, .. } = &record.mark {
+                        if self.cwd.as_deref() != Some(path.as_str()) {
+                            git_dirty = true;
+                        }
                         self.cwd = Some(path.clone());
                     }
                 }
@@ -349,6 +360,8 @@ impl TerminalView {
                             cwd: block.cwd.clone(),
                         });
                     }
+                    // A command may have changed files.
+                    git_dirty = true;
                     if block.clears_timeline() {
                         self.blocks.retain(|b| b.pinned.get());
                         cleared = true;
@@ -361,6 +374,9 @@ impl TerminalView {
         }
         self.sync_list(cleared);
         self.refresh_context(cx);
+        if git_dirty {
+            self.refresh_git(cx);
+        }
         cx.emit(PaneEvent::Changed);
         cx.notify();
     }
@@ -374,7 +390,7 @@ impl TerminalView {
             return;
         }
         self.context_for = Some(key.clone());
-        let wsl = crate::context::wsl_label(self.session.shell());
+        self.wsl = crate::context::wsl_label(self.session.shell());
         self._context_task = Some(cx.spawn(async move |this, cx| {
             let runtimes = cx
                 .background_executor()
@@ -384,19 +400,64 @@ impl TerminalView {
                         .unwrap_or_default()
                 })
                 .await;
-            let mut parts: Vec<String> = runtimes
-                .iter()
-                .take(2)
-                .map(|(name, version)| format!("{name} {version}"))
-                .collect();
-            parts.extend(wsl);
             let _ = this.update(cx, |this, cx| {
-                this.context = (!parts.is_empty()).then(|| parts.join("  ·  "));
                 this.runtimes = runtimes;
                 cx.emit(PaneEvent::Changed);
                 cx.notify();
             });
         }));
+    }
+
+    /// Re-reads the branch and the change count in the background (after a command, when the
+    /// folder changes, and every few seconds for the focused pane). A read already running is
+    /// followed by one more, never stacked.
+    pub fn refresh_git(&mut self, cx: &mut Context<Self>) {
+        if self.git_busy {
+            self.git_again = true;
+            return;
+        }
+        let Some(cwd) = self.cwd.clone() else {
+            return;
+        };
+        self.git_busy = true;
+        cx.spawn(async move |this, cx| {
+            let status = cx
+                .background_executor()
+                .spawn(async move { crate::git::status(&cwd) })
+                .await;
+            let summary = status.map(|s| crate::pills::GitSummary {
+                root: s.root,
+                branch: s.branch,
+                changes: s.files.len(),
+            });
+            let _ = this.update(cx, |this, cx| {
+                this.git_busy = false;
+                if this.git != summary {
+                    this.git = summary;
+                    cx.emit(PaneEvent::Changed);
+                    cx.notify();
+                }
+                if std::mem::take(&mut this.git_again) {
+                    this.refresh_git(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Branch and changes of the pane's repository, once read.
+    pub fn git(&self) -> Option<&crate::pills::GitSummary> {
+        self.git.as_ref()
+    }
+
+    /// The pills under the prompt.
+    pub fn pills(&self) -> crate::pills::Pills {
+        crate::pills::pills(
+            self.cwd.as_deref(),
+            self.git.as_ref(),
+            &self.runtimes,
+            self.wsl.as_deref(),
+        )
     }
 
     /// Language runtimes the current project uses, with versions.
@@ -1512,6 +1573,63 @@ impl TerminalView {
     }
 }
 
+/// The row of pills under the prompt (nothing when there is nothing to say).
+fn render_pills(pills: &crate::pills::Pills) -> AnyElement {
+    let p = palette();
+    let pill = |bg: u32, fg: u32| {
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(4.))
+            .h(px(19.))
+            .px(px(9.))
+            .rounded_full()
+            .bg(theme::hsla(bg))
+            .text_color(theme::hsla(fg))
+    };
+    let mut row = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.))
+        .font_family(FONT_FAMILY)
+        .text_size(px(10.5))
+        .font_weight(gpui::FontWeight::BOLD);
+    let mut any = false;
+    if let Some(project) = &pills.project {
+        row = row.child(pill(p.accent, p.bar).child(SharedString::from(project.clone())));
+        any = true;
+    }
+    if let Some((branch, changes)) = &pills.branch {
+        let mut branch_pill = pill(p.bg1, theme::blend(p.fg, p.fg_dim, 0.5))
+            .child(SharedString::from(format!("\u{e0a0} {branch}")));
+        if *changes > 0 {
+            branch_pill = branch_pill.child(
+                div()
+                    .text_color(theme::hsla(p.accent))
+                    .child(SharedString::from(format!("✱{changes}"))),
+            );
+        }
+        row = row.child(branch_pill);
+        any = true;
+    }
+    for runtime in &pills.runtimes {
+        row = row.child(pill(p.bg, p.ansi[7]).child(SharedString::from(runtime.clone())));
+        any = true;
+    }
+    if let Some(wsl) = &pills.wsl {
+        row = row.child(pill(p.bg, p.ansi[7]).child(SharedString::from(wsl.clone())));
+        any = true;
+    }
+    if any {
+        div().pt(px(8.)).child(row).into_any_element()
+    } else {
+        div().into_any_element()
+    }
+}
+
 fn region_bounds(region: &HitRegion) -> Bounds<Pixels> {
     match region {
         HitRegion::Live { bounds, .. } | HitRegion::Block { bounds, .. } => *bounds,
@@ -1557,13 +1675,8 @@ impl Render for TerminalView {
         let entity: Entity<Self> = cx.entity();
 
         enum Layout {
-            Classic {
-                top: usize,
-                rows: usize,
-            },
-            Blocks {
-                prompt: Option<(usize, usize, usize, usize)>,
-            },
+            Classic { top: usize, rows: usize },
+            Blocks { prompt: Option<(usize, usize)> },
         }
         let layout = {
             let term = self.session.term().lock();
@@ -1584,13 +1697,7 @@ impl Render for TerminalView {
                 let prompt = (live.phase == Phase::Prompt).then(|| {
                     let top = live.prompt_top.unwrap_or(cursor_abs).min(cursor_abs);
                     let last = Self::last_used_row(&term, top, cursor_abs);
-                    // How far the first line's text reaches, so the context can step aside.
-                    let row = &grid[Line(top as i32 - history as i32)];
-                    let used = (0..grid.columns())
-                        .rev()
-                        .find(|&c| row[Column(c)].c != ' ')
-                        .map_or(0, |c| c + 1);
-                    (top, last - top + 1, used, grid.columns())
+                    (top, last - top + 1)
                 });
                 Layout::Blocks { prompt }
             }
@@ -1627,18 +1734,15 @@ impl Render for TerminalView {
                         list(self.list_state.clone(), cx.processor(Self::render_item)).size_full(),
                     ),
                 )
-                .when_some(prompt, |d, (top, rows, used, columns)| {
-                    // The input: a raised, rounded box inset from the pane's edges, growing
-                    // upward with completion menus and second lines. Dim context (Node's
-                    // version, the WSL distribution) sits inside it on the right while the
-                    // typed line leaves room for it.
+                .when_some(prompt, |d, (top, rows)| {
+                    // The input: a raised, rounded box inset from the pane's edges. The shell's
+                    // line on top (growing upward with completion menus and second lines), and
+                    // under it the pills Kiln draws: project, branch and changes, runtimes,
+                    // and the WSL distribution.
                     let inner_x = PADDING_X - INPUT_INSET;
                     let p = palette();
                     let input_bg = self.tint().map_or(p.raised, |(tint, _)| tint.raised(&p));
-                    let context = self.context.clone().filter(|context| {
-                        let cells = context.chars().count() * 11 / 13 + 4;
-                        used + cells < columns
-                    });
+                    let pills = self.pills();
                     d.child(
                         div()
                             .flex_none()
@@ -1648,12 +1752,14 @@ impl Render for TerminalView {
                             .pb(px(INPUT_INSET + 2.))
                             .child(
                                 div()
-                                    .relative()
                                     .w_full()
+                                    .flex()
+                                    .flex_col()
                                     .rounded(px(INPUT_RADIUS))
                                     .bg(theme::hsla(input_bg))
                                     .px(px(inner_x))
-                                    .py(px(8.))
+                                    .pt(px(8.))
+                                    .pb(px(9.))
                                     .child(LiveElement::new(
                                         entity,
                                         self.focus.clone(),
@@ -1661,21 +1767,7 @@ impl Render for TerminalView {
                                         top,
                                         rows,
                                     ))
-                                    .when_some(context, |d, context| {
-                                        d.child(
-                                            div()
-                                                .absolute()
-                                                .top(px(8.))
-                                                .right(px(inner_x))
-                                                .h(self.metrics.line_height)
-                                                .flex()
-                                                .items_center()
-                                                .font_family(FONT_FAMILY)
-                                                .text_size(px(11.))
-                                                .text_color(theme::hsla(p.muted))
-                                                .child(context),
-                                        )
-                                    }),
+                                    .child(render_pills(&pills)),
                             ),
                     )
                 })
