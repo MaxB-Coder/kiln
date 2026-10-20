@@ -1026,7 +1026,7 @@ impl Workspace {
                 tick = tick.wrapping_add(1);
                 let updated = this.update(cx, |this, cx| {
                     this.save_state(cx);
-                    if tick % 3 == 0
+                    if tick.is_multiple_of(3)
                         && let Some(view) = this.focused_view()
                     {
                         view.update(cx, |view, cx| view.refresh_git(cx));
