@@ -57,7 +57,10 @@ function global:prompt {
         $out += "$esc]1337;KilnTools=$(__KilnEncode $tools)$bel"
     }
     $out += "$esc]133;A$bel"
-    if ($kiln -and -not $env:STARSHIP_SHELL) {
+    # Starship's own prompt function, not $env:STARSHIP_SHELL (inherited from wherever Kiln was
+    # started).
+    $starship = "$global:__KilnUserPrompt" -match 'starship'
+    if ($kiln -and -not $starship) {
         $good = $global:__KilnLastOk
         $rgb = if ($good) { $env:KILN_PROMPT_OK } else { $env:KILN_PROMPT_FAIL }
         if (-not $rgb) { $rgb = if ($good) { '224;123;57' } else { '184;100;90' } }

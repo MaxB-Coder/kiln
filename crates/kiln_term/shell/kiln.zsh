@@ -61,7 +61,9 @@ _kiln_precmd() {
 }
 
 _kiln_wrap_prompt() {
-  if [[ ${KILN_PROMPT-} == kiln && -z ${STARSHIP_SHELL-} ]]; then
+  # Starship's own hook, not $STARSHIP_SHELL: that variable is inherited from wherever Kiln
+  # was started.
+  if [[ ${KILN_PROMPT-} == kiln ]] && (( ! ${+functions[starship_precmd]} )); then
     local color=${KILN_PROMPT_OK:-224;123;57}
     # Ctrl-C (130) is not a failure.
     (( _kiln_last != 0 && _kiln_last != 130 )) && color=${KILN_PROMPT_FAIL:-184;100;90}

@@ -80,7 +80,9 @@ fi
 # Runs last in PROMPT_COMMAND (after any prompt theme): sets Kiln's prompt, then from here on
 # the next command is the user's.
 _kiln_arm() {
-  if [[ ${KILN_PROMPT-} == kiln && -z ${STARSHIP_SHELL-} ]]; then
+  # Starship's own hook, not $STARSHIP_SHELL: that variable is inherited from wherever Kiln
+  # was started.
+  if [[ ${KILN_PROMPT-} == kiln ]] && ! declare -F starship_precmd >/dev/null; then
     local color=${KILN_PROMPT_OK:-224;123;57}
     if [[ ${_kiln_last-0} != 0 && ${_kiln_last-0} != 130 ]]; then
       color=${KILN_PROMPT_FAIL:-184;100;90}

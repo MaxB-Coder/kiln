@@ -192,7 +192,10 @@ fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptCell; 2]> {
             Color::Spec(rgb) => Some((rgb.r, rgb.g, rgb.b)),
             _ => None,
         };
-        let _ = grid.columns();
+        let text: String = (0..grid.columns())
+            .map(|c| grid[Line(line.0)][Column(c)].c)
+            .collect();
+        eprintln!("prompt line: {:?}", text.trim_end());
         (cell.c, rgb)
     };
 
