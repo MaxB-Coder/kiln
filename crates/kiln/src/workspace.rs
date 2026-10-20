@@ -1405,37 +1405,41 @@ impl Workspace {
         self.rail.is_some() && !self.focus_mode
     }
 
+    /// Find: a bar across the top of the pane's timeline, "⌕ query" on the left and the count
+    /// with the keys on the right.
     fn render_search_bar(&self) -> Option<AnyElement> {
         let search = self.search.as_ref()?;
         let p = palette();
-        let count = match (search.current, search.matches.len()) {
-            (_, 0) => "no matches".to_string(),
-            (Some(i), n) => format!("{}/{}", i + 1, n),
-            (None, n) => format!("{n}"),
-        };
+        let status = find_status(search.current, search.matches.len());
+        let inset = crate::terminal_view::PADDING_X - 9.;
         Some(
             div()
                 .absolute()
-                .top(px(8.))
-                .right(px(16.))
-                .w(px(320.))
+                .top(px(6.))
+                .left(px(inset))
+                .right(px(inset))
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap(px(10.))
-                .px(px(12.))
-                .py(px(8.))
+                .px(px(11.))
+                .py(px(5.))
                 .rounded(px(8.))
-                .bg(theme::hsla(p.bar))
-                .shadow_lg()
+                .bg(theme::hsla(p.raised))
                 .font_family(FONT_FAMILY)
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(theme::hsla(p.accent))
+                        .child("⌕"),
+                )
                 .child(div().flex_1().min_w_0().child(search.input.clone()))
                 .child(
                     div()
                         .flex_none()
                         .text_size(px(11.))
                         .text_color(theme::hsla(p.muted))
-                        .child(count),
+                        .child(status),
                 )
                 .into_any_element(),
         )
@@ -1502,10 +1506,23 @@ impl Workspace {
                             }
                         }),
                     )
-                    .child(pane.view.clone()),
+                    .child(pane.view.clone())
+                    .when(
+                        self.search.as_ref().is_some_and(|s| s.pane == pane.view),
+                        |d| d.children(self.render_search_bar()),
+                    ),
             );
         }
         row.into_any_element()
+    }
+}
+
+/// The find bar's right side: "2 of 5 · ⏎ next · ⇧⏎ previous · esc".
+pub fn find_status(current: Option<usize>, total: usize) -> String {
+    match (current, total) {
+        (_, 0) => "no matches · esc".to_string(),
+        (Some(i), n) => format!("{} of {n} · ⏎ next · ⇧⏎ previous · esc", i + 1),
+        (None, n) => format!("{n} · ⏎ next · ⇧⏎ previous · esc"),
     }
 }
 
@@ -1722,7 +1739,6 @@ impl Render for Workspace {
         };
         let titlebar = self.render_titlebar(window, cx);
         let panes = self.render_panes(window, cx);
-        let search = self.render_search_bar();
         let palette_overlay = self.palette.as_ref().map(|(palette, _)| {
             div()
                 .id("palette-scrim")
@@ -1851,14 +1867,7 @@ impl Render for Workspace {
                     .flex()
                     .flex_col()
                     .child(titlebar)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .relative()
-                            .child(panes)
-                            .when_some(search, |d, s| d.child(s)),
-                    ),
+                    .child(div().flex_1().min_h_0().relative().child(panes)),
             )
             .when_some(rail, |d, rail| d.child(rail))
             .when_some(palette_overlay, |d, overlay| d.child(overlay))
@@ -1870,6 +1879,15 @@ impl Render for Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_find_bar_says_where_you_are() {
+        assert_eq!(
+            find_status(Some(1), 5),
+            "2 of 5 · ⏎ next · ⇧⏎ previous · esc"
+        );
+        assert_eq!(find_status(None, 0), "no matches · esc");
+    }
 
     #[test]
     fn notification_tags_round_trip_and_titles_stay_short() {

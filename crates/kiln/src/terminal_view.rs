@@ -35,8 +35,9 @@ use crate::live_element::LiveElement;
 use crate::search::{Match, SearchHighlights, find};
 use crate::theme::{self, palette};
 use crate::{
-    Copy, CopyLastOutput, CopyLastOutputRaw, Paste, ScrollPageDown, ScrollPageUp, ScrollToBottom,
-    ScrollToTop, SelectAll,
+    Copy, CopyLastOutput, CopyLastOutputRaw, ExtendSelectionDown, ExtendSelectionUp, Paste,
+    ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToTop, SelectAll, SelectNextCommand,
+    SelectPrevCommand,
 };
 
 /// Option composes characters on macOS unless the config says it is Alt; Alt sends Esc+key
@@ -57,6 +58,8 @@ pub const PADDING_X: f32 = 20.;
 /// `PADDING_X`, so typed text lines up with the blocks above.
 const INPUT_INSET: f32 = 8.;
 const INPUT_RADIUS: f32 = 10.;
+/// How far a hovered or selected block's background reaches past its text.
+const BLOCK_INSET: f32 = 9.;
 pub const PADDING_TOP: f32 = 10.;
 pub const PADDING_BOTTOM: f32 = 8.;
 
@@ -136,6 +139,32 @@ impl EventEmitter<PaneEvent> for TerminalView {}
 /// The folder and the runtimes on PATH that the input bar's context was computed for.
 type ContextKey = (Option<String>, Vec<(String, String)>);
 
+/// "⧉ Copied, ready to paste" and the first lines of what was copied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CopyNote {
+    pub title: &'static str,
+    pub preview: Vec<String>,
+}
+
+impl CopyNote {
+    /// How many lines of the copied text the note shows.
+    const LINES: usize = 5;
+
+    pub fn new(text: &str, raw: bool) -> Self {
+        CopyNote {
+            title: if raw {
+                "Copied raw output"
+            } else {
+                "Copied, ready to paste"
+            },
+            preview: text.lines().take(Self::LINES).map(str::to_string).collect(),
+        }
+    }
+}
+
+/// How long the copy note stays.
+const NOTE_FOR: Duration = Duration::from_millis(2500);
+
 /// Facts about a pane's session, for the rail.
 #[derive(Clone, Debug)]
 pub struct SessionInfo {
@@ -167,6 +196,11 @@ pub struct TerminalView {
     pub(crate) blocks: Vec<Rc<FrozenBlock>>,
     /// The block under the mouse: it shows at full strength even when old.
     hovered_block: Option<u64>,
+    /// Commands selected as a whole (⌘↑/⌘↓, ⇧-click): anchor and cursor, as block indices.
+    block_selection: Option<(usize, usize)>,
+    /// The note shown for a moment after a copy.
+    copy_note: Option<CopyNote>,
+    note_epoch: usize,
     list_state: ListState,
     list_blocks: usize,
     list_running: bool,
@@ -259,6 +293,9 @@ impl TerminalView {
             last_mouse_cell: None,
             blocks: Vec::new(),
             hovered_block: None,
+            block_selection: None,
+            copy_note: None,
+            note_epoch: 0,
             list_state,
             list_blocks: 0,
             list_running: false,
@@ -663,6 +700,24 @@ impl TerminalView {
         if keystroke.modifiers.platform || self.marked_text.is_some() {
             return;
         }
+        // With commands selected, Enter copies them and Esc lets go; any other key goes to
+        // the shell as usual.
+        if self.block_selection.is_some() {
+            let plain = !keystroke.modifiers.modified();
+            match keystroke.key.as_str() {
+                "enter" if plain => {
+                    self.copy_selected_commands(cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                "escape" if plain => {
+                    self.clear_command_selection(cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                _ => self.block_selection = None,
+            }
+        }
         let mods = mods(&keystroke.modifiers);
         if let Some(bytes) = input::encode_key(&keystroke.key, mods, self.mode(), alt_mode()) {
             self.before_input(cx);
@@ -698,7 +753,10 @@ impl TerminalView {
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = self.selection_text() {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+            self.note_copied(&text, false, cx);
+        } else if self.block_selection.is_some() {
+            self.copy_selected_commands(cx);
         } else if cfg!(not(target_os = "macos")) {
             // Ctrl+Shift+C with nothing selected copies the last output.
             self.copy_last(false, cx);
@@ -735,8 +793,103 @@ impl TerminalView {
             } else {
                 copy::fenced(&block.block)
             };
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+            self.note_copied(&text, raw, cx);
         }
+    }
+
+    /// Shows the copy note for a moment.
+    fn note_copied(&mut self, text: &str, raw: bool, cx: &mut Context<Self>) {
+        self.copy_note = Some(CopyNote::new(text, raw));
+        self.note_epoch += 1;
+        let epoch = self.note_epoch;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(NOTE_FOR).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.note_epoch == epoch {
+                    this.copy_note = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The copy note on screen, if any.
+    pub fn copy_note(&self) -> Option<&CopyNote> {
+        self.copy_note.as_ref()
+    }
+
+    // ----- selecting commands as a whole ----------------------------------------------------
+
+    /// The blocks that are commands (the startup output is not one).
+    fn command_indices(&self) -> Vec<usize> {
+        (0..self.blocks.len())
+            .filter(|&i| !self.blocks[i].block.startup)
+            .collect()
+    }
+
+    /// The selected commands, oldest first.
+    pub fn selected_commands(&self) -> Vec<usize> {
+        let Some((anchor, cursor)) = self.block_selection else {
+            return Vec::new();
+        };
+        let (from, to) = (anchor.min(cursor), anchor.max(cursor));
+        self.command_indices()
+            .into_iter()
+            .filter(|i| (from..=to).contains(i))
+            .collect()
+    }
+
+    /// Moves the selection one command up (`delta` -1) or down (+1); with `extend`, the anchor
+    /// stays and the selection grows or shrinks. Down past the newest command clears it.
+    pub fn step_selection(&mut self, delta: isize, extend: bool, cx: &mut Context<Self>) {
+        let next = stepped(&self.command_indices(), self.block_selection, delta, extend);
+        if next == self.block_selection {
+            return;
+        }
+        self.block_selection = next;
+        if let Some((_, cursor)) = next {
+            self.list_state.scroll_to_reveal_item(cursor);
+        }
+        cx.notify();
+    }
+
+    /// ⇧-click on a command: the selection runs from its anchor (or this command) to it.
+    pub fn extend_selection_to(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.blocks.get(ix).is_none_or(|b| b.block.startup) {
+            return;
+        }
+        let anchor = self.block_selection.map_or(ix, |(anchor, _)| anchor);
+        self.block_selection = Some((anchor, ix));
+        self.timeline_selection = None;
+        cx.notify();
+    }
+
+    /// ⇧-click extends a text selection instead when one is in progress.
+    fn block_selection_blocked(&self) -> bool {
+        self.block_selection.is_none() && self.timeline_selection.is_some_and(|s| !s.is_empty())
+    }
+
+    pub fn clear_command_selection(&mut self, cx: &mut Context<Self>) {
+        if self.block_selection.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Copies the selected commands as one paste-ready block, in order.
+    pub fn copy_selected_commands(&mut self, cx: &mut Context<Self>) {
+        let selected = self.selected_commands();
+        if selected.is_empty() {
+            return;
+        }
+        let blocks: Vec<&kiln_term::Block> =
+            selected.iter().map(|&i| &self.blocks[i].block).collect();
+        let text = copy::fenced_many(&blocks);
+        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+        self.note_copied(&text, false, cx);
+        self.block_selection = None;
     }
 
     pub fn rerun_block(&mut self, item: usize, cx: &mut Context<Self>) {
@@ -1386,9 +1539,13 @@ impl TerminalView {
         };
 
         let hovered = self.hovered_block == Some(block.id);
+        let selected = self.selected_commands().contains(&ix);
+        // Hovered and selected blocks sit on a slightly raised background, actions showing.
+        let lifted = hovered || selected;
         let surface = {
             let p = palette();
-            self.tint().map_or(p.bg, |(tint, _)| tint.background(&p))
+            let base = self.tint().map_or(p.bg, |(tint, _)| tint.background(&p));
+            theme::blend(base, p.raised, 0.7)
         };
         let header = div()
             .relative()
@@ -1428,7 +1585,7 @@ impl TerminalView {
             )
             // The actions cover the end of the header while the block is hovered, so they take
             // no room from the command the rest of the time.
-            .when(!block.startup && hovered, |d| {
+            .when(!block.startup && lifted, |d| {
                 d.child(
                     div()
                         .absolute()
@@ -1460,12 +1617,18 @@ impl TerminalView {
             });
 
         let id = block.id;
-        let dimmed = !latest && !pinned && self.hovered_block != Some(id);
+        let dimmed = !latest && !pinned && !lifted;
         div()
             .id(ElementId::NamedInteger("block".into(), block.id))
             .group(group)
             .w_full()
-            .pt(px(14.))
+            .mt(px(8.))
+            // The background reaches a little past the text on both sides.
+            .mx(px(-BLOCK_INSET))
+            .px(px(BLOCK_INSET))
+            .py(px(6.))
+            .rounded(px(8.))
+            .when(lifted, |d| d.bg(theme::hsla(surface)))
             .flex()
             .flex_col()
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
@@ -1476,6 +1639,16 @@ impl TerminalView {
                 }
                 cx.notify();
             }))
+            // ⇧-click adds commands to the selection, to copy several at once.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if event.modifiers.shift && !this.block_selection_blocked() {
+                        this.extend_selection_to(ix, cx);
+                        cx.stop_propagation();
+                    }
+                }),
+            )
             .when(dimmed, |d| d.opacity(0.6))
             .child(header)
             .when(has_output, |d| {
@@ -1571,6 +1744,53 @@ impl TerminalView {
             self.render_running(cx)
         }
     }
+}
+
+/// The note above the input box after a copy: what was copied, dim, for a moment.
+fn render_copy_note(note: &CopyNote) -> AnyElement {
+    let p = palette();
+    div()
+        .absolute()
+        .bottom(px(8.))
+        .left(gpui::relative(0.2))
+        .right(gpui::relative(0.2))
+        .px(px(13.))
+        .py(px(9.))
+        .rounded(px(10.))
+        .bg(theme::hsla(p.bar))
+        .shadow(vec![gpui::BoxShadow {
+            color: theme::hsla(p.bg2),
+            offset: gpui::point(px(0.), px(0.)),
+            blur_radius: px(0.),
+            spread_radius: px(1.),
+            inset: false,
+        }])
+        .font_family(FONT_FAMILY)
+        .text_size(px(12.))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(8.))
+                .child(div().text_color(theme::hsla(p.accent)).child("⧉"))
+                .child(div().text_color(theme::hsla(p.fg)).child(note.title)),
+        )
+        .child(
+            div()
+                .pt(px(6.))
+                .flex()
+                .flex_col()
+                .text_size(px(11.))
+                .text_color(theme::hsla(p.fg_dim))
+                .children(note.preview.iter().map(|line| {
+                    div()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(SharedString::from(line.clone()))
+                })),
+        )
+        .into_any_element()
 }
 
 /// The row of pills under the prompt (nothing when there is nothing to say).
@@ -1730,9 +1950,19 @@ impl Render for TerminalView {
                 .flex_col()
                 .child(
                     // The list ignores its own padding; pad a wrapper instead.
-                    div().flex_1().min_h_0().w_full().px(px(PADDING_X)).child(
-                        list(self.list_state.clone(), cx.processor(Self::render_item)).size_full(),
-                    ),
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .relative()
+                        .px(px(PADDING_X))
+                        .child(
+                            list(self.list_state.clone(), cx.processor(Self::render_item))
+                                .size_full(),
+                        )
+                        .when_some(self.copy_note.clone(), |d, note| {
+                            d.child(render_copy_note(&note))
+                        }),
                 )
                 .when_some(prompt, |d, (top, rows)| {
                     // The input: a raised, rounded box inset from the pane's edges. The shell's
@@ -1806,6 +2036,22 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::copy_last_output_raw))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::select_all))
+            .on_action(
+                cx.listener(|this, _: &SelectPrevCommand, _, cx| {
+                    this.step_selection(-1, false, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectNextCommand, _, cx| this.step_selection(1, false, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ExtendSelectionUp, _, cx| this.step_selection(-1, true, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ExtendSelectionDown, _, cx| {
+                    this.step_selection(1, true, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &ScrollPageUp, _, cx| this.scroll_page(true, cx)))
             .on_action(cx.listener(|this, _: &ScrollPageDown, _, cx| this.scroll_page(false, cx)))
             .on_action(cx.listener(|this, _: &ScrollToTop, _, cx| this.scroll_to_top(cx)))
@@ -1924,5 +2170,66 @@ impl EntityInputHandler for TerminalView {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         None
+    }
+}
+
+/// Where ⌘↑/⌘↓ take a selection of whole commands, as (anchor, cursor) timeline indices.
+/// `commands` are the commands' indices, oldest first. Up from nothing selects the newest; down
+/// past the newest clears the selection (but only stops when extending).
+pub fn stepped(
+    commands: &[usize],
+    selection: Option<(usize, usize)>,
+    delta: isize,
+    extend: bool,
+) -> Option<(usize, usize)> {
+    let &newest = commands.last()?;
+    let next = match selection {
+        None if delta < 0 => newest,
+        None => return None,
+        Some((_, cursor)) => {
+            let at = commands
+                .iter()
+                .position(|&i| i == cursor)
+                .unwrap_or(commands.len() - 1) as isize
+                + delta;
+            match usize::try_from(at) {
+                Err(_) => commands[0],
+                Ok(at) if at >= commands.len() => return if extend { selection } else { None },
+                Ok(at) => commands[at],
+            }
+        }
+    };
+    match (extend, selection) {
+        (true, Some((anchor, _))) => Some((anchor, next)),
+        _ => Some((next, next)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stepping_through_commands() {
+        // Block 0 is the startup output.
+        let commands = [1, 2, 3, 4];
+        assert_eq!(stepped(&commands, None, -1, false), Some((4, 4)));
+        assert_eq!(stepped(&commands, None, 1, false), None);
+        assert_eq!(stepped(&commands, Some((4, 4)), -1, false), Some((3, 3)));
+        // The oldest stays selected; down past the newest clears.
+        assert_eq!(stepped(&commands, Some((1, 1)), -1, false), Some((1, 1)));
+        assert_eq!(stepped(&commands, Some((4, 4)), 1, false), None);
+        assert_eq!(stepped(&[], None, -1, false), None);
+    }
+
+    #[test]
+    fn extending_keeps_the_anchor() {
+        let commands = [1, 2, 3, 4];
+        assert_eq!(stepped(&commands, Some((4, 4)), -1, true), Some((4, 3)));
+        assert_eq!(stepped(&commands, Some((4, 3)), -1, true), Some((4, 2)));
+        assert_eq!(stepped(&commands, Some((4, 2)), 1, true), Some((4, 3)));
+        assert_eq!(stepped(&commands, Some((2, 4)), 1, true), Some((2, 4)));
+        // Up from nothing with ⇧ starts at the newest.
+        assert_eq!(stepped(&commands, None, -1, true), Some((4, 4)));
     }
 }

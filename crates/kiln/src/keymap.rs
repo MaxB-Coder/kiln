@@ -58,6 +58,25 @@ pub fn bindings(style: KeyStyle) -> Vec<KeyBinding> {
         KeyBinding::new(&k("="), ZoomIn, None),
         KeyBinding::new(&k("-"), ZoomOut, None),
         KeyBinding::new(&k("0"), ZoomReset, None),
+        // Commands as a whole: ⌘↑/⌘↓ select the previous or next, ⇧ adds to the selection.
+        KeyBinding::new(&k("up"), SelectPrevCommand, terminal),
+        KeyBinding::new(&k("down"), SelectNextCommand, terminal),
+        KeyBinding::new(
+            match style {
+                KeyStyle::Mac => "cmd-shift-up",
+                KeyStyle::Pc => "ctrl-alt-shift-up",
+            },
+            ExtendSelectionUp,
+            terminal,
+        ),
+        KeyBinding::new(
+            match style {
+                KeyStyle::Mac => "cmd-shift-down",
+                KeyStyle::Pc => "ctrl-alt-shift-down",
+            },
+            ExtendSelectionDown,
+            terminal,
+        ),
         KeyBinding::new("shift-pageup", ScrollPageUp, terminal),
         KeyBinding::new("shift-pagedown", ScrollPageDown, terminal),
         KeyBinding::new("shift-home", ScrollToTop, terminal),
@@ -124,7 +143,7 @@ impl Group {
             Group::Sessions => "Sessions and windows",
             Group::Panes => "Panes",
             Group::View => "View",
-            Group::CopyEdit => "Copy and edit",
+            Group::CopyEdit => "Commands and copy",
             Group::FindPalette => "Find and palette",
             Group::Scroll => "Scroll",
         }
@@ -151,6 +170,26 @@ const DESCRIPTIONS: &[(&str, &str, Group)] = &[
     ("ZoomIn", "Bigger text", Group::View),
     ("ZoomOut", "Smaller text", Group::View),
     ("ZoomReset", "Actual size", Group::View),
+    (
+        "SelectPrevCommand",
+        "Select previous / next command",
+        Group::CopyEdit,
+    ),
+    (
+        "SelectNextCommand",
+        "Select previous / next command",
+        Group::CopyEdit,
+    ),
+    (
+        "ExtendSelectionUp",
+        "Add commands to the selection",
+        Group::CopyEdit,
+    ),
+    (
+        "ExtendSelectionDown",
+        "Add commands to the selection",
+        Group::CopyEdit,
+    ),
     ("Copy", "Copy", Group::CopyEdit),
     ("Paste", "Paste", Group::CopyEdit),
     ("SelectAll", "Select all", Group::CopyEdit),

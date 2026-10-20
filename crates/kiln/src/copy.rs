@@ -44,16 +44,35 @@ pub fn short_folder(path: &str) -> String {
 /// ```
 /// ````
 pub fn fenced(block: &Block) -> String {
-    let output = block.output_text();
+    fenced_many(&[block])
+}
+
+/// Several commands in one fenced block, in order, a blank line between them.
+pub fn fenced_many(blocks: &[&Block]) -> String {
+    let bodies: Vec<(String, String)> = blocks.iter().map(|b| (b.output_text(), body(b))).collect();
     // A fence longer than any backtick run in the output, so the output cannot close it.
-    let longest = longest_backtick_run(&output).max(2);
+    let longest = bodies
+        .iter()
+        .map(|(output, _)| longest_backtick_run(output))
+        .max()
+        .unwrap_or(0)
+        .max(2);
     let fence = "`".repeat(longest + 1);
-    let folder = block.cwd.as_deref().map(short_folder);
-    let mut out = format!("{fence}console\n");
-    match folder {
-        Some(folder) => out.push_str(&format!("{folder} $ {}\n", block.command)),
-        None => out.push_str(&format!("$ {}\n", block.command)),
-    }
+    let joined = bodies
+        .into_iter()
+        .map(|(_, body)| body)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{fence}console\n{joined}{fence}\n")
+}
+
+/// "folder $ command", the output, and "# exit 0 · 1.2 s", each line ending in a newline.
+fn body(block: &Block) -> String {
+    let output = block.output_text();
+    let mut out = match block.cwd.as_deref().map(short_folder) {
+        Some(folder) => format!("{folder} $ {}\n", block.command),
+        None => format!("$ {}\n", block.command),
+    };
     if !output.is_empty() {
         out.push_str(&output);
         out.push('\n');
@@ -63,8 +82,6 @@ pub fn fenced(block: &Block) -> String {
         None => "exit ?".into(),
     };
     out.push_str(&format!("# {exit} · {}\n", duration_label(block.duration)));
-    out.push_str(&fence);
-    out.push('\n');
     out
 }
 
@@ -120,6 +137,19 @@ mod tests {
         assert_eq!(
             text,
             "```console\n/tmp/project $ cargo test\nok\ndone\n# exit 1 · 2.31 s\n```\n"
+        );
+    }
+
+    #[test]
+    fn several_commands_share_one_block_in_order() {
+        let text = fenced_many(&[
+            &block("ls src", &["auth/  app.ts"], 0),
+            &block("npm test", &["FAIL auth.test.ts"], 1),
+        ]);
+        assert_eq!(
+            text,
+            "```console\n/tmp/project $ ls src\nauth/  app.ts\n# exit 0 · 2.31 s\n\n\
+             /tmp/project $ npm test\nFAIL auth.test.ts\n# exit 1 · 2.31 s\n```\n"
         );
     }
 
