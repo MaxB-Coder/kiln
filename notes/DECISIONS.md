@@ -234,3 +234,16 @@ Newest at the bottom.
   filter matches names and keys ("split", "⌘D", "cmd+d", "ctrl+shift+d"). The palette's
   shortcut hints now come from the keymap too: several were wrong on Windows and Linux
   (Next session showed Ctrl+Shift+] where the binding is Ctrl+Tab).
+- **The concept's ten gaps** (`notes/concept/kiln-concept.html`, checked in
+  `notes/concept-check.md`): pills in the input box (project, branch and change count,
+  runtimes, WSL distribution) replace the dim context line; the header shows the branch and
+  "✱N", or "● N running" in focus mode, which narrows the timeline to 72% (at most 100
+  columns). ⌘↑/⌘↓ (Ctrl+Shift+↑/↓) select whole commands, ⇧ extends (Ctrl+Alt+Shift+↑/↓ on
+  Windows and Linux, since Ctrl+Shift+↑/↓ is taken by moving), and one copy gives all of them
+  in one fence. A note above the input box confirms each copy for 2.5 s. Pinned commands leave
+  the timeline for a strip at its top (3 lines, a click shows up to 24, "pinned · HH:MM" in
+  local time through `jiff`) and survive `clear`; a find match below the fold unfolds the pin.
+  Find is a bar across the top of the pane; the timeline starts below it, while the terminal
+  keeps its size. The palette groups results (Commands, Projects, Sessions, Actions, 4 rows
+  each, 12 when one group has them all) with no type column. The sidebar ends with the
+  palette's keys as a link.

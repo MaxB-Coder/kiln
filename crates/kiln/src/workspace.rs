@@ -20,7 +20,7 @@ use crate::grid_paint::{CellMetrics, FONT_FAMILY};
 use crate::keymap::{self, KeyStyle};
 use crate::logs;
 use crate::naming;
-use crate::palette::{CommandPalette, PaletteEvent, PaletteItem, PaletteTarget};
+use crate::palette::{CommandPalette, PaletteEvent, PaletteGroup, PaletteItem, PaletteTarget};
 use crate::rail::Rail;
 use crate::search::Match;
 use crate::shortcuts::{ShortcutsEvent, ShortcutsView};
@@ -469,6 +469,14 @@ impl Workspace {
             window.focus(&search.input.focus_handle(cx), cx);
             return;
         }
+        // Find moves to this pane.
+        if let Some(old) = self.search.take() {
+            old.pane.update(cx, |pane, cx| {
+                pane.set_search("", cx);
+                pane.set_find_open(false, cx);
+            });
+        }
+        pane.update(cx, |pane, cx| pane.set_find_open(true, cx));
         let input = cx.new(|cx| TextInput::new("Find", cx));
         let events = cx.subscribe_in(
             &input,
@@ -532,6 +540,7 @@ impl Workspace {
         if let Some(search) = self.search.take() {
             search.pane.update(cx, |pane, cx| {
                 pane.set_search("", cx);
+                pane.set_find_open(false, cx);
             });
             self.focus_active(window, cx);
             cx.notify();
@@ -543,6 +552,11 @@ impl Workspace {
     /// Whether the shortcuts pop-up is open.
     pub fn shortcuts_open(&self) -> bool {
         self.shortcuts.is_some()
+    }
+
+    /// Whether the command palette is open.
+    pub fn palette_open(&self) -> bool {
+        self.palette.is_some()
     }
 
     /// The shortcuts pop-up: opens over everything, closes with the same keys, Esc or a click
@@ -610,10 +624,16 @@ impl Workspace {
         // Keys come from the keymap in effect, so they are always the ones that work.
         let style = key_style();
         let mut action = |label: &str, action: Box<dyn Action>| {
+            let mut detail = keymap::keys_for(&*action, cx, style);
+            // Windows and Linux: Ctrl+Shift+C copies the last output when nothing is selected.
+            if detail.is_empty() && action.partial_eq(&CopyLastOutput) {
+                detail = keymap::keys_for(&crate::Copy, cx, style);
+            }
             items.push(PaletteItem {
                 label: label.into(),
-                detail: keymap::keys_for(&*action, cx, style),
-                kind: "action",
+                detail,
+                group: PaletteGroup::Actions,
+                dot: None,
                 target: PaletteTarget::Action(action),
             })
         };
@@ -641,7 +661,8 @@ impl Workspace {
                 PaletteItem {
                     label,
                     detail: String::new(),
-                    kind: "update",
+                    group: PaletteGroup::Actions,
+                    dot: None,
                     target: PaletteTarget::Action(Box::new(InstallUpdate)),
                 },
             );
@@ -662,7 +683,8 @@ impl Workspace {
             items.push(PaletteItem {
                 label,
                 detail: cwd.as_deref().map(copy::short_folder).unwrap_or_default(),
-                kind: "session",
+                group: PaletteGroup::Sessions,
+                dot: None,
                 target: PaletteTarget::Session(index),
             });
         }
@@ -677,26 +699,31 @@ impl Workspace {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| project.root.clone()),
-                detail: copy::short_folder(&project.root),
-                kind: "project",
+                detail: "open".into(),
+                group: PaletteGroup::Projects,
+                dot: Some(state::project_color(&project.root, &config::current())),
                 target: PaletteTarget::Project(root),
             });
         }
 
-        // Past commands from every session, newest first, each once.
+        // Past commands from every session, newest first, each once, with the project they
+        // ran in.
         let mut seen = std::collections::HashSet::new();
-        let mut commands: Vec<String> = Vec::new();
+        let mut commands: Vec<(String, String)> = Vec::new();
         for tab in &self.tabs {
             for pane in &tab.panes {
-                commands.extend(pane.view.read(cx).commands());
+                let view = pane.view.read(cx);
+                let project = view.pills().project.unwrap_or_default();
+                commands.extend(view.commands().into_iter().map(|c| (c, project.clone())));
             }
         }
-        for command in commands.into_iter().rev() {
+        for (command, project) in commands.into_iter().rev() {
             if seen.insert(command.clone()) {
                 items.push(PaletteItem {
                     label: command.clone(),
-                    detail: "run".into(),
-                    kind: "command",
+                    detail: project,
+                    group: PaletteGroup::Commands,
+                    dot: None,
                     target: PaletteTarget::RunCommand(command),
                 });
             }
@@ -1181,6 +1208,25 @@ impl Workspace {
                         .child(SharedString::from(label)),
                 )
             })
+            .child(
+                // The way into the palette, for anyone who has not learnt the keys yet.
+                div().flex_none().px(px(14.)).pt(px(4.)).pb(px(10.)).child(
+                    div()
+                        .id("palette-hint")
+                        .text_size(px(10.5))
+                        .text_color(theme::hsla(p.bg3))
+                        .hover(|s| s.text_color(theme::hsla(p.fg_dim)))
+                        .cursor_pointer()
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(CommandPaletteToggle), cx)
+                        })
+                        .child(SharedString::from(keymap::keys_for(
+                            &CommandPaletteToggle,
+                            cx,
+                            key_style(),
+                        ))),
+                ),
+            )
             .into_any_element()
     }
 
@@ -1356,7 +1402,7 @@ impl Workspace {
                 }
             })
             .when(chrome() != Chrome::Mac && !self.sidebar_visible(), |d| {
-                d.child(app_mark())
+                d.child(div().flex_none().mr(px(12.)).child(app_mark()))
             })
             .child(
                 div()
@@ -1411,19 +1457,20 @@ impl Workspace {
         let search = self.search.as_ref()?;
         let p = palette();
         let status = find_status(search.current, search.matches.len());
-        let inset = crate::terminal_view::PADDING_X - 9.;
+        // Its edges line up with the blocks' backgrounds.
+        let inset = crate::terminal_view::PADDING_X;
         Some(
             div()
                 .absolute()
-                .top(px(6.))
+                .top(px(crate::terminal_view::FIND_BAR_TOP))
                 .left(px(inset))
                 .right(px(inset))
+                .h(px(crate::terminal_view::FIND_BAR_HEIGHT))
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap(px(10.))
                 .px(px(11.))
-                .py(px(5.))
                 .rounded(px(8.))
                 .bg(theme::hsla(p.raised))
                 .font_family(FONT_FAMILY)
@@ -1437,8 +1484,8 @@ impl Workspace {
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(11.))
-                        .text_color(theme::hsla(p.muted))
+                        .text_size(px(10.5))
+                        .text_color(theme::hsla(p.bg3))
                         .child(status),
                 )
                 .into_any_element(),
@@ -1515,6 +1562,13 @@ impl Workspace {
         }
         row.into_any_element()
     }
+}
+
+/// The veil behind the palette and the shortcuts pop-up, and how far down they sit.
+const SCRIM_TOP: f32 = 52.;
+
+fn scrim() -> gpui::Hsla {
+    theme::hsla(0x121212).opacity(0.62)
 }
 
 /// The find bar's right side: "2 of 5 · ⏎ next · ⇧⏎ previous · esc".
@@ -1747,7 +1801,9 @@ impl Render for Workspace {
                 .flex()
                 .flex_col()
                 .items_center()
-                .pt(px(72.))
+                .pt(px(SCRIM_TOP))
+                .px(px(24.))
+                .bg(scrim())
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| {
@@ -1765,10 +1821,11 @@ impl Render for Workspace {
                 .absolute()
                 .size_full()
                 .flex()
+                .flex_col()
                 .items_center()
-                .justify_center()
-                .p(px(24.))
-                .bg(gpui::black().opacity(0.35))
+                .pt(px(SCRIM_TOP))
+                .px(px(24.))
+                .bg(scrim())
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| {

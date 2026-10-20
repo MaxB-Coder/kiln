@@ -17,6 +17,8 @@ serde_json = "1"
 kiln_update.workspace = true
 toml = "0.9"
 gpui.workspace = true
+# The local time of day ("pinned · 09:41").
+jiff = "0.2"
 kiln_term.workspace = true
 log.workspace = true
 

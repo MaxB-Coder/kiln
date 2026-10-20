@@ -5,19 +5,20 @@
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Bounds, ClipboardItem, Context, ElementId, Entity, EntityInputHandler,
+    AnyElement, App, Bounds, ClipboardItem, Context, Div, ElementId, Entity, EntityInputHandler,
     EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
     ListAlignment, ListOffset, ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
     SharedString, StatefulInteractiveElement, Styled, Task, UTF16Selection, Window, canvas, div,
     list, px,
 };
+use kiln_term::Block;
 use kiln_term::engine::event::Event as TermEvent;
 use kiln_term::engine::grid::{Dimensions, Scroll};
 use kiln_term::engine::index::{Column, Line, Point as GridPoint, Side};
@@ -59,7 +60,13 @@ pub const PADDING_X: f32 = 20.;
 const INPUT_INSET: f32 = 8.;
 const INPUT_RADIUS: f32 = 10.;
 /// How far a hovered or selected block's background reaches past its text.
-const BLOCK_INSET: f32 = 9.;
+pub const BLOCK_INSET: f32 = 9.;
+/// The find bar (the workspace draws it over the top of the pane), and the room left for it.
+pub const FIND_BAR_TOP: f32 = 6.;
+pub const FIND_BAR_HEIGHT: f32 = 28.;
+/// Output lines a pinned block shows, folded and unfolded.
+const PIN_ROWS: usize = 3;
+const PIN_ROWS_OPEN: usize = 24;
 pub const PADDING_TOP: f32 = 10.;
 pub const PADDING_BOTTOM: f32 = 8.;
 
@@ -148,7 +155,7 @@ pub struct CopyNote {
 
 impl CopyNote {
     /// How many lines of the copied text the note shows.
-    const LINES: usize = 5;
+    const LINES: usize = 8;
 
     pub fn new(text: &str, raw: bool) -> Self {
         CopyNote {
@@ -196,6 +203,10 @@ pub struct TerminalView {
     pub(crate) blocks: Vec<Rc<FrozenBlock>>,
     /// The block under the mouse: it shows at full strength even when old.
     hovered_block: Option<u64>,
+    /// Pinned blocks unfolded to show more of their output, by id.
+    open_pins: std::collections::HashSet<u64>,
+    /// The find bar is over this pane: the timeline starts below it.
+    find_open: bool,
     /// Commands selected as a whole (⌘↑/⌘↓, ⇧-click): anchor and cursor, as block indices.
     block_selection: Option<(usize, usize)>,
     /// The note shown for a moment after a copy.
@@ -293,6 +304,8 @@ impl TerminalView {
             last_mouse_cell: None,
             blocks: Vec::new(),
             hovered_block: None,
+            open_pins: Default::default(),
+            find_open: false,
             block_selection: None,
             copy_note: None,
             note_epoch: 0,
@@ -399,12 +412,7 @@ impl TerminalView {
                     }
                     // A command may have changed files.
                     git_dirty = true;
-                    if block.clears_timeline() {
-                        self.blocks.retain(|b| b.pinned.get());
-                        cleared = true;
-                    } else {
-                        self.blocks.push(Rc::new(FrozenBlock::new(block)));
-                    }
+                    cleared |= add_to_timeline(&mut self.blocks, block);
                     self.timeline_selection = None;
                 }
             }
@@ -823,10 +831,10 @@ impl TerminalView {
 
     // ----- selecting commands as a whole ----------------------------------------------------
 
-    /// The blocks that are commands (the startup output is not one).
+    /// The commands in the timeline (the startup output is not one; pinned ones sit above).
     fn command_indices(&self) -> Vec<usize> {
         (0..self.blocks.len())
-            .filter(|&i| !self.blocks[i].block.startup)
+            .filter(|&i| !self.blocks[i].block.startup && !self.blocks[i].is_pinned())
             .collect()
     }
 
@@ -884,8 +892,7 @@ impl TerminalView {
         if selected.is_empty() {
             return;
         }
-        let blocks: Vec<&kiln_term::Block> =
-            selected.iter().map(|&i| &self.blocks[i].block).collect();
+        let blocks: Vec<&Block> = selected.iter().map(|&i| &self.blocks[i].block).collect();
         let text = copy::fenced_many(&blocks);
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
         self.note_copied(&text, false, cx);
@@ -907,9 +914,43 @@ impl TerminalView {
         }
     }
 
+    /// Pinned blocks leave the timeline for the top of it, and stay through `clear`.
     pub fn toggle_pin(&mut self, item: usize, cx: &mut Context<Self>) {
         if let Some(block) = self.blocks.get(item) {
-            block.pinned.set(!block.pinned.get());
+            let pinned = !block.is_pinned();
+            block.pinned.set(pinned.then(SystemTime::now));
+            self.open_pins.remove(&block.block.id);
+            self.block_selection = None;
+            cx.notify();
+        }
+    }
+
+    /// Each block's id and command, by timeline index.
+    pub fn timeline(&self) -> Vec<(u64, String)> {
+        self.blocks
+            .iter()
+            .map(|b| (b.block.id, b.block.command.clone()))
+            .collect()
+    }
+
+    /// The pinned blocks, oldest first, as timeline indices.
+    pub fn pinned(&self) -> Vec<usize> {
+        (0..self.blocks.len())
+            .filter(|&i| self.blocks[i].is_pinned())
+            .collect()
+    }
+
+    /// Folds or unfolds a pinned block (by block id), as a click on it does.
+    pub fn toggle_pin_open(&mut self, id: u64, cx: &mut Context<Self>) {
+        if !self.open_pins.remove(&id) {
+            self.open_pins.insert(id);
+        }
+        cx.notify();
+    }
+
+    pub fn set_find_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.find_open != open {
+            self.find_open = open;
             cx.notify();
         }
     }
@@ -1380,6 +1421,20 @@ impl TerminalView {
 
     /// Scrolls so a match is visible.
     pub fn reveal_match(&mut self, m: Match, cx: &mut Context<Self>) {
+        // Pinned blocks are always in view: unfold one when the match is below its fold.
+        if let Match::Header { item, .. } | Match::Block { item, .. } = m
+            && let Some(frozen) = self.blocks.get(item).filter(|b| b.is_pinned())
+        {
+            if let Match::Block { line, .. } = m {
+                let columns = self.session.size().columns;
+                let row = frozen.rows(columns).iter().position(|r| r.line == line);
+                if row.is_some_and(|row| row >= PIN_ROWS) {
+                    self.open_pins.insert(frozen.block.id);
+                }
+            }
+            cx.notify();
+            return;
+        }
         match m {
             Match::Header { item, .. } => {
                 self.list_state.scroll_to(ListOffset {
@@ -1469,34 +1524,52 @@ impl TerminalView {
         abs.max(floor)
     }
 
+    /// A command line, with find highlights.
+    fn render_title(&self, ix: usize) -> Div {
+        let block = &self.blocks[ix].block;
+        let mut title = div()
+            .flex()
+            .flex_row()
+            .text_color(theme::hsla(palette().fg))
+            .whitespace_nowrap()
+            .overflow_hidden();
+        let mut at = 0;
+        for &(start, end) in self.search_highlights.header_ranges(ix) {
+            if start > at {
+                title = title.child(block.command[at..start].to_string());
+            }
+            title = title.child(
+                div()
+                    .bg(theme::hsla(palette().modified))
+                    .text_color(theme::hsla(palette().bg))
+                    .child(block.command[start..end].to_string()),
+            );
+            at = end;
+        }
+        title.child(
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(block.command[at..].to_string()),
+        )
+    }
+
     fn render_block(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
         let entity = cx.entity();
         let frozen = self.blocks[ix].clone();
         let block = &frozen.block;
-        let latest = Some(ix) == self.last_command_index();
-        let pinned = frozen.pinned.get();
+        // The newest command in the timeline shows at full strength.
+        let latest = Some(ix)
+            == self
+                .blocks
+                .iter()
+                .rposition(|b| !b.block.startup && !b.is_pinned());
+        let pinned = frozen.is_pinned();
         let columns = self.session.size().columns;
         let has_output = !frozen.rows(columns).is_empty();
         let group: SharedString = format!("block-{}", block.id).into();
         let small = px(11.);
-
-        fn action(
-            label: &'static str,
-            ix: usize,
-            cx: &mut Context<TerminalView>,
-            f: fn(&mut TerminalView, usize, &mut Context<TerminalView>),
-        ) -> impl IntoElement {
-            div()
-                .id(ElementId::NamedInteger(label.into(), ix as u64))
-                .px(px(4.))
-                .text_size(px(11.))
-                .text_color(theme::hsla(palette().muted))
-                .hover(|s| s.text_color(theme::hsla(palette().fg)))
-                .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(move |this, _, _, cx| f(this, ix, cx)))
-                .child(label)
-        }
 
         let title = if block.startup {
             div()
@@ -1504,33 +1577,7 @@ impl TerminalView {
                 .text_size(small)
                 .child("shell started")
         } else {
-            // Find highlights in the command line.
-            let mut title = div()
-                .flex()
-                .flex_row()
-                .text_color(theme::hsla(palette().fg))
-                .whitespace_nowrap()
-                .overflow_hidden();
-            let mut at = 0;
-            for &(start, end) in self.search_highlights.header_ranges(ix) {
-                if start > at {
-                    title = title.child(block.command[at..start].to_string());
-                }
-                title = title.child(
-                    div()
-                        .bg(theme::hsla(palette().modified))
-                        .text_color(theme::hsla(palette().bg))
-                        .child(block.command[start..end].to_string()),
-                );
-                at = end;
-            }
-            title.child(
-                div()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .child(block.command[at..].to_string()),
-            )
+            self.render_title(ix)
         };
         let meta = if block.startup {
             String::new()
@@ -1565,16 +1612,6 @@ impl TerminalView {
                         .bg(theme::hsla(palette().failed)),
                 )
             })
-            // Pinned is a state, not something to act on: a quiet dot, not the accent.
-            .when(pinned, |d| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .size(px(6.))
-                        .rounded_full()
-                        .bg(theme::hsla(palette().fg_dim)),
-                )
-            })
             .child(div().flex_1().min_w_0().child(title))
             .child(
                 div()
@@ -1598,19 +1635,19 @@ impl TerminalView {
                         .gap(px(6.))
                         .pl(px(16.))
                         .bg(theme::hsla(surface))
-                        .child(action("Copy", ix, cx, |this, ix, cx| {
+                        .child(block_action("Copy", ix, cx, |this, ix, cx| {
                             this.copy_block(ix, false, cx)
                         }))
-                        .child(action("Rerun", ix, cx, |this, ix, cx| {
+                        .child(block_action("Rerun", ix, cx, |this, ix, cx| {
                             this.rerun_block(ix, cx)
                         }))
-                        .child(action(
+                        .child(block_action(
                             if pinned { "Unpin" } else { "Pin" },
                             ix,
                             cx,
                             |this, ix, cx| this.toggle_pin(ix, cx),
                         ))
-                        .child(action("Open log", ix, cx, |this, ix, cx| {
+                        .child(block_action("Open log", ix, cx, |this, ix, cx| {
                             this.open_log(ix, cx)
                         })),
                 )
@@ -1670,6 +1707,128 @@ impl TerminalView {
                 )
             })
             .into_any_element()
+    }
+
+    /// Pinned blocks at the top of the timeline: the command, "pinned · 09:41", and the first
+    /// lines of output; a click unfolds more. The hover actions unpin.
+    fn render_pins(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pinned = self.pinned();
+        if pinned.is_empty() {
+            return None;
+        }
+        let entity = cx.entity();
+        let p = palette();
+        let columns = self.session.size().columns;
+        let base = self.tint().map_or(p.bg, |(tint, _)| tint.background(&p));
+        let surface = theme::blend(base, p.raised, 0.3);
+        let mut list = div().flex_none().flex().flex_col().gap(px(6.)).pb(px(2.));
+        for ix in pinned {
+            let frozen = self.blocks[ix].clone();
+            let block = &frozen.block;
+            let id = block.id;
+            let open = self.open_pins.contains(&id);
+            let hovered = self.hovered_block == Some(id);
+            let rows = frozen.rows(columns).len();
+            let shown = rows.min(if open { PIN_ROWS_OPEN } else { PIN_ROWS });
+            let when = frozen.pinned.get().map(clock_label).unwrap_or_default();
+            let header = div()
+                .relative()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.))
+                .h(self.metrics.line_height)
+                .font_family(FONT_FAMILY)
+                .text_size(self.metrics.font_size)
+                // Pinned is a state, not something to act on: a quiet dot, not the accent.
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(5.))
+                        .rounded_full()
+                        .bg(theme::hsla(theme::blend(p.bg3, p.muted, 0.5))),
+                )
+                .child(div().flex_1().min_w_0().child(self.render_title(ix)))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(10.5))
+                        .text_color(theme::hsla(p.bg3))
+                        .child(format!("pinned · {when}")),
+                )
+                .when(hovered, |d| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .h_full()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(6.))
+                            .pl(px(16.))
+                            .bg(theme::hsla(surface))
+                            .child(block_action("Copy", ix, cx, |this, ix, cx| {
+                                this.copy_block(ix, false, cx)
+                            }))
+                            .child(block_action("Rerun", ix, cx, |this, ix, cx| {
+                                this.rerun_block(ix, cx)
+                            }))
+                            .child(block_action("Unpin", ix, cx, |this, ix, cx| {
+                                this.toggle_pin(ix, cx)
+                            }))
+                            .child(block_action("Open log", ix, cx, |this, ix, cx| {
+                                this.open_log(ix, cx)
+                            })),
+                    )
+                });
+            let card = div()
+                .id(ElementId::NamedInteger("pin".into(), id))
+                .w_full()
+                .px(px(BLOCK_INSET))
+                .py(px(6.))
+                .rounded(px(8.))
+                .bg(theme::hsla(surface))
+                .flex()
+                .flex_col()
+                .cursor_pointer()
+                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    if *hovered {
+                        this.hovered_block = Some(id);
+                    } else if this.hovered_block == Some(id) {
+                        this.hovered_block = None;
+                    }
+                    cx.notify();
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| this.toggle_pin_open(id, cx)))
+                .child(header)
+                .when(shown > 0, |d| {
+                    d.child(
+                        div().pt(px(2.)).child(
+                            BlockBody::new(
+                                entity.clone(),
+                                ix,
+                                frozen.clone(),
+                                columns,
+                                self.metrics,
+                            )
+                            .max_rows(shown),
+                        ),
+                    )
+                })
+                .when(rows > shown && open, |d| {
+                    d.child(
+                        div()
+                            .pt(px(2.))
+                            .text_size(px(10.5))
+                            .text_color(theme::hsla(p.bg3))
+                            .child(format!("{} more lines · Open log", rows - shown)),
+                    )
+                });
+            list = list.child(card);
+        }
+        Some(list.into_any_element())
     }
 
     fn render_running(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -1739,11 +1898,57 @@ impl TerminalView {
 
     fn render_item(&mut self, ix: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if ix < self.blocks.len() {
+            if self.blocks[ix].is_pinned() {
+                // Shown above the timeline instead.
+                return div().into_any_element();
+            }
             self.render_block(ix, cx)
         } else {
             self.render_running(cx)
         }
     }
+}
+
+/// A finished command joins the timeline; `clear` empties it, except for pinned blocks.
+/// Returns whether it was cleared.
+pub fn add_to_timeline(blocks: &mut Vec<Rc<FrozenBlock>>, block: Block) -> bool {
+    if block.clears_timeline() {
+        blocks.retain(|b| b.is_pinned());
+        true
+    } else {
+        blocks.push(Rc::new(FrozenBlock::new(block)));
+        false
+    }
+}
+
+/// One of a block's hover actions: Copy, Rerun, Pin, Open log.
+fn block_action(
+    label: &'static str,
+    ix: usize,
+    cx: &mut Context<TerminalView>,
+    f: fn(&mut TerminalView, usize, &mut Context<TerminalView>),
+) -> impl IntoElement + use<> {
+    div()
+        .id(ElementId::NamedInteger(label.into(), ix as u64))
+        .px(px(4.))
+        .text_size(px(11.))
+        .text_color(theme::hsla(palette().muted))
+        .hover(|s| s.text_color(theme::hsla(palette().fg)))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(cx.listener(move |this, _, _, cx| f(this, ix, cx)))
+        .child(label)
+}
+
+/// "09:41": the local time of day.
+pub fn clock_label(at: SystemTime) -> String {
+    jiff::Timestamp::try_from(at)
+        .map(|t| {
+            t.to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
 }
 
 /// The note above the input box after a copy: what was copied, dim, for a moment.
@@ -1948,6 +2153,18 @@ impl Render for TerminalView {
                 .size_full()
                 .flex()
                 .flex_col()
+                // Room for the find bar the workspace draws over the top.
+                .when(self.find_open, |d| d.pt(px(FIND_BAR_TOP + FIND_BAR_HEIGHT)))
+                .when_some(self.render_pins(cx), |d, pins| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .w_full()
+                            .px(px(PADDING_X))
+                            .pt(px(8.))
+                            .child(pins),
+                    )
+                })
                 .child(
                     // The list ignores its own padding; pad a wrapper instead.
                     div()
@@ -2220,6 +2437,45 @@ mod tests {
         assert_eq!(stepped(&commands, Some((1, 1)), -1, false), Some((1, 1)));
         assert_eq!(stepped(&commands, Some((4, 4)), 1, false), None);
         assert_eq!(stepped(&[], None, -1, false), None);
+    }
+
+    fn block(id: u64, command: &str) -> Block {
+        Block {
+            id,
+            command: command.into(),
+            cwd: None,
+            started_at: SystemTime::UNIX_EPOCH,
+            duration: Duration::ZERO,
+            exit_code: Some(0),
+            lines: Vec::new(),
+            truncated: false,
+            startup: false,
+        }
+    }
+
+    #[test]
+    fn pinned_blocks_stay_through_clear_and_new_commands() {
+        let mut blocks = Vec::new();
+        add_to_timeline(&mut blocks, block(1, "npm run migrate:status"));
+        add_to_timeline(&mut blocks, block(2, "ls"));
+        blocks[0].pinned.set(Some(SystemTime::now()));
+        assert!(add_to_timeline(&mut blocks, block(3, "clear")));
+        let ids: Vec<_> = blocks.iter().map(|b| b.block.id).collect();
+        assert_eq!(ids, [1]);
+        assert!(!add_to_timeline(&mut blocks, block(4, "git status")));
+        assert!(blocks[0].is_pinned());
+        assert_eq!(blocks.len(), 2);
+        // Unpinned, the next clear takes it too.
+        blocks[0].pinned.set(None);
+        add_to_timeline(&mut blocks, block(5, "clear"));
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn the_clock_is_hours_and_minutes() {
+        let label = clock_label(SystemTime::now());
+        assert_eq!(label.len(), 5, "{label}");
+        assert_eq!(&label[2..3], ":");
     }
 
     #[test]

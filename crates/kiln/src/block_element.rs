@@ -3,6 +3,7 @@
 use std::cell::{Cell as StdCell, RefCell};
 use std::panic::Location;
 use std::rc::Rc;
+use std::time::SystemTime;
 
 use gpui::{
     App, Bounds, Element, ElementId, Entity, GlobalElementId, InspectorElementId, IntoElement,
@@ -26,7 +27,8 @@ pub struct WrappedRow {
 /// A finished command as the timeline keeps it.
 pub struct FrozenBlock {
     pub block: Block,
-    pub pinned: StdCell<bool>,
+    /// When it was pinned; `None` when it is not.
+    pub pinned: StdCell<Option<SystemTime>>,
     wrap: RefCell<Option<(usize, Rc<Vec<WrappedRow>>)>>,
 }
 
@@ -34,9 +36,13 @@ impl FrozenBlock {
     pub fn new(block: Block) -> Self {
         Self {
             block,
-            pinned: StdCell::new(false),
+            pinned: StdCell::new(None),
             wrap: RefCell::new(None),
         }
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        self.pinned.get().is_some()
     }
 
     /// Display rows at `columns` wide (cached per width).
@@ -183,6 +189,8 @@ pub struct BlockBody {
     block: Rc<FrozenBlock>,
     columns: usize,
     metrics: CellMetrics,
+    /// Shows only the first rows (a pinned block, folded).
+    max_rows: Option<usize>,
 }
 
 impl BlockBody {
@@ -199,7 +207,18 @@ impl BlockBody {
             block,
             columns,
             metrics,
+            max_rows: None,
         }
+    }
+
+    pub fn max_rows(mut self, rows: usize) -> Self {
+        self.max_rows = Some(rows);
+        self
+    }
+
+    fn shown_rows(&self) -> usize {
+        let rows = self.block.rows(self.columns).len();
+        self.max_rows.map_or(rows, |max| rows.min(max))
     }
 }
 
@@ -230,7 +249,7 @@ impl Element for BlockBody {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, ()) {
-        let rows = self.block.rows(self.columns).len();
+        let rows = self.shown_rows();
         let mut style = Style::default();
         style.size.width = relative(1.).into();
         style.size.height = (self.metrics.line_height * rows as f32).into();
@@ -256,8 +275,12 @@ impl Element for BlockBody {
         let colors = Colors::default();
         let mut painter = GridPainter::new(bounds.origin, self.metrics, &colors, Tone::Muted)
             .with_scale(window.scale_factor());
-        let visible =
-            crate::grid_paint::visible_rows(bounds, self.metrics.line_height, rows.len(), window);
+        let visible = crate::grid_paint::visible_rows(
+            bounds,
+            self.metrics.line_height,
+            self.shown_rows(),
+            window,
+        );
         for (r, row) in rows
             .iter()
             .enumerate()

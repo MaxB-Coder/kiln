@@ -81,7 +81,7 @@ fn key_cap(keys: &str) -> Div {
         .py(px(1.))
         .rounded(px(4.))
         .bg(theme::hsla(p.raised))
-        .text_size(px(11.))
+        .text_size(px(10.5))
         .text_color(theme::hsla(p.fg_dim))
         .child(SharedString::from(keys.to_string()))
 }
@@ -102,7 +102,7 @@ fn row(row: &ShortcutRow) -> Div {
                 .whitespace_nowrap()
                 .overflow_hidden()
                 .text_ellipsis()
-                .text_color(theme::hsla(p.fg_dim))
+                .text_color(theme::hsla(p.ansi[7]))
                 .child(SharedString::from(row.label.clone())),
         )
         .child(
@@ -124,8 +124,8 @@ fn section(group: Group, rows: &[&ShortcutRow]) -> Div {
         .child(
             div()
                 .pb(px(4.))
-                .text_size(px(11.))
-                .text_color(theme::hsla(p.muted))
+                .text_size(px(10.5))
+                .text_color(theme::hsla(p.bg3))
                 .child(group.title()),
         )
         .children(rows.iter().map(|r| row(r)))
@@ -136,7 +136,8 @@ impl Render for ShortcutsView {
         let p = palette();
         let sections = self.sections(cx);
         let two = f32::from(window.viewport_size().width) >= TWO_COLUMNS_FROM;
-        let max_h = f32::from(window.viewport_size().height) * 0.86;
+        // It sits 52 px from the top (see the workspace's scrim): leave room below too.
+        let max_h = f32::from(window.viewport_size().height) - 52. - 24.;
 
         // Two columns: sections in order, the left one filled to about half of the rows.
         let total: usize = sections.iter().map(|(_, rows)| rows.len() + 2).sum();
@@ -182,10 +183,10 @@ impl Render for ShortcutsView {
             .p(px(8.))
             .rounded(px(12.))
             .bg(theme::hsla(p.bar))
-            // A faint ring and a soft drop shadow instead of a border.
+            // A ring and a soft drop shadow instead of a border.
             .shadow(vec![
                 BoxShadow {
-                    color: gpui::white().opacity(0.06),
+                    color: theme::hsla(p.bg1),
                     offset: point(px(0.), px(0.)),
                     blur_radius: px(0.),
                     spread_radius: px(1.),
@@ -202,7 +203,22 @@ impl Render for ShortcutsView {
             .font_family(FONT_FAMILY)
             .text_size(px(13.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(div().px(px(12.)).py(px(10.)).child(self.input.clone()))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.))
+                    .px(px(12.))
+                    .py(px(10.))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(theme::hsla(p.accent))
+                            .child("❯"),
+                    )
+                    .child(div().flex_1().min_w_0().child(self.input.clone())),
+            )
             .child(
                 div()
                     .id("shortcuts-body")

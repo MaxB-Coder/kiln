@@ -49,12 +49,16 @@ on macOS, the Help menu. The ones you will use most:
 | Command palette (actions, sessions, projects, past commands) | ⌘K | Ctrl+Shift+K |
 | Find | ⌘F | Ctrl+Shift+F |
 | Copy the last output, fenced / raw | ⌘⇧C / ⌘⌥C | Ctrl+Shift+C (with no selection) / Ctrl+Shift+Alt+C |
+| Select a command / add to the selection (then ⌘C or Enter copies it, Esc clears) | ⌘↑ ⌘↓ / ⇧⌘↑ ⇧⌘↓, ⇧-click | Ctrl+Shift+↑ ↓ / Ctrl+Alt+Shift+↑ ↓, Shift+click |
 | Context rail: changes, processes, ports, runtimes, session | ⌘I | Ctrl+Shift+I |
 | Focus mode | ⌘. | Ctrl+Shift+. |
 | Sidebar | ⌘B | Ctrl+Shift+B |
 | Sessions 1–9, next, previous | ⌘1–9, ⌘⇧], ⌘⇧[ | Ctrl+Alt+1–9, Ctrl+Tab, Ctrl+Shift+Tab |
 | Text size | ⌘= ⌘- ⌘0 | Ctrl+Shift+= - 0 |
 | Settings | ⌘, | Ctrl+Shift+, |
+
+A pinned command (Pin in a block's hover actions) stays at the top of the timeline, through
+`clear`, with its first lines; a click shows more.
 
 Kiln loads its shell integration for zsh, bash and PowerShell by itself, without touching your
 startup files. Other shells (fish, nu) get a classic terminal. Inside Kiln the prompt is a

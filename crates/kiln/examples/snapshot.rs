@@ -3,7 +3,8 @@
 //! Uses GPUI's headless app context with the real text system and the real GPU renderer, and
 //! real shells on real PTYs, so the pictures show Kiln as it behaves; no display is needed.
 //!
-//! Usage: cargo run -p kiln --example snapshot -- [out dir] [phase1|phase2|phase3|prompt|shortcuts]
+//! Usage: cargo run -p kiln --example snapshot -- [out dir]
+//! [phase1|phase2|phase3|prompt|shortcuts|concept]
 //! (default: notes/screenshots/phase1, scenario phase1)
 
 use std::path::PathBuf;
@@ -11,8 +12,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyWindowHandle, AppContext as _, Entity, HeadlessAppContext, Modifiers, MouseMoveEvent,
-    PlatformInput, Point, WindowHandle, px, size,
+    AnyWindowHandle, AppContext as _, Entity, HeadlessAppContext, Modifiers, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput, Point, WindowHandle, px, size,
 };
 use kiln::config::{self, Config};
 use kiln::grid_paint::{self, CellMetrics};
@@ -136,6 +137,35 @@ impl Shots {
         self.pump(Duration::from_millis(200));
     }
 
+    fn click(&mut self, x: f32, y: f32, modifiers: Modifiers) {
+        let window: AnyWindowHandle = self.window.into();
+        let position = Point::new(px(x), px(y));
+        for event in [
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers,
+                click_count: 1,
+            }),
+        ] {
+            let _ = self
+                .cx
+                .update_window(window, |_, window, cx| window.dispatch_event(event, cx));
+        }
+        self.pump(Duration::from_millis(200));
+    }
+
+    fn workspace<R>(&mut self, f: impl FnOnce(&Workspace) -> R) -> R {
+        self.cx.update(|cx| f(self.window.read(cx).unwrap()))
+    }
+
     fn shot(&mut self, name: &str) {
         self.pump(Duration::from_millis(200));
         let window: AnyWindowHandle = self.window.into();
@@ -165,7 +195,7 @@ fn main() {
     unsafe { std::env::set_var("KILN_STATE_FILE", &state_file) };
     // Kiln opens the way it does after a restart: one saved session, whose shell starts in its
     // folder (nothing is typed to get there).
-    let start = if scenario == "phase2" {
+    let start = if scenario == "phase2" || scenario == "concept" {
         demo_project()
     } else {
         std::env::current_dir().unwrap()
@@ -212,6 +242,12 @@ fn main() {
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "concept" {
+        concept(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        println!("done");
+        return;
+    }
     if scenario == "shortcuts" {
         shortcuts(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -534,6 +570,165 @@ fn phase3(s: &mut Shots) {
     s.action(Box::new(kiln::CommandPaletteToggle));
     s.shot("22-palette-update");
     s.keystroke("escape");
+}
+
+/// Each state of `notes/concept/kiln-concept.html`, for `notes/concept-check.md`: on macOS, and
+/// again in the Windows chrome preview with the Windows and Linux key bindings.
+fn concept(s: &mut Shots) {
+    let clean = clean_project();
+    let loose = std::env::temp_dir().join("kiln-demo").join("scratch");
+    std::fs::create_dir_all(&loose).unwrap();
+    s.run("git --no-pager log --oneline", Duration::from_secs(5));
+    s.run("ls src", Duration::from_secs(5));
+    s.run("git status --short", Duration::from_secs(5));
+    // The rail's runtimes and git refresh in the background.
+    s.pump(Duration::from_millis(2500));
+
+    // 1–2. The pills in the input box; the header's branch and change count.
+    s.shot("01-pills-changes");
+    s.run(&format!("cd {}", clean.display()), Duration::from_secs(5));
+    s.pump(Duration::from_millis(1500));
+    s.shot("01b-pills-clean");
+    s.run(&format!("cd {}", loose.display()), Duration::from_secs(5));
+    s.pump(Duration::from_millis(1500));
+    s.shot("01c-pills-no-repo");
+    s.run("cd -", Duration::from_secs(5));
+    s.run("cd ../acme-web", Duration::from_secs(5));
+    s.pump(Duration::from_millis(1500));
+
+    // 3. Focus mode, with something running in another session.
+    s.action(Box::new(kiln::NewSession));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.type_only("sleep 60\r");
+    s.pump(Duration::from_millis(600));
+    s.action(Box::new(kiln::SelectSession1));
+    s.action(Box::new(kiln::ToggleFocusMode));
+    s.shot("03-focus-mode");
+    s.action(Box::new(kiln::ToggleFocusMode));
+
+    // 4–6. Selecting commands, extending, copying several; the copy note.
+    s.run("node --version || echo 'no node'", Duration::from_secs(5));
+    s.keystroke("cmd-up cmd-up");
+    s.shot("04-select-command");
+    s.keystroke("cmd-shift-up");
+    s.shot("05-extend-selection");
+    s.keystroke("cmd-c");
+    s.shot("06-copy-note");
+    let copied =
+        s.cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    if let Some(text) = copied {
+        std::fs::write(s.out.join("05-multi-copy.md"), &text).unwrap();
+    }
+    s.pump(Duration::from_millis(2800));
+    s.shot("06b-note-gone");
+
+    // 7. A pinned command stays at the top through new commands and `clear`.
+    let pane = s.pane();
+    let status = s.cx.update(|cx| {
+        let view = pane.read(cx);
+        view.timeline()
+            .iter()
+            .rposition(|(_, command)| command == "git status --short")
+            .unwrap()
+    });
+    s.cx.update(|cx| pane.update(cx, |p, cx| p.toggle_pin(status, cx)));
+    s.run("clear", Duration::from_secs(5));
+    s.run("ls", Duration::from_secs(5));
+    s.run("git --no-pager diff --stat", Duration::from_secs(5));
+    s.shot("07-pinned");
+    s.mouse_move(700., 60.);
+    s.shot("07b-pinned-hover");
+    let id = s.cx.update(|cx| pane.read(cx).timeline()[0].0);
+    s.cx.update(|cx| pane.update(cx, |p, cx| p.toggle_pin_open(id, cx)));
+    s.shot("07c-pinned-open");
+    s.cx.update(|cx| pane.update(cx, |p, cx| p.toggle_pin_open(id, cx)));
+    s.mouse_move(5., 700.);
+
+    // 8. Find.
+    s.action(Box::new(kiln::Find));
+    s.type_into_field("auth");
+    s.keystroke("enter");
+    s.shot("08-find");
+    s.keystroke("escape");
+
+    // 9. The palette: everything, then a query.
+    s.pump(Duration::from_millis(2200));
+    s.keystroke("cmd-k");
+    s.shot("09-palette");
+    s.type_into_field("git");
+    s.shot("09b-palette-query");
+    s.keystroke("escape");
+
+    // 10. The sidebar's hint opens the palette.
+    s.click(24., 707., Modifiers::default());
+    assert!(
+        s.workspace(|w| w.palette_open()),
+        "a click on the sidebar hint opens the palette"
+    );
+    s.shot("10-sidebar-hint");
+    s.keystroke("escape");
+
+    // 11. The shortcuts pop-up lists the new bindings.
+    s.keystroke("cmd-/");
+    s.type_into_field("select");
+    s.shot("11-shortcuts-select");
+    s.keystroke("escape");
+
+    // The Windows chrome preview, with the bindings Windows and Linux get.
+    // SAFETY: only this thread reads the variable (in the next render).
+    unsafe { std::env::set_var("KILN_CHROME", "windows") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::Pc));
+    });
+    s.pump(Duration::from_millis(400));
+    s.shot("w01-pills-header");
+    s.keystroke("ctrl-shift-up");
+    s.keystroke("ctrl-alt-shift-up");
+    s.shot("w04-select");
+    s.keystroke("escape");
+    s.action(Box::new(kiln::ToggleFocusMode));
+    s.shot("w03-focus-mode");
+    s.action(Box::new(kiln::ToggleFocusMode));
+    s.keystroke("ctrl-shift-f");
+    s.type_into_field("auth");
+    s.shot("w08-find");
+    s.keystroke("escape");
+    s.keystroke("ctrl-shift-k");
+    s.shot("w09-palette");
+    s.keystroke("escape");
+    s.keystroke("ctrl-shift-/");
+    s.type_into_field("select");
+    s.shot("w11-shortcuts-select");
+    s.keystroke("escape");
+    unsafe { std::env::remove_var("KILN_CHROME") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::current()));
+    });
+    s.type_only("\x03");
+}
+
+/// A git project with nothing changed.
+fn clean_project() -> PathBuf {
+    let root = std::env::temp_dir().join("kiln-demo").join("notes-site");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("index.md"), "# Notes\n").unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=Demo", "-c", "user.email=demo@example.com"])
+            .args(args)
+            .current_dir(&root)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "Start the notes"]);
+    root
 }
 
 /// A small git project with a few changes, in a scratch folder.
