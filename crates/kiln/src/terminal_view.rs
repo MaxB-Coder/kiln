@@ -31,6 +31,7 @@ use kiln_term::{EngineTerm, GridSize, Mark, Phase, Session, SessionEvent, Sessio
 
 use crate::block_element::{BlockBody, FrozenBlock, TimelinePoint, TimelineSelection, WrappedRow};
 use crate::copy;
+use crate::flame;
 use crate::grid_paint::{CellMetrics, FONT_FAMILY};
 use crate::live_element::LiveElement;
 use crate::search::{Match, SearchHighlights, find};
@@ -205,6 +206,12 @@ pub struct TerminalView {
     hovered_block: Option<u64>,
     /// Pinned blocks unfolded to show more of their output, by id.
     open_pins: std::collections::HashSet<u64>,
+    /// The flame's place in the input box, in window coordinates, as last painted; whether it
+    /// shows (only at a prompt), and red (after a failed command). The workspace paints the
+    /// flame there, so its frames redraw without this view.
+    flame_bounds: Option<Bounds<Pixels>>,
+    flame_shown: bool,
+    flame_failed: bool,
     /// The find bar is over this pane: the timeline starts below it.
     find_open: bool,
     /// Commands selected as a whole (⌘↑/⌘↓, ⇧-click): anchor and cursor, as block indices.
@@ -305,6 +312,9 @@ impl TerminalView {
             blocks: Vec::new(),
             hovered_block: None,
             open_pins: Default::default(),
+            flame_bounds: None,
+            flame_shown: false,
+            flame_failed: false,
             find_open: false,
             block_selection: None,
             copy_note: None,
@@ -822,6 +832,14 @@ impl TerminalView {
         })
         .detach();
         cx.notify();
+    }
+
+    /// Where the flame goes (window coordinates) and whether it is red; `None` while there is
+    /// none (a command runs, a full-screen program, the shell's own prompt).
+    pub fn flame(&self) -> Option<(Bounds<Pixels>, bool)> {
+        self.flame_bounds
+            .filter(|_| self.flame_shown)
+            .map(|bounds| (bounds, self.flame_failed))
     }
 
     /// The copy note on screen, if any.
@@ -1999,62 +2017,6 @@ fn render_copy_note(note: &CopyNote) -> AnyElement {
 }
 
 /// The row of pills under the prompt (nothing when there is nothing to say).
-fn render_pills(pills: &crate::pills::Pills) -> AnyElement {
-    let p = palette();
-    let pill = |bg: u32, fg: u32| {
-        div()
-            .flex_none()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(4.))
-            .h(px(19.))
-            .px(px(9.))
-            .rounded_full()
-            .bg(theme::hsla(bg))
-            .text_color(theme::hsla(fg))
-    };
-    let mut row = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(6.))
-        .font_family(FONT_FAMILY)
-        .text_size(px(10.5))
-        .font_weight(gpui::FontWeight::BOLD);
-    let mut any = false;
-    if let Some(project) = &pills.project {
-        row = row.child(pill(p.accent, p.bar).child(SharedString::from(project.clone())));
-        any = true;
-    }
-    if let Some((branch, changes)) = &pills.branch {
-        let mut branch_pill = pill(p.bg1, theme::blend(p.fg, p.fg_dim, 0.5))
-            .child(SharedString::from(format!("\u{e0a0} {branch}")));
-        if *changes > 0 {
-            branch_pill = branch_pill.child(
-                div()
-                    .text_color(theme::hsla(p.accent))
-                    .child(SharedString::from(format!("✱{changes}"))),
-            );
-        }
-        row = row.child(branch_pill);
-        any = true;
-    }
-    for runtime in &pills.runtimes {
-        row = row.child(pill(p.bg, p.ansi[7]).child(SharedString::from(runtime.clone())));
-        any = true;
-    }
-    if let Some(wsl) = &pills.wsl {
-        row = row.child(pill(p.bg, p.ansi[7]).child(SharedString::from(wsl.clone())));
-        any = true;
-    }
-    if any {
-        div().pt(px(8.)).child(row).into_any_element()
-    } else {
-        div().into_any_element()
-    }
-}
-
 fn region_bounds(region: &HitRegion) -> Bounds<Pixels> {
     match region {
         HitRegion::Live { bounds, .. } | HitRegion::Block { bounds, .. } => *bounds,
@@ -2100,8 +2062,16 @@ impl Render for TerminalView {
         let entity: Entity<Self> = cx.entity();
 
         enum Layout {
-            Classic { top: usize, rows: usize },
-            Blocks { prompt: Option<(usize, usize)> },
+            Classic {
+                top: usize,
+                rows: usize,
+            },
+            Blocks {
+                prompt: Option<(usize, usize)>,
+                /// Where the prompt starts within it (row, column), and whether the last
+                /// command failed: the flame goes there.
+                flame: Option<(usize, usize, bool)>,
+            },
         }
         let layout = {
             let term = self.session.term().lock();
@@ -2124,9 +2094,27 @@ impl Render for TerminalView {
                     let last = Self::last_used_row(&term, top, cursor_abs);
                     (top, last - top + 1)
                 });
-                Layout::Blocks { prompt }
+                // Ctrl-C (130) is not a failure; the startup files never report one.
+                let failed = live.last_exit.is_some_and(|code| code != 0 && code != 130);
+                let flame = prompt
+                    .filter(|_| self.session.minimal_prompt())
+                    .map(|(top, _)| {
+                        let row = live.prompt_top.map_or(0, |p| p.saturating_sub(top));
+                        (row, live.prompt_column, failed)
+                    });
+                Layout::Blocks { prompt, flame }
             }
         };
+
+        let flame_state = match layout {
+            Layout::Blocks {
+                flame: Some((_, _, failed)),
+                ..
+            } => (true, failed),
+            _ => (false, false),
+        };
+        // Read by the workspace when it paints the flame, after this view has painted.
+        (self.flame_shown, self.flame_failed) = flame_state;
 
         let sizer_entity = entity.clone();
         let sizer = canvas(
@@ -2149,7 +2137,7 @@ impl Render for TerminalView {
                         .fill(),
                 )
                 .into_any_element(),
-            Layout::Blocks { prompt } => div()
+            Layout::Blocks { prompt, flame } => div()
                 .size_full()
                 .flex()
                 .flex_col()
@@ -2182,14 +2170,29 @@ impl Render for TerminalView {
                         }),
                 )
                 .when_some(prompt, |d, (top, rows)| {
-                    // The input: a raised, rounded box inset from the pane's edges. The shell's
-                    // line on top (growing upward with completion menus and second lines), and
-                    // under it the pills Kiln draws: project, branch and changes, runtimes,
-                    // and the WSL distribution.
+                    // The input: a raised, rounded box inset from the pane's edges, with the
+                    // shell's line (growing upward with completion menus and second lines).
+                    // Kiln draws the flame over the blank cells the minimal prompt leaves.
                     let inner_x = PADDING_X - INPUT_INSET;
                     let p = palette();
                     let input_bg = self.tint().map_or(p.raised, |(tint, _)| tint.raised(&p));
-                    let pills = self.pills();
+                    // Where the flame goes: the workspace paints it (see `Self::flame`).
+                    let flame = flame.map(|(row, column, _)| {
+                        let (w, h) = flame::size(self.metrics.line_height);
+                        let line = self.metrics.line_height;
+                        let view = entity.clone();
+                        canvas(
+                            |_, _, _| {},
+                            move |bounds, _, _, cx| {
+                                view.update(cx, |view, _| view.flame_bounds = Some(bounds));
+                            },
+                        )
+                        .absolute()
+                        .left(px(inner_x) + self.metrics.cell_width * column as f32)
+                        .top(px(8.) + line * row as f32 + (line - h) / 2.)
+                        .w(w)
+                        .h(h)
+                    });
                     d.child(
                         div()
                             .flex_none()
@@ -2199,6 +2202,7 @@ impl Render for TerminalView {
                             .pb(px(INPUT_INSET + 2.))
                             .child(
                                 div()
+                                    .relative()
                                     .w_full()
                                     .flex()
                                     .flex_col()
@@ -2214,7 +2218,7 @@ impl Render for TerminalView {
                                         top,
                                         rows,
                                     ))
-                                    .child(render_pills(&pills)),
+                                    .children(flame),
                             ),
                     )
                 })

@@ -1,8 +1,12 @@
-//! The pills under the prompt in the input box: the project, the git branch with its change
-//! count, the runtimes the project uses, and the WSL distribution. Kiln draws them itself, so
-//! they look the same on every system and shell.
+//! The pills in each pane's header: the project, the git branch with its change count, the
+//! runtimes the project uses, and the WSL distribution. Kiln draws them itself, so they look the
+//! same on every system and shell.
 
+use gpui::{AnyElement, IntoElement, ParentElement, SharedString, Styled, div, px};
+
+use crate::grid_paint::FONT_FAMILY;
 use crate::naming;
+use crate::theme::{self, palette};
 
 /// What git says about a pane's folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -66,6 +70,57 @@ pub fn pills(
             label.rsplit(" · ").next().unwrap_or(label).to_string()
         }),
     }
+}
+
+/// The branch pill's text (#d5c4a1 in the default palette).
+fn branch_text(p: &theme::Palette) -> u32 {
+    theme::blend(p.fg, p.fg_dim, 0.5)
+}
+
+/// The pills as a row, sized for the header (about 18 px high at the 11 pt UI size).
+pub fn render(pills: &Pills) -> AnyElement {
+    let p = palette();
+    let pill = |bg: u32, fg: u32| {
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(4.))
+            .h(px(18.))
+            .px(px(9.))
+            .rounded_full()
+            .bg(theme::hsla(bg))
+            .text_color(theme::hsla(fg))
+    };
+    let mut row = div()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.))
+        .font_family(FONT_FAMILY)
+        .text_size(px(10.5))
+        .font_weight(gpui::FontWeight::BOLD);
+    if let Some(project) = &pills.project {
+        row = row.child(pill(p.accent, p.bar).child(SharedString::from(project.clone())));
+    }
+    if let Some((branch, changes)) = &pills.branch {
+        let mut branch_pill =
+            pill(p.bg1, branch_text(&p)).child(SharedString::from(format!("\u{e0a0} {branch}")));
+        if *changes > 0 {
+            branch_pill = branch_pill.child(
+                div()
+                    .text_color(theme::hsla(p.accent))
+                    .child(SharedString::from(format!("✱{changes}"))),
+            );
+        }
+        row = row.child(branch_pill);
+    }
+    for runtime in pills.runtimes.iter().chain(&pills.wsl) {
+        row = row.child(pill(p.raised, p.ansi[7]).child(SharedString::from(runtime.clone())));
+    }
+    row.into_any_element()
 }
 
 #[cfg(test)]

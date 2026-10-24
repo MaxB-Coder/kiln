@@ -3,8 +3,8 @@
 # Kiln exports PROMPT_COMMAND so bash sources this file at the first prompt. It marks the
 # prompt, the command and its output (OSC 133) and reports the current folder (OSC 7).
 # Commands are marked through PS0 (bash 4.4 and later); older bash still gets prompts.
-# With KILN_PROMPT=kiln the prompt is Kiln's minimal "❯ " (Starship gets a one-character
-# config instead); readline and completion are untouched.
+# With KILN_PROMPT=kiln the prompt is two blank cells, where Kiln draws its flame (Starship gets
+# a config that prints only those); readline and completion are untouched.
 
 if [[ -n "${_KILN_INTEGRATED-}" ]]; then
   return 0 2>/dev/null || true
@@ -12,7 +12,6 @@ fi
 _KILN_INTEGRATED=1
 _kiln_first=1
 # The last command's exit status, for the prompt's colour (startup files do not count).
-_kiln_last=0
 
 # Remove the bootstrap from PROMPT_COMMAND; keep whatever the user's startup files added.
 _kiln_user_pc=${PROMPT_COMMAND//"[ -n \"\$KILN_BASH_INTEGRATION\" ] && . \"\$KILN_BASH_INTEGRATION\""/}
@@ -37,7 +36,6 @@ _kiln_prompt_command() {
     export STARSHIP_CONFIG=$KILN_STARSHIP_CONFIG
   fi
   if [[ -z $_kiln_first ]]; then
-    _kiln_last=$ret
     printf '\e]133;D;%d\a' "$ret"
   fi
   _kiln_first=
@@ -83,11 +81,7 @@ _kiln_arm() {
   # Starship's own hook, not $STARSHIP_SHELL: that variable is inherited from wherever Kiln
   # was started.
   if [[ ${KILN_PROMPT-} == kiln ]] && ! declare -F starship_precmd >/dev/null; then
-    local color=${KILN_PROMPT_OK:-224;123;57}
-    if [[ ${_kiln_last-0} != 0 && ${_kiln_last-0} != 130 ]]; then
-      color=${KILN_PROMPT_FAIL:-184;100;90}
-    fi
-    PS1='\[\e]133;A\a\]\[\e[38;2;'"$color"'m\]❯\[\e[0m\] \[\e]133;B\a\]'
+    PS1='\[\e]133;A\a\]  \[\e]133;B\a\]'
   fi
   _kiln_at_prompt=1
 }

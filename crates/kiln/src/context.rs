@@ -52,16 +52,23 @@ const RUNTIMES: &[(&str, &str, &[&str])] = &[
     ("bun", "bun", &["bun.lockb", "bun.lock", "bunfig.toml"]),
 ];
 
-/// Marker files found from `cwd` up to the project root (the first folder with `.git`) or home.
+/// Marker files of the project at `cwd`: from `cwd` up to its repository's root, or in `cwd`
+/// alone outside a repository. Never the home folder's own files: Home is not a project.
 fn markers(cwd: &str) -> Vec<String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_default();
+    markers_in(Path::new(cwd), Path::new(&home))
+}
+
+fn markers_in(cwd: &Path, home: &Path) -> Vec<String> {
+    let below_home = |dir: &&Path| home.as_os_str().is_empty() || *dir != home;
+    let in_repo = cwd
+        .ancestors()
+        .take_while(below_home)
+        .any(|dir| dir.join(".git").exists());
     let mut found = Vec::new();
-    for dir in Path::new(cwd).ancestors() {
-        if !home.is_empty() && dir.as_os_str() == home.as_str() {
-            break;
-        }
+    for dir in cwd.ancestors().take_while(below_home) {
         for (_, _, files) in RUNTIMES {
             for file in *files {
                 if !found.iter().any(|f| f == file) && dir.join(file).exists() {
@@ -69,7 +76,7 @@ fn markers(cwd: &str) -> Vec<String> {
                 }
             }
         }
-        if dir.join(".git").exists() {
+        if !in_repo || dir.join(".git").exists() {
             break;
         }
     }
@@ -191,6 +198,32 @@ pub fn wsl_label(shell: &ShellCommand) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtimes_only_where_the_project_uses_them() {
+        let home = std::env::temp_dir().join(format!("kiln-markers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let touch = |path: &str| {
+            let path = home.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        };
+        touch("Cargo.toml");
+        touch("code/app/.git/HEAD");
+        touch("code/app/package.json");
+        touch("code/app/src/main.ts");
+        touch("code/tool/go.mod");
+        touch("notes/todo.md");
+        let at = |dir: &str| markers_in(&home.join(dir), &home);
+        // Home is not a project, even with a Cargo.toml in it.
+        assert!(markers_in(&home, &home).is_empty());
+        // In a repository, from the folder up to its root.
+        assert_eq!(at("code/app/src"), ["package.json"]);
+        // Outside one, the folder's own files only.
+        assert_eq!(at("code/tool"), ["go.mod"]);
+        assert!(at("notes").is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn reads_versions_from_install_paths() {

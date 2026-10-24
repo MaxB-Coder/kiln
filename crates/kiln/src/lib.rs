@@ -6,6 +6,7 @@ pub mod box_drawing;
 pub mod config;
 pub mod context;
 pub mod copy;
+pub mod flame;
 pub mod git;
 pub mod grid_paint;
 pub mod keymap;

@@ -238,10 +238,19 @@ fn main() {
         })
         .unwrap();
     let mut s = Shots { cx, window, out };
+    // As if it were the window in front: the flame only moves there.
+    let handle: AnyWindowHandle = s.window.into();
+    let _ =
+        s.cx.update_window(handle, |_, window, _| window.activate_window());
 
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "bench-flame" {
+        bench_flame(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        return;
+    }
     if scenario == "concept" {
         concept(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -576,6 +585,7 @@ fn phase3(s: &mut Shots) {
 /// again in the Windows chrome preview with the Windows and Linux key bindings.
 fn concept(s: &mut Shots) {
     let clean = clean_project();
+    let rust = rust_project();
     let loose = std::env::temp_dir().join("kiln-demo").join("scratch");
     std::fs::create_dir_all(&loose).unwrap();
     s.run("git --no-pager log --oneline", Duration::from_secs(5));
@@ -584,17 +594,27 @@ fn concept(s: &mut Shots) {
     // The rail's runtimes and git refresh in the background.
     s.pump(Duration::from_millis(2500));
 
-    // 1–2. The pills in the input box; the header's branch and change count.
-    s.shot("01-pills-changes");
+    // 1. The header's pills: a repository with changes, a clean one, a plain folder, Home;
+    // the runtime only where the project uses it.
+    s.shot("01-header-repo");
     s.run(&format!("cd {}", clean.display()), Duration::from_secs(5));
     s.pump(Duration::from_millis(1500));
-    s.shot("01b-pills-clean");
+    s.shot("01b-header-clean");
     s.run(&format!("cd {}", loose.display()), Duration::from_secs(5));
     s.pump(Duration::from_millis(1500));
-    s.shot("01c-pills-no-repo");
-    s.run("cd -", Duration::from_secs(5));
+    s.shot("01c-header-plain-folder");
+    s.run("cd ~", Duration::from_secs(5));
+    s.pump(Duration::from_millis(1500));
+    s.shot("01d-header-home");
+    s.run(&format!("cd {}", rust.display()), Duration::from_secs(5));
+    s.pump(Duration::from_millis(2500));
+    s.shot("02-runtime-rust");
     s.run("cd ../acme-web", Duration::from_secs(5));
     s.pump(Duration::from_millis(1500));
+
+    // 2. The flame: its four frames (from the focused pane, as they come), after a failure,
+    // holding still without focus or with reduced motion, and in split panes.
+    flame(s);
 
     // 3. Focus mode, with something running in another session.
     s.action(Box::new(kiln::NewSession));
@@ -682,7 +702,7 @@ fn concept(s: &mut Shots) {
         cx.bind_keys(keymap::bindings(keymap::KeyStyle::Pc));
     });
     s.pump(Duration::from_millis(400));
-    s.shot("w01-pills-header");
+    s.shot("w01-header-pills");
     s.keystroke("ctrl-shift-up");
     s.keystroke("ctrl-alt-shift-up");
     s.shot("w04-select");
@@ -707,6 +727,175 @@ fn concept(s: &mut Shots) {
         cx.bind_keys(keymap::bindings(keymap::KeyStyle::current()));
     });
     s.type_only("\x03");
+}
+
+/// What one flame frame costs: the workspace rendered, laid out and painted again (the panes
+/// come from the cache), as each 150 ms tick asks for; then the same with the scene also
+/// rendered on the GPU and read back (more than presenting costs). Prints the time per frame and what that is at the flame's rate.
+/// Build with --release.
+fn bench_flame(s: &mut Shots) {
+    s.run("git --no-pager log --oneline", Duration::from_secs(5));
+    s.run("ls -la", Duration::from_secs(5));
+    s.pump(Duration::from_millis(2500));
+    let window: AnyWindowHandle = s.window.into();
+    let per_second = 1000. / kiln::flame::FRAME_EVERY.as_millis() as f64;
+    let workspace = s.window;
+    for gpu in [false, true] {
+        let frame = |s: &mut Shots| {
+            // What a tick does: the workspace redraws.
+            let _ =
+                s.cx.update(|cx| workspace.update(cx, |_, _, cx| cx.notify()));
+            let start = Instant::now();
+            if gpu {
+                let _ = s.cx.capture_screenshot(window);
+            } else {
+                let _ =
+                    s.cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx));
+            }
+            start.elapsed()
+        };
+        for _ in 0..30 {
+            frame(s);
+        }
+        let mut times: Vec<Duration> = (0..300).map(|_| frame(s)).collect();
+        times.sort();
+        let mean = times.iter().sum::<Duration>() / times.len() as u32;
+        println!(
+            "{}: median {:.2} ms, mean {:.2} ms, p95 {:.2} ms; at {:.1} frames/s: {:.2}% of one core",
+            if gpu {
+                "frame drawn, rendered and read back"
+            } else {
+                "frame drawn (render, layout, paint)"
+            },
+            times[times.len() / 2].as_secs_f64() * 1000.,
+            mean.as_secs_f64() * 1000.,
+            times[times.len() * 95 / 100].as_secs_f64() * 1000.,
+            per_second,
+            mean.as_secs_f64() * per_second * 100.,
+        );
+    }
+}
+
+/// The flame's states, and a contact sheet of its frames as Kiln draws them.
+fn flame(s: &mut Shots) {
+    let pane = s.pane();
+    let frame = |s: &mut Shots, pane: &Entity<TerminalView>| {
+        let workspace = s.window;
+        s.cx.update(|cx| workspace.read(cx).unwrap().flame_frame_of(pane))
+    };
+    s.shot("12-flame-ready");
+    // The frames, one by one: each crop is the flame and a little around it.
+    let mut crops = Vec::new();
+    for want in 0..kiln::flame::FRAMES {
+        let end = Instant::now() + Duration::from_secs(5);
+        while frame(s, &pane) != want && Instant::now() < end {
+            s.cx.advance_clock(Duration::from_millis(5));
+            s.cx.run_until_parked();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            frame(s, &pane),
+            want,
+            "the flame moves on to frame {}",
+            want + 1
+        );
+        s.redraw();
+        let (bounds, _) = s.cx.update(|cx| pane.read(cx).flame()).unwrap();
+        let window: AnyWindowHandle = s.window.into();
+        let image = s.cx.capture_screenshot(window).unwrap();
+        let scale = image.width() as f32 / 1180.;
+        // A little room around it, short of the cursor two cells on.
+        let (pad_x, pad_y) = (2., 4.);
+        let x = ((f32::from(bounds.origin.x) - pad_x) * scale) as u32;
+        let y = ((f32::from(bounds.origin.y) - pad_y) * scale) as u32;
+        let w = ((f32::from(bounds.size.width) + 2. * pad_x) * scale) as u32;
+        let h = ((f32::from(bounds.size.height) + 2. * pad_y) * scale) as u32;
+        crops.push(image::imageops::crop_imm(&image, x, y, w, h).to_image());
+    }
+    // Side by side, four times bigger, with a gap.
+    let zoom = 4;
+    let (cw, ch) = (crops[0].width() * zoom, crops[0].height() * zoom);
+    let gap = 24;
+    let mut sheet = image::RgbaImage::from_pixel(
+        cw * crops.len() as u32 + gap * (crops.len() as u32 + 1),
+        ch + 2 * gap,
+        image::Rgba([0x32, 0x30, 0x2f, 0xff]),
+    );
+    for (i, crop) in crops.iter().enumerate() {
+        let big = image::imageops::resize(crop, cw, ch, image::imageops::FilterType::Nearest);
+        image::imageops::overlay(
+            &mut sheet,
+            &big,
+            (gap + i as u32 * (cw + gap)) as i64,
+            gap as i64,
+        );
+    }
+    sheet.save(s.out.join("12a-flame-frames.png")).unwrap();
+
+    // A failed command: muted red.
+    s.run("false", Duration::from_secs(5));
+    s.shot("12b-flame-failed");
+    s.run("true", Duration::from_secs(5));
+
+    // Without the keyboard (the palette has it), the flame holds frame 1.
+    s.keystroke("cmd-k");
+    s.pump(Duration::from_millis(800));
+    assert_eq!(frame(s, &pane), 0, "the flame holds still without focus");
+    s.keystroke("escape");
+
+    // Reduced motion: frame 1.
+    kiln::flame::force_reduced_motion(true);
+    s.pump(Duration::from_millis(800));
+    assert_eq!(
+        frame(s, &pane),
+        0,
+        "the flame holds still with reduced motion"
+    );
+    s.shot("12c-flame-reduced-motion");
+    kiln::flame::force_reduced_motion(false);
+
+    // Split panes: each has its own header and flame; only the focused one moves.
+    s.action(Box::new(kiln::SplitRight));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.pump(Duration::from_millis(1500));
+    let right = s.pane();
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..12 {
+        s.pump(Duration::from_millis(100));
+        seen.insert(frame(s, &right));
+        assert_eq!(frame(s, &pane), 0, "the other pane's flame holds still");
+    }
+    assert!(seen.len() > 1, "the focused pane's flame moves: {seen:?}");
+    s.shot("12d-flame-split");
+    s.action(Box::new(kiln::ClosePane));
+    s.pump(Duration::from_millis(500));
+}
+
+/// A Rust project (in git, nothing changed).
+fn rust_project() -> PathBuf {
+    let root = std::env::temp_dir().join("kiln-demo").join("rust-cli");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"rust-cli\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=Demo", "-c", "user.email=demo@example.com"])
+            .args(args)
+            .current_dir(&root)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "Start"]);
+    root
 }
 
 /// A git project with nothing changed.

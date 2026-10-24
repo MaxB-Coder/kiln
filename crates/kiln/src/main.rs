@@ -42,6 +42,9 @@ fn parse_args() -> Args {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--bench-startup" => args.bench_startup = true,
+            // The flame moves even without focus, so its cost can be measured on a window in
+            // the background (see notes/concept-check.md).
+            "--bench-flame" => flame::force_animation(true),
             "--background" => args.background = true,
             "--fresh" => args.restore = false,
             "--cols" => args.columns = it.next().and_then(|v| v.parse().ok()),
@@ -62,7 +65,7 @@ fn parse_args() -> Args {
             }
             "--help" | "-h" => {
                 println!(
-                    "kiln [--cols N] [--rows N] [--background] [--fresh] [--bench-startup] [--wsl | --pwsh] [-- program args...]"
+                    "kiln [--cols N] [--rows N] [--background] [--fresh] [--bench-startup] [--bench-flame] [--wsl | --pwsh] [-- program args...]"
                 );
                 std::process::exit(0);
             }

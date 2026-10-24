@@ -10,12 +10,13 @@ use gpui::{
     Action, AnyElement, App, AppContext as _, Context, Decorations, Entity, Focusable,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render, ResizeEdge,
     SharedString, StatefulInteractiveElement, Styled, Subscription, Task, Window,
-    WindowControlArea, div, px,
+    WindowControlArea, canvas, div, px,
 };
 use kiln_term::{GridSize, SessionOptions, ShellCommand};
 
 use crate::config::{self, Config};
 use crate::copy;
+use crate::flame;
 use crate::grid_paint::{CellMetrics, FONT_FAMILY};
 use crate::keymap::{self, KeyStyle};
 use crate::logs;
@@ -45,8 +46,15 @@ const PANE_GAP: Pixels = px(10.);
 /// Focus mode's reading width: this share of the window, at most this many columns.
 const READING_SHARE: f32 = 0.72;
 const READING_COLUMNS: f32 = 100.;
-/// Space after the branch at the right end of the title strip (the panes' own padding).
-const PANE_GAP_RIGHT: f32 = 14.;
+/// A pane header's text starts where the timeline's does, and its pills end where the blocks'
+/// backgrounds do.
+const HEADER_LEAD: f32 = crate::terminal_view::PADDING_X + crate::terminal_view::BLOCK_INSET;
+const HEADER_TRAIL: f32 = crate::terminal_view::PADDING_X;
+/// The `>_` mark and the room after it; minimize, maximize and close.
+const MARK_WIDTH: f32 = 44.;
+/// While the flame holds still, how often to look whether it may move again.
+const FLAME_HELD_CHECK: Duration = Duration::from_millis(500);
+const WINDOW_CONTROLS_WIDTH: f32 = 3. * 46.;
 
 struct Pane {
     view: Entity<TerminalView>,
@@ -82,6 +90,10 @@ pub struct Workspace {
     pub(crate) rail: Option<Rail>,
     /// ⌘.: only the focused pane, no sidebar or rail.
     focus_mode: bool,
+    /// The focused pane's flame: its frame (0–3), and whether a task moves it on. Other panes'
+    /// flames hold frame 1.
+    flame_frame: usize,
+    flame_ticking: bool,
     search: Option<SearchBar>,
     palette: Option<(Entity<CommandPalette>, Subscription)>,
     shortcuts: Option<(Entity<ShortcutsView>, Subscription)>,
@@ -92,8 +104,6 @@ pub struct Workspace {
     /// Per working directory as reported: the folder with links resolved, and its project (git
     /// root, else the folder itself).
     projects: HashMap<String, (PathBuf, PathBuf)>,
-    /// The checked-out branch per project root, re-read every few seconds.
-    branches: HashMap<PathBuf, (Instant, Option<String>)>,
     start_error: Option<String>,
     _config_watch: Task<()>,
     _state_watch: Task<()>,
@@ -118,6 +128,8 @@ impl Workspace {
             sidebar_open: config.window.sidebar,
             rail: None,
             focus_mode: false,
+            flame_frame: 0,
+            flame_ticking: false,
             search: None,
             palette: None,
             shortcuts: None,
@@ -126,7 +138,6 @@ impl Workspace {
             bench_startup,
             shell_override,
             projects: HashMap::new(),
-            branches: HashMap::new(),
             start_error: None,
             _config_watch: Task::ready(()),
             _state_watch: Task::ready(()),
@@ -174,11 +185,7 @@ impl Workspace {
         options.scrollback_lines = config.scrollback;
         options.shell_integration = config.shell.integration.unwrap_or(true);
         if config.shell.prompt == config::PromptStyle::Kiln {
-            let p = theme::palette();
-            options.prompt = Some(kiln_term::integration::MinimalPrompt {
-                ok: p.accent,
-                failed: p.failed,
-            });
+            options.prompt = Some(kiln_term::integration::MinimalPrompt);
         }
         options
     }
@@ -256,6 +263,62 @@ impl Workspace {
             },
         );
         self.activate(insert_at, window, cx);
+    }
+
+    /// The frame a pane's flame shows.
+    pub fn flame_frame_of(&self, view: &Entity<TerminalView>) -> usize {
+        if self.focused_view().as_ref() == Some(view) {
+            self.flame_frame
+        } else {
+            0
+        }
+    }
+
+    /// Starts moving the flame on, unless it already is.
+    fn ensure_flame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.flame_ticking {
+            return;
+        }
+        self.flame_ticking = true;
+        cx.spawn_in(window, async move |this, cx| {
+            let mut wait = flame::FRAME_EVERY;
+            loop {
+                cx.background_executor().timer(wait).await;
+                match this.update_in(cx, |this, window, cx| this.flame_tick(window, cx)) {
+                    Ok(Some(next)) => wait = next,
+                    _ => break,
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// One step of the focused pane's flame: the next frame while the window is active, the
+    /// pane has the keyboard and the system allows motion; frame 1 otherwise. Only this view
+    /// redraws (the panes are cached). Returns when to look again, or `None` once the pane
+    /// has no flame (a command runs, a full-screen program is open).
+    fn flame_tick(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<Duration> {
+        let Some(view) = self.focused_view().filter(|v| v.read(cx).flame().is_some()) else {
+            self.flame_ticking = false;
+            self.flame_frame = 0;
+            return None;
+        };
+        let animate = flame::animation_forced()
+            || window.is_window_active()
+                && view.focus_handle(cx).is_focused(window)
+                && !cx.reduce_motion()
+                && !flame::reduced_motion();
+        if animate {
+            self.flame_frame = (self.flame_frame + 1) % flame::FRAMES;
+            cx.notify();
+            Some(flame::FRAME_EVERY)
+        } else {
+            if self.flame_frame != 0 {
+                self.flame_frame = 0;
+                cx.notify();
+            }
+            Some(FLAME_HELD_CHECK)
+        }
     }
 
     pub fn focused_view(&self) -> Option<Entity<TerminalView>> {
@@ -859,54 +922,68 @@ impl Workspace {
     pub(crate) fn session_names(&mut self, cx: &App) -> Vec<(Option<String>, String)> {
         let mut facts = Vec::with_capacity(self.tabs.len());
         for index in 0..self.tabs.len() {
-            let (cwd, program, shell) = {
-                let tab = &self.tabs[index];
-                match tab.panes.get(tab.focused) {
-                    Some(pane) => {
-                        let view = pane.view.read(cx);
-                        (
-                            view.cwd()
-                                .map(str::to_string)
-                                .or_else(|| pane.start_cwd.clone()),
-                            view.running_program(),
-                            view.shell_label(),
-                        )
-                    }
-                    None => (None, None, String::new()),
-                }
-            };
-            let (cwd, project) = match cwd {
-                Some(cwd) => {
-                    let (path, root) = self.resolve(&cwd);
-                    (
-                        Some(path.to_string_lossy().into_owned()),
-                        Some(root.to_string_lossy().into_owned()),
-                    )
-                }
-                None => (None, None),
-            };
-            facts.push(naming::SessionFacts {
-                project,
-                cwd,
-                program,
-                shell,
-            });
+            let focused = self.tabs[index].focused;
+            facts.push(self.pane_facts(index, focused, cx));
         }
         let labels = naming::session_labels(&facts);
         facts.into_iter().map(|f| f.project).zip(labels).collect()
     }
 
-    /// The branch checked out in a project, from `.git/HEAD`, at most a few seconds old.
-    fn branch(&mut self, root: &Path) -> Option<String> {
-        if let Some((read, branch)) = self.branches.get(root)
-            && read.elapsed() < Duration::from_secs(3)
-        {
-            return branch.clone();
+    /// What a pane's name is made of: its project, folder, program and shell.
+    fn pane_facts(&mut self, tab: usize, pane: usize, cx: &App) -> naming::SessionFacts {
+        let (cwd, program, shell) = match self.tabs.get(tab).and_then(|t| t.panes.get(pane)) {
+            Some(pane) => {
+                let view = pane.view.read(cx);
+                (
+                    view.cwd()
+                        .map(str::to_string)
+                        .or_else(|| pane.start_cwd.clone()),
+                    view.running_program(),
+                    view.shell_label(),
+                )
+            }
+            None => (None, None, String::new()),
+        };
+        let (cwd, project) = match cwd {
+            Some(cwd) => {
+                let (path, root) = self.resolve(&cwd);
+                (
+                    Some(path.to_string_lossy().into_owned()),
+                    Some(root.to_string_lossy().into_owned()),
+                )
+            }
+            None => (None, None),
+        };
+        naming::SessionFacts {
+            project,
+            cwd,
+            program,
+            shell,
         }
-        let branch = naming::git_branch(root);
-        self.branches
-            .insert(root.to_path_buf(), (Instant::now(), branch.clone()));
-        branch
+    }
+
+    /// The name in each pane's header for the active session: the sidebar's label for the
+    /// focused pane, each other pane's own.
+    fn pane_names(&mut self, cx: &App) -> Vec<String> {
+        let label = self
+            .session_names(cx)
+            .get(self.active)
+            .map(|(_, label)| label.clone())
+            .unwrap_or_default();
+        let Some(tab) = self.tabs.get(self.active) else {
+            return Vec::new();
+        };
+        let (count, focused) = (tab.panes.len(), tab.focused);
+        (0..count)
+            .map(|i| {
+                if i == focused {
+                    label.clone()
+                } else {
+                    let facts = self.pane_facts(self.active, i, cx);
+                    naming::session_labels(&[facts]).remove(0)
+                }
+            })
+            .collect()
     }
 
     /// "acme-web › api" for the focused session.
@@ -1328,110 +1405,79 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// A pane's header, one line: its name, dim, on the left; on the right how many things
+    /// run (in focus mode) and the pills. `lead` and `trail` keep it clear of the traffic
+    /// lights, the `>_` mark and the window controls.
+    fn render_pane_header(
+        &self,
+        view: &Entity<TerminalView>,
+        name: String,
+        lead: f32,
+        trail: f32,
+        cx: &App,
+    ) -> AnyElement {
         let p = palette();
-        let leading =
-            if chrome() == Chrome::Mac && !self.sidebar_visible() && !window.is_fullscreen() {
-                TRAFFIC_LIGHTS_WIDTH
-            } else {
-                px(10.)
-            };
-        // A dim breadcrumb on the left ("acme-web › api"); on the right the branch and its
-        // change count, or in focus mode how many things are running.
-        let title = self.focused_breadcrumb(cx);
-        let git = self
-            .focused_view()
-            .and_then(|view| view.read(cx).git().cloned());
-        let branch = match &git {
-            Some(git) => Some((
-                git.branch.clone().unwrap_or_else(|| "detached".into()),
-                git.changes,
-            )),
-            // Before the first read: the branch from .git/HEAD, without a count.
-            None => self
-                .focused_cwd(cx)
-                .map(|cwd| self.project_of(&cwd.to_string_lossy()))
-                .filter(|root| root.join(".git").exists())
-                .and_then(|root| self.branch(&root))
-                .map(|branch| (branch, 0)),
-        };
-        let running = self.running_count(cx);
-        let right: Option<AnyElement> = if self.focus_mode {
-            (running > 0).then(|| {
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(div().size(px(5.)).rounded_full().bg(theme::hsla(p.ok)))
-                    .child(format!("{running} running"))
-                    .into_any_element()
-            })
-        } else {
-            branch.map(|(branch, changes)| {
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(6.))
-                    .child(format!("\u{e0a0} {branch}"))
-                    .when(changes > 0, |d| {
-                        d.child(
-                            div()
-                                .text_color(theme::hsla(p.modified))
-                                .child(format!("✱{changes}")),
-                        )
-                    })
-                    .into_any_element()
-            })
-        };
+        let pills = view.read(cx).pills();
+        let running = Some(self.running_count(cx)).filter(|n| self.focus_mode && *n > 0);
         div()
-            .id("titlebar")
             .flex_none()
             .h(TITLEBAR_HEIGHT)
             .w_full()
             .flex()
             .flex_row()
             .items_center()
-            .pl(leading)
+            .gap(px(10.))
+            .pl(px(lead))
+            .pr(px(trail))
             .window_control_area(WindowControlArea::Drag)
-            .on_mouse_down(MouseButton::Left, |event, window, _| {
-                if event.click_count == 2 {
-                    window.titlebar_double_click();
-                } else if !cfg!(windows) {
-                    window.start_window_move();
-                }
-            })
-            .when(chrome() != Chrome::Mac && !self.sidebar_visible(), |d| {
-                d.child(div().flex_none().mr(px(12.)).child(app_mark()))
-            })
+            .on_mouse_down(MouseButton::Left, start_window_drag)
+            .font_family(FONT_FAMILY)
+            .text_size(px(11.))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .font_family(FONT_FAMILY)
-                    .text_size(px(11.))
-                    .text_color(theme::hsla(p.muted))
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .child(SharedString::from(title)),
+                    .text_color(theme::hsla(theme::blend(p.bg3, p.muted, 0.5)))
+                    .child(SharedString::from(name)),
             )
-            .when_some(right, |d, right| {
+            .when_some(running, |d, running| {
                 d.child(
                     div()
                         .flex_none()
-                        .pl(px(12.))
-                        .pr(px(PANE_GAP_RIGHT))
-                        .font_family(FONT_FAMILY)
-                        .text_size(px(11.))
-                        .text_color(theme::hsla(p.muted))
-                        .child(right),
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.))
+                        .text_size(px(10.5))
+                        .text_color(theme::hsla(p.bg3))
+                        .child(div().size(px(5.)).rounded_full().bg(theme::hsla(p.ok)))
+                        .child(format!("{running} running")),
                 )
             })
-            .when(chrome() != Chrome::Mac && !self.rail_visible(), |d| {
-                d.child(window_controls(window))
-            })
+            .child(crate::pills::render(&pills))
             .into_any_element()
+    }
+
+    /// Room the window's own controls take at the top left and right of the panes: the traffic
+    /// lights (macOS) or the `>_` mark when the sidebar is closed, and the window controls
+    /// (Windows and Linux) when the rail is.
+    fn chrome_reserve(&self, window: &Window) -> (f32, f32) {
+        let mac = chrome() == Chrome::Mac;
+        let left = match (self.sidebar_visible(), mac) {
+            (true, _) => 0.,
+            (false, true) if window.is_fullscreen() => 0.,
+            (false, true) => f32::from(TRAFFIC_LIGHTS_WIDTH),
+            (false, false) => MARK_WIDTH,
+        };
+        let right = if !mac && !self.rail_visible() {
+            WINDOW_CONTROLS_WIDTH + 8.
+        } else {
+            0.
+        };
+        (left, right)
     }
 
     /// Panes with a command running, in every session.
@@ -1492,7 +1538,12 @@ impl Workspace {
         )
     }
 
-    fn render_panes(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_panes(
+        &self,
+        names: Vec<String>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(tab) = self.tabs.get(self.active) else {
             let p = palette();
             let message = self
@@ -1501,6 +1552,7 @@ impl Workspace {
                 .unwrap_or_else(|| "No sessions".into());
             return div()
                 .p(px(16.))
+                .pt(TITLEBAR_HEIGHT)
                 .text_color(theme::hsla(p.failed))
                 .font_family(FONT_FAMILY)
                 .child(format!("Kiln could not start the shell: {message}"))
@@ -1515,6 +1567,13 @@ impl Workspace {
                 + 2. * crate::terminal_view::PADDING_X;
             px((window_w * READING_SHARE).min(columns))
         });
+        // Each header keeps clear of the window's controls where it reaches them; elsewhere its
+        // text lines up with the timeline's.
+        let (left_reserve, right_reserve) = self.chrome_reserve(window);
+        let margin = reading.map_or(0., |width| {
+            (f32::from(window.viewport_size().width) - f32::from(width)) / 2.
+        });
+        let last = tab.panes.len() - 1;
         let mut row = div()
             .size_full()
             .flex()
@@ -1526,6 +1585,20 @@ impl Workspace {
             if self.focus_mode && !focused {
                 continue;
             }
+            let first = i == 0 || self.focus_mode;
+            let lead = HEADER_LEAD.max(if first { left_reserve - margin } else { 0. });
+            let trail = HEADER_TRAIL.max(if i == last || self.focus_mode {
+                right_reserve - margin
+            } else {
+                0.
+            });
+            let header = self.render_pane_header(
+                &pane.view,
+                names.get(i).cloned().unwrap_or_default(),
+                lead,
+                trail,
+                cx,
+            );
             let view = pane.view.clone();
             row = row.child(
                 div()
@@ -1536,7 +1609,8 @@ impl Workspace {
                     })
                     .min_w_0()
                     .h_full()
-                    .relative()
+                    .flex()
+                    .flex_col()
                     // Panes that do not have focus step back a little; no borders.
                     .when(several && !focused, |d| d.opacity(0.72))
                     .on_mouse_down(
@@ -1553,10 +1627,20 @@ impl Workspace {
                             }
                         }),
                     )
-                    .child(pane.view.clone())
-                    .when(
-                        self.search.as_ref().is_some_and(|s| s.pane == pane.view),
-                        |d| d.children(self.render_search_bar()),
+                    .child(header)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .relative()
+                            .child(
+                                gpui::AnyView::from(pane.view.clone())
+                                    .cached(gpui::StyleRefinement::default().size_full()),
+                            )
+                            .when(
+                                self.search.as_ref().is_some_and(|s| s.pane == pane.view),
+                                |d| d.children(self.render_search_bar()),
+                            ),
                     ),
             );
         }
@@ -1631,6 +1715,16 @@ pub fn chrome() -> Chrome {
         _ if cfg!(target_os = "macos") => Chrome::Mac,
         _ if cfg!(windows) => Chrome::Windows,
         _ => Chrome::Linux,
+    }
+}
+
+/// A press on a title area: a double click zooms (or whatever the system does), a press moves
+/// the window (Windows does that itself, from the drag area).
+fn start_window_drag(event: &gpui::MouseDownEvent, window: &mut Window, _: &mut App) {
+    if event.click_count == 2 {
+        window.titlebar_double_click();
+    } else if !cfg!(windows) {
+        window.start_window_move();
     }
 }
 
@@ -1791,8 +1885,76 @@ impl Render for Workspace {
         } else {
             None
         };
-        let titlebar = self.render_titlebar(window, cx);
-        let panes = self.render_panes(window, cx);
+        let names = self.pane_names(cx);
+        let panes = self.render_panes(names, window, cx);
+        // Behind the pane headers, a strip that moves the window where no header is (beside a
+        // pane in focus mode), and over them the `>_` mark and the window controls.
+        let mac = chrome() == Chrome::Mac;
+        let drag_strip = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .w_full()
+            .h(TITLEBAR_HEIGHT)
+            .window_control_area(WindowControlArea::Drag)
+            .on_mouse_down(MouseButton::Left, start_window_drag);
+        let mark = (!mac && !self.sidebar_visible()).then(|| {
+            div()
+                .absolute()
+                .top_0()
+                .left(px(10.))
+                .h(TITLEBAR_HEIGHT)
+                .flex()
+                .items_center()
+                .child(app_mark())
+        });
+        // The flames, over the input boxes, painted after the panes so their places are known.
+        // A frame of the flame redraws this view only.
+        let flames: Vec<(Entity<TerminalView>, usize, f32)> = self
+            .tabs
+            .get(self.active)
+            .map(|tab| {
+                let several = tab.panes.len() > 1 && !self.focus_mode;
+                tab.panes
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !self.focus_mode || *i == tab.focused)
+                    .map(|(i, pane)| {
+                        let dim = if several && i != tab.focused {
+                            0.72
+                        } else {
+                            1.
+                        };
+                        (pane.view.clone(), self.flame_frame_of(&pane.view), dim)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if self
+            .focused_view()
+            .is_some_and(|v| v.read(cx).flame().is_some())
+        {
+            self.ensure_flame(window, cx);
+        }
+        let flame_overlay = canvas(
+            |_, _, _| {},
+            move |_, _, window, cx| {
+                for (view, frame, opacity) in &flames {
+                    if let Some((bounds, failed)) = view.read(cx).flame() {
+                        flame::paint(*frame, failed, *opacity, bounds, window);
+                    }
+                }
+            },
+        )
+        .absolute()
+        .size_full();
+        let controls = (!mac && !self.rail_visible()).then(|| {
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .child(window_controls(window))
+        });
         let palette_overlay = self.palette.as_ref().map(|(palette, _)| {
             div()
                 .id("palette-scrim")
@@ -1921,11 +2083,13 @@ impl Render for Workspace {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .flex()
-                    .flex_col()
-                    .child(titlebar)
-                    .child(div().flex_1().min_h_0().relative().child(panes)),
+                    .relative()
+                    .child(drag_strip)
+                    .child(panes)
+                    .children(mark)
+                    .children(controls),
             )
+            .child(flame_overlay)
             .when_some(rail, |d, rail| d.child(rail))
             .when_some(palette_overlay, |d, overlay| d.child(overlay))
             .when_some(shortcuts_overlay, |d, overlay| d.child(overlay))

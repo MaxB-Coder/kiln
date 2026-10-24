@@ -37,6 +37,8 @@ pub struct LiveState {
     pub integrated: bool,
     /// First row of the current prompt.
     pub prompt_top: Option<usize>,
+    /// The column the prompt starts at (its OSC 133 start mark), on `prompt_top`.
+    pub prompt_column: usize,
     /// First row of the running command's output.
     pub output_top: Option<usize>,
     /// The running command.
@@ -153,8 +155,9 @@ impl BlockRecorder {
                     .flatten();
                 self.seen_prompt = true;
                 // The startup block cleared the scrollback, which moves the prompt's row.
-                let (abs, _) = cursor_abs(term);
+                let (abs, column) = cursor_abs(term);
                 live.prompt_top = Some(abs);
+                live.prompt_column = column;
                 startup
             }
             Mark::InputStart => {

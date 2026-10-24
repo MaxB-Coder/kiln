@@ -247,3 +247,20 @@ Newest at the bottom.
   keeps its size. The palette groups results (Commands, Projects, Sessions, Actions, 4 rows
   each, 12 when one group has them all) with no type column. The sidebar ends with the
   palette's keys as a link.
+- **Header pills and the flame** (the concept's revised items 1 and 2; the in-box pills of
+  5da7876 lasted one day). Each pane has its own header line: its name, dim, and on the right
+  the pills (project, branch with ✱N, runtimes, WSL distribution), with "● N running" before
+  them in focus mode. The headers replace the window-wide title strip; the traffic lights, the
+  `>_` mark and the window controls sit over the panes' corners and the headers keep clear of
+  them. A runtime pill needs a marker file in the project: from the folder up to its
+  repository's root, or the folder alone outside one; never the home folder.
+- **The flame prompt**: the minimal prompt is now two blank cells (zsh, bash, PowerShell, and a
+  Starship config whose format is just those). Kiln paints the flame over the first, at the
+  prompt's OSC 133 start (`LiveState::prompt_column`), from the four SVG frames in
+  `assets/flame` parsed at startup and filled as vector paths (so it is as sharp as the text
+  at any scale). It moves every 150 ms only while its window is active, its pane has the
+  keyboard and the system allows motion (macOS Reduce motion, Windows animation effects,
+  GNOME's enable-animations); otherwise it holds frame 1, checking twice a second. While a
+  command runs or a full-screen program is open there is no flame and no timer. Red follows
+  the last exit code (130, Ctrl-C, does not count). `--bench-flame` keeps it moving without
+  focus, to measure what it costs.

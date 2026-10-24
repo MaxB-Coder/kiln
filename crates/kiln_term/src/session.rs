@@ -156,6 +156,8 @@ pub struct Session {
     size: GridSize,
     shell: ShellCommand,
     integrated: bool,
+    /// The shell prints Kiln's minimal prompt (blank cells for the flame).
+    minimal_prompt: bool,
     pid: Option<u32>,
 }
 
@@ -172,6 +174,7 @@ impl Session {
         };
 
         let label = options.shell.clone();
+        let prompt = options.prompt;
         let integrated = options.shell_integration
             && match integration::default_dir().map(|dir| integration::install(&dir)) {
                 Some(Ok(installed)) => integration::apply(
@@ -232,6 +235,7 @@ impl Session {
             size,
             shell: label,
             integrated,
+            minimal_prompt: integrated && prompt.is_some(),
             pid,
         })
     }
@@ -257,6 +261,11 @@ impl Session {
     /// Whether Kiln's shell integration was loaded into this shell.
     pub fn integration_loaded(&self) -> bool {
         self.integrated
+    }
+
+    /// Whether the shell prints Kiln's minimal prompt, so Kiln draws the flame over it.
+    pub fn minimal_prompt(&self) -> bool {
+        self.minimal_prompt
     }
 
     pub fn size(&self) -> GridSize {

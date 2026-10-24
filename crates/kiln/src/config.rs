@@ -79,14 +79,14 @@ pub struct ShellConfig {
     pub args: Option<Vec<String>>,
     /// Load Kiln's shell integration (needed for blocks).
     pub integration: Option<bool>,
-    /// Kiln's minimal "❯" prompt, or the shell's own.
+    /// Kiln's flame prompt, or the shell's own.
     pub prompt: PromptStyle,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PromptStyle {
-    /// "❯ " in the input box (orange; red after a failed command).
+    /// A small flame Kiln draws in the input box (orange; red after a failed command).
     #[default]
     Kiln,
     /// Whatever the shell's startup files set (Starship, a theme, PS1).
@@ -287,7 +287,7 @@ notify_after_secs = 10
 # args = ["-l"]
 # Shell integration draws each command as a block. Turn off for a classic terminal.
 # integration = true
-# The prompt in the input box: "kiln" (a quiet ❯) or "shell" (your shell's own prompt, such
+# The prompt in the input box: "kiln" (a small flame) or "shell" (your shell's own prompt, such
 # as Starship). Only inside Kiln; your shell elsewhere is unchanged.
 prompt = "kiln"
 

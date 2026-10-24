@@ -141,15 +141,14 @@ fn pwsh_block() {
     }
 }
 
-/// A prompt's first cell: its glyph and colour.
-type PromptCell = (char, Option<(u8, u8, u8)>);
+/// What a prompt shows: the start of its line, and the column typing starts at.
+type PromptLine = (String, usize);
 
-/// Runs a shell with Kiln's minimal prompt and returns the prompt's first cell before and after
-/// a failing command.
-fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptCell; 2]> {
+/// Runs a shell with Kiln's minimal prompt and returns its line before and after a failing
+/// command.
+fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptLine; 2]> {
     use kiln_term::engine::grid::Dimensions as _;
     use kiln_term::engine::index::{Column, Line};
-    use kiln_term::engine::vte::ansi::Color;
     use kiln_term::integration::MinimalPrompt;
 
     if !Path::new(program).exists() {
@@ -170,10 +169,7 @@ fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptCell; 2]> {
         shell: ShellCommand::new(program, args.iter().copied()),
         working_directory: Some(home.clone()),
         env,
-        prompt: Some(MinimalPrompt {
-            ok: 0xe07b39,
-            failed: 0xb8645a,
-        }),
+        prompt: Some(MinimalPrompt),
         ..Default::default()
     };
     let (tx, rx) = mpsc::channel();
@@ -182,21 +178,16 @@ fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptCell; 2]> {
     })
     .unwrap();
 
-    let first_cell = |session: &Session| {
+    let prompt_line = |session: &Session| {
         let term = session.term().lock();
         let grid = term.grid();
         let line = grid.cursor.point.line;
         // The prompt starts at the beginning of the cursor's line.
-        let cell = &grid[Line(line.0)][Column(0)];
-        let rgb = match cell.fg {
-            Color::Spec(rgb) => Some((rgb.r, rgb.g, rgb.b)),
-            _ => None,
-        };
         let text: String = (0..grid.columns())
             .map(|c| grid[Line(line.0)][Column(c)].c)
             .collect();
         eprintln!("prompt line: {:?}", text.trim_end());
-        (cell.c, rgb)
+        (text.chars().take(2).collect(), grid.cursor.point.column.0)
     };
 
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -209,19 +200,20 @@ fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptCell; 2]> {
             && record.mark == Mark::InputStart
         {
             std::thread::sleep(Duration::from_millis(200));
-            cells.push(first_cell(&session));
+            cells.push(prompt_line(&session));
             match cells.len() {
                 // `false` fails in every shell here (PowerShell runs /usr/bin/false).
                 1 => session.write(b"false\r".to_vec()),
-                _ => return Some([cells[0], cells[1]]),
+                _ => return Some([cells[0].clone(), cells[1].clone()]),
             }
         }
     }
 }
 
-fn check_prompt(cells: [PromptCell; 2]) {
-    assert_eq!(cells[0], ('❯', Some((224, 123, 57))), "first prompt");
-    assert_eq!(cells[1], ('❯', Some((184, 100, 90))), "after a failure");
+/// Two blank cells for the flame, before and after a failure; typing starts after them.
+fn check_prompt(lines: [PromptLine; 2]) {
+    assert_eq!(lines[0], ("  ".to_string(), 2), "first prompt");
+    assert_eq!(lines[1], ("  ".to_string(), 2), "after a failure");
 }
 
 #[test]

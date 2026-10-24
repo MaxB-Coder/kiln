@@ -1,15 +1,14 @@
 # Kiln shell integration for PowerShell (pwsh 7 and Windows PowerShell 5.1).
 #
 # Marks the prompt, the command and its output (OSC 133) and reports the current folder
-# (OSC 7). Kiln loads it with -NoExit -EncodedCommand. With KILN_PROMPT=kiln the prompt is
-# Kiln's minimal "❯ " (">" where the console is not UTF-8; Starship gets a one-character config
-# instead); otherwise the user's own prompt stays.
+# (OSC 7). Kiln loads it with -NoExit -EncodedCommand. With KILN_PROMPT=kiln the prompt is two
+# blank cells, where Kiln draws its flame (Starship gets a config that prints only those);
+# otherwise the user's own prompt stays.
 
 if ($global:__KilnIntegrated) { return }
 $global:__KilnIntegrated = $true
 $global:__KilnRunning = $false
 # Whether the last command succeeded, for the prompt's colour (the profile does not count).
-$global:__KilnLastOk = $true
 $global:__KilnUserPrompt = $function:prompt
 
 function global:__KilnEncode([string] $s) {
@@ -36,7 +35,6 @@ function global:prompt {
     $out = ''
     if ($global:__KilnRunning) {
         $exit = if ($ok) { 0 } elseif ($code) { $code } else { 1 }
-        $global:__KilnLastOk = $ok
         $out += "$esc]133;D;$exit$bel"
         $global:__KilnRunning = $false
     }
@@ -61,11 +59,7 @@ function global:prompt {
     # started).
     $starship = "$global:__KilnUserPrompt" -match 'starship'
     if ($kiln -and -not $starship) {
-        $good = $global:__KilnLastOk
-        $rgb = if ($good) { $env:KILN_PROMPT_OK } else { $env:KILN_PROMPT_FAIL }
-        if (-not $rgb) { $rgb = if ($good) { '224;123;57' } else { '184;100;90' } }
-        $sym = if ([Console]::OutputEncoding.CodePage -eq 65001) { [string][char]0x276F } else { '>' }
-        $out += "$esc[38;2;${rgb}m$sym$esc[0m "
+        $out += '  '
     } else {
         $out += & $global:__KilnUserPrompt
     }

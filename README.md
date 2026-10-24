@@ -46,7 +46,7 @@ on macOS, the Help menu. The ones you will use most:
 | --- | --- | --- |
 | All keyboard shortcuts | ⌘/ | Ctrl+Shift+/ |
 | New session / split right | ⌘T / ⌘D | Ctrl+Shift+T / Ctrl+Shift+D |
-| Command palette (actions, sessions, projects, past commands) | ⌘K | Ctrl+Shift+K |
+| Command palette (past commands, projects, sessions, actions) | ⌘K | Ctrl+Shift+K |
 | Find | ⌘F | Ctrl+Shift+F |
 | Copy the last output, fenced / raw | ⌘⇧C / ⌘⌥C | Ctrl+Shift+C (with no selection) / Ctrl+Shift+Alt+C |
 | Select a command / add to the selection (then ⌘C or Enter copies it, Esc clears) | ⌘↑ ⌘↓ / ⇧⌘↑ ⇧⌘↓, ⇧-click | Ctrl+Shift+↑ ↓ / Ctrl+Alt+Shift+↑ ↓, Shift+click |
@@ -62,9 +62,11 @@ A pinned command (Pin in a block's hover actions) stays at the top of the timeli
 
 Kiln loads its shell integration for zsh, bash and PowerShell by itself, without touching your
 startup files. Other shells (fish, nu) get a classic terminal. Inside Kiln the prompt is a
-quiet `❯` in the input box (muted red after a failed command), with Starship given a
-one-character config; your line editor, plugins and completion stay as they are, and outside
-Kiln your prompt is unchanged. `[shell] prompt = "shell"` keeps your own prompt in Kiln too.
+small flame Kiln draws in the input box (muted red after a failed command; it holds still
+without focus or with reduced motion); the shell prints only blank cells there, Starship
+included. Your line editor, plugins and completion stay as they are, and outside Kiln your
+prompt is unchanged. `[shell] prompt = "shell"` keeps your own prompt in Kiln too. Each pane's
+header shows the project, the branch with its change count, and the runtimes the project uses.
 
 ## Settings
 
@@ -76,7 +78,7 @@ font_size = 13.0
 notify_after_secs = 10          # notify when a long command finishes out of sight (0: off)
 
 [shell]
-prompt = "kiln"                 # a quiet ❯ in the input box; "shell" keeps your own prompt
+prompt = "kiln"                 # a small flame in the input box; "shell" keeps your own prompt
 
 [window]
 restore = true                  # reopen the last sessions at launch

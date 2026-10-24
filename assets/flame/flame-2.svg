@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="12" height="16">
+  <!-- Kiln prompt flame, stop-motion frame 2 of 4. Outer: accent #e07b39 (failed: #b8645a).
+       Inner: #f2b36b (failed: #d0927f). Frames swap every 150 ms in order 1-2-3-4. -->
+  <path fill="#e07b39" d="M7.2 1.6 C9 4.6 10.5 6.3 10.5 9.6 C10.5 12.9 8.4 15 6 15 C3.6 15 1.5 12.8 1.5 9.6 C1.5 7.4 2.9 6 3.6 4.6 C3.9 6 4.8 6.6 5.6 6.7 C5.9 4.8 6.3 3 7.2 1.6 Z"/>
+  <path fill="#f2b36b" d="M6.6 8.4 C7.6 9.6 8.1 10.6 8.1 11.9 C8.1 13.2 7.1 14 6 14 C4.9 14 4 13.2 4 11.9 C4 10.8 4.6 10 5.1 9.6 C5.3 10.2 5.6 10.5 6 10.5 C6.1 9.7 6.2 9 6.6 8.4 Z"/>
+</svg>
