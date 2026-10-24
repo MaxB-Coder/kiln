@@ -160,7 +160,14 @@ Newest at the bottom.
   the binary, from their own licence files, offline) and every package carries it with the
   font licences. Kiln's own crates are skipped until it has a licence.
 - **App icon**: a kiln's arch with the prompt glowing inside, in the palette's colours
-  (`assets/icon/kiln.svg`; PNG, icns and ico made from it).
+  (`assets/icon/kiln.svg`; PNG, icns and ico made from it). Since 2026-10-24 the arch holds
+  the prompt's own flame (frame 1 of `assets/flame`, concept A, "Fired").
+  `scripts/make-icons.sh` makes every format from the SVG: the .icns keeps the macOS grid's
+  margin (824 of 1024); the .ico and the Linux PNGs are cut to the body (248 of 256), as
+  Windows and Linux icons fill their tile. kiln.exe now carries the .ico as a resource
+  (`build.rs`, winresource; before, Explorer showed the default program icon), and
+  `scripts/check-icons.sh` / `.ps1` check every package against the assets, byte for byte,
+  in the release workflow (and the exe in CI).
 - **Daily security check**: `security.yml` runs the RustSec advisories check every day, so a
   new advisory against a shipped crate fails a run (GitHub emails about failed scheduled runs)
   without waiting for a push. Renovate (once installed) opens the fix.

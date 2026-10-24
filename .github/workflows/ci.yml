@@ -60,6 +60,11 @@ jobs:
       - name: Build
         run: cargo build --release --locked -p kiln
 
+      - name: The exe carries the app icon (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/check-icons.ps1 -Exe target/release/kiln.exe
+
       - name: Test
         run: cargo test --release --locked --workspace
 

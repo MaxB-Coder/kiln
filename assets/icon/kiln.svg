@@ -1,24 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- Kiln: a kiln's arch with the prompt glowing inside. macOS icon grid: 824 px body. -->
+  <!-- Kiln: a kiln's arch with the prompt flame burning inside (icon concept A, "Fired").
+       macOS icon grid: 824 px body centred on 1024. The flame is frame 1 of
+       assets/flame (the prompt's own flame), so the icon and the input box match. -->
   <defs>
     <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#32302f"/>
-      <stop offset="1" stop-color="#1d2021"/>
+      <stop offset="0" stop-color="#34302d"/>
+      <stop offset="1" stop-color="#1d1b1a"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.78" r="0.62">
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
       <stop offset="0" stop-color="#e07b39" stop-opacity="0.55"/>
-      <stop offset="0.55" stop-color="#e07b39" stop-opacity="0.14"/>
       <stop offset="1" stop-color="#e07b39" stop-opacity="0"/>
     </radialGradient>
   </defs>
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
-  <!-- The arch opening -->
-  <path d="M292 760 V520 a220 220 0 0 1 440 0 V760 Z" fill="#282828"/>
-  <path d="M292 760 V520 a220 220 0 0 1 440 0 V760 Z" fill="url(#glow)"/>
-  <path d="M292 760 V520 a220 220 0 0 1 440 0 V760" fill="none" stroke="#504945" stroke-width="28" stroke-linejoin="round"/>
-  <!-- Hearth line -->
-  <rect x="236" y="752" width="552" height="28" rx="14" fill="#504945"/>
-  <!-- The prompt: chevron and cursor -->
-  <path d="M410 560 L490 620 L410 680" fill="none" stroke="#e07b39" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="530" y="652" width="104" height="36" rx="18" fill="#ebdbb2"/>
+  <ellipse cx="512.0" cy="688.6" rx="235.4" ry="215.8" fill="url(#glow)"/>
+  <path d="M325.6 786.7 V482.6 A186.4 186.4 0 0 1 698.4 482.6 V786.7"
+        fill="none" stroke="#5a524c" stroke-width="39.2" stroke-linecap="round"/>
+  <line x1="257.0" y1="791.6" x2="767.0" y2="791.6" stroke="#5a524c" stroke-width="39.2" stroke-linecap="round"/>
+  <g transform="translate(388.4 443.3) scale(20.6)">
+    <path fill="#e07b39" d="M6 1 C8 4 10.5 6 10.5 9.5 C10.5 12.8 8.4 15 6 15 C3.6 15 1.5 12.8 1.5 9.5 C1.5 7 3.2 5.6 4 4 C4.3 5.5 5 6.3 5.6 6.5 C5.6 4.5 5.4 2.8 6 1 Z"/>
+    <path fill="#f2b36b" d="M6 8 C7.2 9.4 8 10.4 8 11.8 C8 13.2 7.1 14 6 14 C4.9 14 4 13.2 4 11.8 C4 10.6 4.8 9.6 5.3 9.2 C5.4 9.9 5.7 10.2 6 10.3 C6 9.4 5.8 8.7 6 8 Z"/>
+  </g>
 </svg>

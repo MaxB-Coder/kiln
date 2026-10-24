@@ -185,6 +185,7 @@ jobs:
           hdiutil attach -quiet -nobrowse -mountpoint /tmp/kiln-dmg target/packages/Kiln-*.dmg
           ditto /tmp/kiln-dmg/Kiln.app "$RUNNER_TEMP/Kiln.app"
           hdiutil detach -quiet /tmp/kiln-dmg
+          scripts/check-icons.sh "$RUNNER_TEMP/Kiln.app"
           "$RUNNER_TEMP/Kiln.app/Contents/MacOS/kiln" --version
           scripts/ci-smoke.sh "$RUNNER_TEMP/Kiln.app/Contents/MacOS/kiln"
 
@@ -192,6 +193,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 10
         run: |
+          scripts/check-icons.sh
           sudo apt-get install -y ./target/packages/*.deb
           kiln --version
           xvfb-run -a -s "-screen 0 1600x1000x24" scripts/ci-smoke.sh "$(command -v kiln)"
@@ -232,12 +234,14 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem target/packages/*-setup.exe | Select-Object -First 1
+          scripts/check-icons.ps1 -Exe $setup.FullName -Installer
           Start-Process -Wait -FilePath $setup.FullName -ArgumentList "/S"
           $exe = Get-ChildItem "$env:LOCALAPPDATA" -Recurse -Filter kiln.exe -ErrorAction SilentlyContinue |
             Where-Object { $_.DirectoryName -like "*Kiln*" } | Select-Object -First 1
           if (-not $exe) { throw "the installer did not put kiln.exe under LOCALAPPDATA" }
           "installed: $($exe.FullName)"
           if (-not (Test-Path (Join-Path $exe.DirectoryName "uninstall.exe"))) { throw "no uninstaller next to kiln.exe" }
+          scripts/check-icons.ps1 -Exe $exe.FullName
           scripts/ci-smoke.ps1 -Kiln $exe.FullName
           Start-Process -Wait -FilePath (Join-Path $exe.DirectoryName "uninstall.exe") -ArgumentList "/S"
 
