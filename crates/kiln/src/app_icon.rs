@@ -175,7 +175,7 @@ mod platform {
 
     /// The window's title-bar and taskbar icons, at the window's scale.
     pub fn apply(icon: AppIcon, window: &gpui::Window) -> Result<(), String> {
-        let handle = window.window_handle().map_err(|e| e.to_string())?;
+        let handle = HasWindowHandle::window_handle(window).map_err(|e| e.to_string())?;
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return Err("not a Win32 window".into());
         };
@@ -220,7 +220,7 @@ mod platform {
     /// X11: the window's `_NET_WM_ICON`. Wayland has no way for an app to set its window's
     /// icon: the compositor shows the desktop file's (the default icon).
     pub fn apply(icon: AppIcon, window: &gpui::Window) -> Result<(), String> {
-        let handle = window.window_handle().map_err(|e| e.to_string())?;
+        let handle = HasWindowHandle::window_handle(window).map_err(|e| e.to_string())?;
         let id = match handle.as_raw() {
             RawWindowHandle::Xcb(h) => h.window.get(),
             RawWindowHandle::Xlib(h) => h.window as u32,
