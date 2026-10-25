@@ -34,11 +34,21 @@ if [[ "$(uname)" == "Linux" ]]; then
     XDG_CONFIG_HOME="$config_home" KILN_STATE_FILE="$config_home/state.json" \
       "$kiln" --fresh --cols 80 --rows 20 -- /bin/sh -c 'sleep 30' &
     pid=$!
-    sleep 8
-    window="$(xwininfo -root -tree | awk '/"Kiln"|kiln/ && /0x/ { print $1; exit }')"
-    # The raw numbers (xprop otherwise draws the icon as text): width, height, then pixels.
-    icon="$(xprop -id "$window" -notype -f _NET_WM_ICON 32c ' = $0+' _NET_WM_ICON | sed 's/.*= //')"
+    # Wait for the window and its icon (start-up under lavapipe can take several seconds).
+    window="" icon=""
+    for _ in $(seq 30); do
+      sleep 1
+      window="$(xwininfo -root -tree | awk '/"Kiln"|kiln/ && /0x/ { print $1; exit }')"
+      [ -n "$window" ] || continue
+      # The raw numbers (xprop otherwise draws the icon as text): width, height, then pixels.
+      icon="$(xprop -id "$window" -notype -f _NET_WM_ICON 32c ' = $0+' _NET_WM_ICON | sed 's/.*= //' || true)"
+      case "$icon" in [0-9]*) break ;; esac
+    done
     kill "$pid" || true
+    case "$icon" in
+      [0-9]*) ;;
+      *) echo "ci-smoke: no _NET_WM_ICON on Kiln's window ($window) after 30 s" >&2; exit 1 ;;
+    esac
     echo "first icon: $(echo "$icon" | cut -d, -f1-2)"
     # Row 0, column 8 of the 16 px icon: the third value is its first pixel.
     pixel="$(echo "$icon" | tr -d ' ' | cut -d, -f11)"
