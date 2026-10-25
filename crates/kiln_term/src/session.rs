@@ -253,6 +253,31 @@ impl Session {
         self.live.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Whether the shell waits at its prompt with nothing typed: the cursor is where typing
+    /// starts and the rest of that line is blank.
+    pub fn at_empty_prompt(&self) -> bool {
+        use alacritty_terminal::index::{Column, Line};
+
+        let term = self.term.lock();
+        let live = self.live();
+        if live.phase != crate::blocks::Phase::Prompt {
+            return false;
+        }
+        let Some((row, column)) = live.input_start else {
+            return false;
+        };
+        let grid = term.grid();
+        let cursor = grid.cursor.point;
+        let history = grid.history_size();
+        if cursor.line.0 + history as i32 != row as i32 || cursor.column.0 != column {
+            return false;
+        }
+        (column..grid.columns()).all(|c| {
+            let cell = &grid[Line(cursor.line.0)][Column(c)];
+            cell.c == ' ' || cell.c == '\0'
+        })
+    }
+
     /// The shell's process id.
     pub fn pid(&self) -> Option<u32> {
         self.pid

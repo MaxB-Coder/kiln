@@ -751,6 +751,24 @@ impl TerminalView {
         cx.notify();
     }
 
+    /// Whether the prompt on screen is Kiln's (the flame), as the shell last reported.
+    pub fn shows_kiln_prompt(&self) -> bool {
+        self.session.integration_loaded()
+            && self
+                .session
+                .live()
+                .kiln_prompt
+                .unwrap_or(self.session.minimal_prompt())
+    }
+
+    /// A new prompt (an Enter on an empty line), so a changed prompt style shows now. Nothing
+    /// happens while a command runs or something is typed.
+    pub fn redraw_empty_prompt(&self) {
+        if self.session.integration_loaded() && self.session.at_empty_prompt() {
+            self.session.write(b"\r".to_vec());
+        }
+    }
+
     pub fn is_at_prompt(&self) -> bool {
         self.session.live().phase == Phase::Prompt
     }

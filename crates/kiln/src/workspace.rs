@@ -897,13 +897,21 @@ impl Workspace {
         if config.app_icon() != old.app_icon() {
             crate::app_icon::apply(&config.app_icon(), window, false);
         }
-        // Open sessions switch at their next prompt (the scripts read this file).
-        if config.shell.prompt != old.shell.prompt
-            && let Err(err) = kiln_term::integration::set_prompt_mode(
+        // Open sessions switch at their next prompt (the scripts read this file); one waiting
+        // at an empty prompt draws a new one now, so the change shows at once.
+        if config.shell.prompt != old.shell.prompt {
+            match kiln_term::integration::set_prompt_mode(
                 config.shell.prompt == config::PromptStyle::Kiln,
-            )
-        {
-            log::warn!("could not switch the prompt: {err}");
+            ) {
+                Ok(()) => {
+                    for tab in &self.tabs {
+                        for pane in &tab.panes {
+                            pane.view.update(cx, |view, _| view.redraw_empty_prompt());
+                        }
+                    }
+                }
+                Err(err) => log::warn!("could not switch the prompt: {err}"),
+            }
         }
         if let Some((settings, _)) = &self.settings {
             settings.update(cx, |settings, cx| {

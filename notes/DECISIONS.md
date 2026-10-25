@@ -350,7 +350,10 @@ Newest at the bottom.
   so each Kiln process keeps the style in a small file (`<temp>/kiln-prompt-<pid>`, "kiln" or
   "shell"; its path in `KILN_PROMPT_FILE`, through WSLENV as a path) that the zsh, bash and
   PowerShell scripts read before every prompt. Changing the setting rewrites the file, so every
-  open session follows at its next prompt. The scripts keep the user's own prompt and
+  open session follows at its next prompt; one waiting at an empty prompt gets an Enter, so
+  it draws its new prompt at once (seen without it: switching looked like it did nothing until
+  the next command). An empty prompt is the cursor where typing starts with the rest of the
+  line blank; anything typed, or a running program, is left alone. The scripts keep the user's own prompt and
   `STARSHIP_CONFIG` from when they loaded and put them back for "shell". Each prompt reports
   its style (`OSC 1337;KilnPrompt=kiln|shell`), and Kiln draws the flame only where the shell
   printed Kiln's two blank cells; the blank first line Starship adds is not kept above a shell
