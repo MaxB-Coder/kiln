@@ -13,6 +13,8 @@ use crate::theme::{DEFAULT_PALETTE, Palette};
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
+    /// The app icon (the Dock on macOS, the window icon on Windows and Linux).
+    pub icon: AppIcon,
     /// Font size in points.
     pub font_size: f32,
     /// Lines of scrollback per running command.
@@ -29,6 +31,38 @@ pub struct Config {
     pub updates: UpdatesConfig,
     /// Per-project settings, keyed by the project's folder ("~/code/app" works).
     pub projects: std::collections::BTreeMap<String, ProjectConfig>,
+}
+
+/// The app icon's variants (assets/icon/variants).
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AppIcon {
+    /// Fired clay; the icon the app ships with.
+    #[default]
+    Terracotta,
+    Black,
+    White,
+}
+
+impl AppIcon {
+    pub const ALL: [AppIcon; 3] = [AppIcon::Terracotta, AppIcon::Black, AppIcon::White];
+
+    /// The value in kiln.toml.
+    pub fn key(self) -> &'static str {
+        match self {
+            AppIcon::Terracotta => "terracotta",
+            AppIcon::Black => "black",
+            AppIcon::White => "white",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            AppIcon::Terracotta => "Terracotta",
+            AppIcon::Black => "Black",
+            AppIcon::White => "White",
+        }
+    }
 }
 
 /// Checking for updates: Kiln's only network use.
@@ -127,6 +161,7 @@ pub struct ThemeConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            icon: AppIcon::default(),
             font_size: 13.,
             scrollback: 10_000,
             cursor_blink: true,
@@ -271,8 +306,11 @@ pub fn set_current(config: Config) {
 
 /// The commented template written when the user opens the config for the first time.
 pub const TEMPLATE: &str = r##"# Kiln config. Every setting is optional; delete what you don't change.
-# Kiln reloads this file when you save it.
+# Kiln reloads this file when you save it. Settings (⌘, or Ctrl+Shift+,) changes the common
+# ones here too, keeping your comments.
 
+# The app icon: "terracotta", "black" or "white".
+icon = "terracotta"
 font_size = 13
 scrollback = 10000
 cursor_blink = true
@@ -335,6 +373,16 @@ mod tests {
     #[test]
     fn template_parses_to_the_defaults() {
         assert_eq!(parse(TEMPLATE).unwrap(), Config::default());
+    }
+
+    #[test]
+    fn the_icon_key_reads_each_variant() {
+        assert_eq!(Config::default().icon, AppIcon::Terracotta);
+        for icon in AppIcon::ALL {
+            let config = parse(&format!("icon = \"{}\"\n", icon.key())).unwrap();
+            assert_eq!(config.icon, icon);
+        }
+        assert!(parse("icon = \"pink\"\n").is_err());
     }
 
     #[test]

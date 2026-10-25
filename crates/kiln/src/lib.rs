@@ -4,6 +4,7 @@
 pub mod block_element;
 pub mod box_drawing;
 pub mod config;
+pub mod config_write;
 pub mod context;
 pub mod copy;
 pub mod flame;
