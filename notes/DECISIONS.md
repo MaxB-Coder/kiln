@@ -353,7 +353,11 @@ Newest at the bottom.
   open session follows at its next prompt; one waiting at an empty prompt gets an Enter, so
   it draws its new prompt at once (seen without it: switching looked like it did nothing until
   the next command). An empty prompt is the cursor where typing starts with the rest of the
-  line blank; anything typed, or a running program, is left alone. The scripts keep the user's own prompt and
+  line blank; anything typed, or a running program, is left alone. With the shell's own
+  prompt the input box shows only the line typing starts on (from the OSC 133 input mark):
+  lines above it, such as a two-line Starship prompt's folder and git pills, repeat what the
+  header shows, so "Shell's own" reads as the prompt character (e.g. `❯`) where Kiln's reads
+  as the flame. The scripts keep the user's own prompt and
   `STARSHIP_CONFIG` from when they loaded and put them back for "shell". Each prompt reports
   its style (`OSC 1337;KilnPrompt=kiln|shell`), and Kiln draws the flame only where the shell
   printed Kiln's two blank cells; the blank first line Starship adds is not kept above a shell

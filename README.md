@@ -86,7 +86,7 @@ font_size = 13.0
 notify_after_secs = 10          # notify when a long command finishes out of sight (0: off)
 
 [shell]
-prompt = "kiln"                 # a small flame in the input box; "shell" keeps your own prompt
+prompt = "kiln"                 # a small flame in the input box; "shell": your prompt's last line (e.g. ❯)
 
 [icon_colours]                  # each design keeps its own colour (terracotta when not set)
 beehive = "slate"               # terracotta, black, white, ember, slate, sage or sand
