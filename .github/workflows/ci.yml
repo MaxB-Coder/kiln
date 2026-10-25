@@ -48,7 +48,7 @@ jobs:
             build-essential pkg-config clang \
             libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libssl-dev \
-            xvfb mesa-vulkan-drivers imagemagick zsh
+            xvfb mesa-vulkan-drivers imagemagick zsh x11-utils
 
       - name: Install Rust (from rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install

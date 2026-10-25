@@ -50,3 +50,22 @@ cannot show (the flame's frames changing, holding still, the sidebar hint openin
   sidebar's groups; the branch and runtime pills stay away.
 - Reduced motion on Linux reads GNOME's `enable-animations` once at startup.
 - The pills and blocks use Kiln's text size (13 pt) rather than the concept's 12.5 px.
+
+## Settings pop-up (notes/concept/kiln-settings.html)
+
+`cargo run -p kiln --example snapshot -- notes/screenshots/settings settings` (with a config
+folder of its own; it never touches yours). The mockup, rendered with WebKit, beside Kiln:
+[compare-mockup](screenshots/settings/compare-mockup.png).
+
+| Item | Kiln | Verdict |
+| --- | --- | --- |
+| Panel: veil, #1d2021, radius 12, ring #3c3836, 470 wide, "Settings" and "esc" | [s01](screenshots/settings/s01-settings.png) | Matches |
+| App icon tiles, 60 px, 2 px #e07b39 ring 3 px out | [s01](screenshots/settings/s01-settings.png), [s03](screenshots/settings/s03-icon-black.png) (Black picked; the file gets `icon = "black"`) | Matches |
+| Rows, toggles, segmented prompt, steppers ("off" at 0) | [s01](screenshots/settings/s01-settings.png), [s04](screenshots/settings/s04-changed.png) | Matches |
+| Keyboard: Tab/↑↓ move (the row lights), ←→ change, Space/Enter, Esc closes | [s02](screenshots/settings/s02-keyboard.png), [s04](screenshots/settings/s04-changed.png); asserted | Matches |
+| Writes keep the file: only changed lines change, comments stay | [before](screenshots/settings/s00-kiln-before.toml) → [after](screenshots/settings/s04-kiln-after.toml); tests in `config_write.rs` | Matches |
+| A broken file: error shown, editing off, file untouched | [s05](screenshots/settings/s05-broken-file.png); asserted | Matches |
+| Windows/Linux: no Option row, Ctrl+Shift+, | [w-settings](screenshots/settings/w-settings.png) | Matches |
+
+Deliberate difference: the footer shows this platform's key only (⌘, or Ctrl+Shift+,), where
+the mockup lists both.

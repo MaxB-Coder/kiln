@@ -193,6 +193,12 @@ fn main() {
         std::env::temp_dir().join(format!("kiln-snapshot-{}.json", std::process::id()));
     // SAFETY: no other thread runs yet.
     unsafe { std::env::set_var("KILN_STATE_FILE", &state_file) };
+    // So is the config: Settings writes kiln.toml, and this must never be the user's.
+    let config_home =
+        std::env::temp_dir().join(format!("kiln-snapshot-config-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&config_home);
+    // SAFETY: as above.
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", &config_home) };
     // Kiln opens the way it does after a restart: one saved session, whose shell starts in its
     // folder (nothing is typed to get there).
     let start = if scenario == "phase2" || scenario == "concept" {
@@ -246,6 +252,13 @@ fn main() {
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "settings" {
+        settings(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        let _ = std::fs::remove_dir_all(&config_home);
+        println!("done");
+        return;
+    }
     if scenario == "bench-flame" {
         bench_flame(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -727,6 +740,78 @@ fn concept(s: &mut Shots) {
         cx.bind_keys(keymap::bindings(keymap::KeyStyle::current()));
     });
     s.type_only("\x03");
+}
+
+/// The Settings pop-up: as it opens, driven by the keyboard, the icon picked, a file it must
+/// not write over, and the Windows preview. Saves kiln.toml before and after, to show that only
+/// the changed lines change.
+fn settings(s: &mut Shots) {
+    let path = kiln::config::config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let user = "# My Kiln settings\n\
+        font_size = 13    # comfortable on this screen\n\
+        \n\
+        [shell]\n\
+        program = \"/bin/zsh\" # not in Settings: stays as it is\n\
+        \n\
+        [window]\n\
+        sidebar = true\n";
+    std::fs::write(&path, user).unwrap();
+    std::fs::write(s.out.join("s00-kiln-before.toml"), user).unwrap();
+    s.run("git --no-pager log --oneline -3", Duration::from_secs(5));
+    let open = |s: &mut Shots| s.workspace(|w| w.settings_open());
+
+    s.keystroke("cmd-,");
+    assert!(open(s), "⌘, opens Settings");
+    s.shot("s01-settings");
+
+    // The keyboard: Tab lights the first control, the arrows change it.
+    s.keystroke("tab");
+    s.shot("s02-keyboard");
+    s.keystroke("right");
+    s.shot("s03-icon-black");
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("icon = \"black\""), "{written}");
+    // Font size up, the cursor's blink off, the prompt switched, notifications later.
+    s.keystroke("tab right");
+    s.keystroke("tab space");
+    s.keystroke("tab tab right");
+    s.keystroke("tab tab right right");
+    s.shot("s04-changed");
+    std::fs::copy(&path, s.out.join("s04-kiln-after.toml")).unwrap();
+    s.keystroke("escape");
+    assert!(!open(s), "Esc closes Settings");
+
+    // A file Kiln cannot read: shown, and left alone.
+    let broken = "font_size = = 13\n";
+    std::fs::write(&path, broken).unwrap();
+    s.keystroke("cmd-,");
+    s.shot("s05-broken-file");
+    // Only "Open config file" takes the keyboard; the arrows change nothing.
+    s.keystroke("tab right left");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        broken,
+        "a broken file is not written"
+    );
+    s.keystroke("escape");
+
+    // The Windows preview: no Option row, the Windows keys.
+    std::fs::write(&path, user).unwrap();
+    // SAFETY: only this thread reads the variable (in the next render).
+    unsafe { std::env::set_var("KILN_CHROME", "windows") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::Pc));
+    });
+    s.keystroke("ctrl-shift-,");
+    s.shot("w-settings");
+    s.keystroke("escape");
+    unsafe { std::env::remove_var("KILN_CHROME") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::current()));
+    });
 }
 
 /// What one flame frame costs: the workspace rendered, laid out and painted again (the panes

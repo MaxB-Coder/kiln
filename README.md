@@ -70,10 +70,17 @@ header shows the project, the branch with its change count, and the runtimes the
 
 ## Settings
 
-`~/.config/kiln/kiln.toml` (`%APPDATA%\Kiln\kiln.toml` on Windows). ⌘, opens it with every
-option and its default; changes apply as you save. A few:
+**⌘,** (Ctrl+Shift+, on Windows and Linux) opens Settings: the app icon (Terracotta, Black or
+White), font size, blinking cursor, sidebar, prompt, reopening sessions, notifications, remote
+tints, Option as Alt (macOS) and update checks. A change applies at once and is written into
+`~/.config/kiln/kiln.toml` (`%APPDATA%\Kiln\kiln.toml` on Windows), changing only that line:
+your comments and other settings stay as they are. A file with an error is shown, never
+written over. Everything else (theme colours, the shell, projects) lives in the file: "Open
+config file" in Settings (or the palette) opens it with every option and its default, and
+changes apply as you save. A few:
 
 ```toml
+icon = "terracotta"             # the app icon: "terracotta", "black" or "white"
 font_size = 13.0
 notify_after_secs = 10          # notify when a long command finishes out of sight (0: off)
 

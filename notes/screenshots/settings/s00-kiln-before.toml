@@ -1,0 +1,8 @@
+# My Kiln settings
+font_size = 13    # comfortable on this screen
+
+[shell]
+program = "/bin/zsh" # not in Settings: stays as it is
+
+[window]
+sidebar = true

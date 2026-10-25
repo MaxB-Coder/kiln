@@ -276,3 +276,24 @@ Newest at the bottom.
 - **Name pill outside projects (2026-10-25, the user's call).** Home and plain folders keep a
   single name pill ("Home", the folder name) in the header, with no branch or runtime pill.
   Projects show project, branch and runtime pills as before.
+- **Settings pop-up** (⌘, / Ctrl+Shift+,, the EditConfig binding; "Open config file" in it and
+  in the palette does what ⌘, did before). Every row is an existing key in kiln.toml, plus the
+  new `icon`. A change applies at once and is written with `toml_edit` (`config_write.rs`):
+  only that value changes, keeping its spacing and trailing comment; a missing key is added to
+  its table (a top-level one before the first table), a missing table at the end, and a
+  missing file starts from the commented template. The write is atomic (a temporary file
+  renamed over it; through a symlink, onto its target, keeping its permissions). A file that
+  does not parse, or holds a value Kiln cannot use, is shown in the pop-up and never written.
+  Each window remembers the config it applied, so the file watcher's reload after Kiln's own
+  write changes nothing (no flicker, no loop). The prompt style applies to new sessions.
+  Keyboard: Tab or ↑↓ move, ←→ change, Space or Enter toggle, Esc closes. The footer shows
+  this platform's key only.
+- **App icon variants** (Terracotta, the default, Black, White; `assets/icon/variants`, made
+  by `scripts/make-icons.sh`). Switched while Kiln runs, from PNGs built into the binary:
+  macOS sets the Dock icon (`NSApplication.applicationIconImage`; the default resets it to the
+  bundle's). Finder, Launchpad and the app switcher's file icon keep the bundle icon: changing
+  the bundle would break its signature. Windows sets each window's title-bar and taskbar icon
+  (`WM_SETICON`, sized for the window's DPI); the exe and installer stay terracotta. Linux
+  sets `_NET_WM_ICON` on X11 windows (x11rb, already in the tree); on Wayland an app cannot
+  set its window icon (no stable protocol; `xdg-toplevel-icon` is not widely available), so
+  the compositor shows the desktop file's terracotta icon.

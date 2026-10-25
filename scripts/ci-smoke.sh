@@ -23,4 +23,29 @@ if [[ "$(uname)" == "Linux" ]]; then
   sleep 8
   import -window root smoke/linux.png
   kill "$pid" || true
+
+  # 3. The icon setting (X11): with icon = "black", the window's _NET_WM_ICON is the black
+  #    variant (its top edge is dark, where terracotta's is orange).
+  if command -v xprop >/dev/null; then
+    config_home="$(mktemp -d)"
+    mkdir -p "$config_home/kiln"
+    echo 'icon = "black"' > "$config_home/kiln/kiln.toml"
+    XDG_CONFIG_HOME="$config_home" KILN_STATE_FILE="$config_home/state.json" \
+      "$kiln" --fresh --cols 80 --rows 20 -- /bin/sh -c 'sleep 30' &
+    pid=$!
+    sleep 8
+    window="$(xwininfo -root -tree | awk '/"Kiln"|kiln/ && /0x/ { print $1; exit }')"
+    icon="$(xprop -id "$window" _NET_WM_ICON | sed 's/.*= //')"
+    kill "$pid" || true
+    echo "$icon" | tr ',' '\n' | head -2 | tr '\n' ' '; echo "(the first icon's size)"
+    # Row 0, column 8 of the 16 px icon: the third value is its first pixel.
+    pixel="$(echo "$icon" | tr -d ' ' | cut -d, -f11)"
+    red=$(( (pixel >> 16) & 255 ))
+    echo "window $window, top edge pixel $(printf '#%06x' $(( pixel & 0xffffff ))) (red $red)"
+    if [ -z "$pixel" ] || [ "$red" -ge 128 ]; then
+      echo "ci-smoke: the window icon is not the black variant" >&2
+      exit 1
+    fi
+    echo "ok: the window icon follows icon = \"black\""
+  fi
 fi

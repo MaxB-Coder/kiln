@@ -47,3 +47,35 @@ $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
 $bitmap.Save("smoke/windows-$name.png")
 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+
+# 3. The icon setting: with icon = "black" (in a config of its own), the window's big icon is
+#    the black variant (its top edge is dark, where terracotta's is orange).
+if (-not $Wsl) {
+    $config = Join-Path ([System.IO.Path]::GetTempPath()) "kiln-smoke-config"
+    New-Item -ItemType Directory -Force (Join-Path $config "Kiln") | Out-Null
+    Set-Content -Path (Join-Path $config "Kiln\kiln.toml") -Value 'icon = "black"'
+    $appdata = $env:APPDATA
+    $env:APPDATA = $config
+    $proc = Start-Process -FilePath $Kiln -ArgumentList @("--fresh", "--cols", "80", "--rows", "20", "--", "powershell.exe", "-NoLogo", "-Command", "Start-Sleep 30") -PassThru
+    $env:APPDATA = $appdata
+    Add-Type -Namespace KilnSmoke -Name Win -MemberDefinition @"
+[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
+"@
+    $hwnd = [IntPtr]::Zero
+    for ($i = 0; $i -lt 30 -and $hwnd -eq [IntPtr]::Zero; $i++) {
+        Start-Sleep 1
+        $proc.Refresh()
+        $hwnd = $proc.MainWindowHandle
+    }
+    Start-Sleep 3
+    # WM_GETICON (0x7F), ICON_BIG (1)
+    $hicon = [KilnSmoke.Win]::SendMessage($hwnd, 0x7F, [IntPtr]1, [IntPtr]::Zero)
+    if ($hicon -eq [IntPtr]::Zero) { Stop-Process -Id $proc.Id -Force; throw "Kiln's window has no icon" }
+    $icon = [System.Drawing.Icon]::FromHandle($hicon).ToBitmap()
+    $icon.Save("smoke/windows-window-icon.png")
+    $pixel = $icon.GetPixel([int]($icon.Width / 2), 1)
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    "window icon $($icon.Width) px, top edge pixel R=$($pixel.R) G=$($pixel.G) B=$($pixel.B)"
+    if ($pixel.R -ge 128) { throw "the window icon is not the black variant" }
+    "ok: the window icon follows icon = `"black`""
+}

@@ -1,6 +1,7 @@
 //! Kiln: a calm, cross-platform terminal. The library holds the app; `main.rs` starts it, and
 //! the `snapshot` example renders it headless for visual checks.
 
+pub mod app_icon;
 pub mod block_element;
 pub mod box_drawing;
 pub mod config;
@@ -19,6 +20,7 @@ pub mod pills;
 pub mod rail;
 pub mod remote;
 pub mod search;
+pub mod settings;
 pub mod shortcuts;
 pub mod state;
 pub mod terminal_view;
@@ -61,6 +63,7 @@ actions!(
         ZoomOut,
         ZoomReset,
         EditConfig,
+        OpenConfigFile,
         InstallUpdate,
         Copy,
         CopyLastOutput,

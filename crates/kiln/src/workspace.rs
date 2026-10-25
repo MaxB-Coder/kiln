@@ -24,6 +24,7 @@ use crate::naming;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteGroup, PaletteItem, PaletteTarget};
 use crate::rail::Rail;
 use crate::search::Match;
+use crate::settings::{SettingsEvent, SettingsView};
 use crate::shortcuts::{ShortcutsEvent, ShortcutsView};
 use crate::state::{self, TabState, WindowState};
 use crate::terminal_view::{PaneEvent, PaneStatus, TerminalView};
@@ -32,9 +33,10 @@ use crate::theme::{self, palette};
 use crate::{
     ClosePane, CloseWindow, CommandPaletteToggle, CopyLastOutput, CopyLastOutputRaw, EditConfig,
     Find, FocusNextPane, FocusPrevPane, InstallUpdate, NewSession, NewWindow, NextSession,
-    PrevSession, Quit, SelectSession1, SelectSession2, SelectSession3, SelectSession4,
-    SelectSession5, SelectSession6, SelectSession7, SelectSession8, SelectSession9, SplitRight,
-    ToggleFocusMode, ToggleRail, ToggleShortcuts, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
+    OpenConfigFile, PrevSession, Quit, SelectSession1, SelectSession2, SelectSession3,
+    SelectSession4, SelectSession5, SelectSession6, SelectSession7, SelectSession8, SelectSession9,
+    SplitRight, ToggleFocusMode, ToggleRail, ToggleShortcuts, ToggleSidebar, ZoomIn, ZoomOut,
+    ZoomReset,
 };
 
 /// Height of the strip at the top that holds the window controls.
@@ -97,6 +99,9 @@ pub struct Workspace {
     search: Option<SearchBar>,
     palette: Option<(Entity<CommandPalette>, Subscription)>,
     shortcuts: Option<(Entity<ShortcutsView>, Subscription)>,
+    settings: Option<(Entity<SettingsView>, Subscription)>,
+    /// The config this window last applied (its own writes, then the file watcher's reloads).
+    applied: Config,
     metrics: CellMetrics,
     started: Instant,
     bench_startup: bool,
@@ -133,6 +138,8 @@ impl Workspace {
             search: None,
             palette: None,
             shortcuts: None,
+            settings: None,
+            applied: config.clone(),
             metrics,
             started,
             bench_startup,
@@ -143,6 +150,7 @@ impl Workspace {
             _state_watch: Task::ready(()),
         };
         this._config_watch = this.watch_config(window, cx);
+        crate::app_icon::apply(config.icon, window, true);
         cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active()
                 && let Some(tab) = this.tabs.get_mut(this.active)
@@ -645,6 +653,41 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Whether the Settings pop-up is open.
+    pub fn settings_open(&self) -> bool {
+        self.settings.is_some()
+    }
+
+    /// The Settings pop-up (⌘, or Ctrl+Shift+,): opens over everything; Esc, a click outside
+    /// or the same keys close it.
+    fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings.take().is_some() {
+            self.focus_active(window, cx);
+            cx.notify();
+            return;
+        }
+        self.palette = None;
+        self.shortcuts = None;
+        let shortcut = keymap::keys_for(&EditConfig, cx, key_style());
+        let mac = chrome() == Chrome::Mac;
+        let view = cx.new(|cx| SettingsView::new(mac, shortcut, window, cx));
+        let events = cx.subscribe_in(&view, window, |this, _, event, window, cx| match event {
+            SettingsEvent::Changed(config) => this.apply_config((**config).clone(), window, cx),
+            SettingsEvent::OpenFile => {
+                this.settings = None;
+                this.edit_config(window, cx);
+                cx.notify();
+            }
+            SettingsEvent::Dismiss => {
+                this.settings = None;
+                this.focus_active(window, cx);
+                cx.notify();
+            }
+        });
+        self.settings = Some((view, events));
+        cx.notify();
+    }
+
     fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette.take().is_some() {
             self.focus_active(window, cx);
@@ -715,7 +758,8 @@ impl Workspace {
         action("Bigger text", Box::new(ZoomIn));
         action("Smaller text", Box::new(ZoomOut));
         action("Reset text size", Box::new(ZoomReset));
-        action("Edit config", Box::new(EditConfig));
+        action("Settings", Box::new(EditConfig));
+        action("Open config file", Box::new(OpenConfigFile));
         action("New window", Box::new(NewWindow));
         action("Quit Kiln", Box::new(Quit));
         if let Some(label) = crate::update::state(cx).label() {
@@ -825,11 +869,31 @@ impl Workspace {
         })
     }
 
+    /// Applies a config this window has not applied yet: from Settings at once, or from the
+    /// file watcher when the file changed (which, after Settings wrote it, is the same config,
+    /// so nothing happens twice).
     fn apply_config(&mut self, config: Config, window: &mut Window, cx: &mut Context<Self>) {
-        log::info!("config reloaded");
-        let font_size = px(config.font_size.clamp(6., 72.));
-        config::set_current(config);
-        self.set_font_size(font_size, window, cx);
+        if config == self.applied {
+            return;
+        }
+        log::info!("config applied");
+        let old = std::mem::replace(&mut self.applied, config.clone());
+        config::set_current(config.clone());
+        if config.font_size != old.font_size {
+            self.set_font_size(px(config.font_size.clamp(6., 72.)), window, cx);
+        }
+        if config.window.sidebar != old.window.sidebar {
+            self.sidebar_open = config.window.sidebar;
+        }
+        if config.icon != old.icon {
+            crate::app_icon::apply(config.icon, window, false);
+        }
+        if let Some((settings, _)) = &self.settings {
+            settings.update(cx, |settings, cx| {
+                settings.reload();
+                cx.notify();
+            });
+        }
         window.refresh();
     }
 
@@ -1977,6 +2041,28 @@ impl Render for Workspace {
                 .child(palette.clone())
         });
 
+        let settings_overlay = self.settings.as_ref().map(|(view, _)| {
+            div()
+                .id("settings-scrim")
+                .absolute()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .pt(px(22.))
+                .px(px(24.))
+                .bg(theme::hsla(0x0e0e0e).opacity(0.62))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.settings = None;
+                        this.focus_active(window, cx);
+                        cx.notify();
+                    }),
+                )
+                .child(view.clone())
+        });
+
         let shortcuts_overlay = self.shortcuts.as_ref().map(|(view, _)| {
             div()
                 .id("shortcuts-scrim")
@@ -2075,7 +2161,12 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ZoomIn, window, cx| this.zoom(1., window, cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, window, cx| this.zoom(-1., window, cx)))
             .on_action(cx.listener(|this, _: &ZoomReset, window, cx| this.zoom(0., window, cx)))
-            .on_action(cx.listener(|this, _: &EditConfig, window, cx| this.edit_config(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &EditConfig, window, cx| this.toggle_settings(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &OpenConfigFile, window, cx| this.edit_config(window, cx)),
+            )
             .on_action(|_: &InstallUpdate, window, cx| crate::update::install(window, cx))
             .when_some(sidebar, |d, sidebar| d.child(sidebar))
             .child(
@@ -2093,6 +2184,7 @@ impl Render for Workspace {
             .when_some(rail, |d, rail| d.child(rail))
             .when_some(palette_overlay, |d, overlay| d.child(overlay))
             .when_some(shortcuts_overlay, |d, overlay| d.child(overlay))
+            .when_some(settings_overlay, |d, overlay| d.child(overlay))
             .when_some(resize_edges(window), |d, edges| d.child(edges))
     }
 }

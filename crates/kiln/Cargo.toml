@@ -28,14 +28,22 @@ log.workspace = true
 # font-kit: text rendering (off by default in gpui_macos).
 # runtime_shaders: compile Metal shaders at startup, so it builds without full Xcode.
 gpui_platform = { workspace = true, features = ["font-kit", "runtime_shaders"] }
-# Reduce motion (the flame holds still).
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility"] }
+# Reduce motion (the flame holds still); the Dock icon (app_icon.rs).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility", "NSApplication", "NSResponder", "NSImage"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 gpui_platform.workspace = true
+# The window icon (app_icon.rs).
+raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { workspace = true, features = ["wayland", "x11"] }
+# The window icon under X11 (app_icon.rs).
+png = "0.18"
+raw-window-handle = "0.6"
+x11rb = "0.13"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

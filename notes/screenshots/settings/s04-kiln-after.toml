@@ -1,0 +1,12 @@
+# My Kiln settings
+font_size = 14    # comfortable on this screen
+icon = "black"
+cursor_blink = false
+notify_after_secs = 20
+
+[shell]
+program = "/bin/zsh" # not in Settings: stays as it is
+prompt = "shell"
+
+[window]
+sidebar = true
