@@ -108,8 +108,8 @@ fn tiles(icon: AppIcon) -> [(u32, &'static [u8]); 7] {
     }
 }
 
-/// The smallest tile at least `size` px (or the largest).
-#[cfg(not(target_os = "macos"))]
+/// The smallest tile at least `size` px (or the largest). Windows picks its icons by size.
+#[cfg(any(windows, all(test, not(target_os = "macos"))))]
 fn tile_for(icon: AppIcon, size: u32) -> &'static [u8] {
     let tiles = tiles(icon);
     tiles

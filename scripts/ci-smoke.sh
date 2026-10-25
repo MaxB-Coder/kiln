@@ -35,9 +35,10 @@ if [[ "$(uname)" == "Linux" ]]; then
     pid=$!
     sleep 8
     window="$(xwininfo -root -tree | awk '/"Kiln"|kiln/ && /0x/ { print $1; exit }')"
-    icon="$(xprop -id "$window" _NET_WM_ICON | sed 's/.*= //')"
+    # The raw numbers (xprop otherwise draws the icon as text): width, height, then pixels.
+    icon="$(xprop -id "$window" -notype -f _NET_WM_ICON 32c ' = $0+' _NET_WM_ICON | sed 's/.*= //')"
     kill "$pid" || true
-    echo "$icon" | tr ',' '\n' | head -2 | tr '\n' ' '; echo "(the first icon's size)"
+    echo "first icon: $(echo "$icon" | cut -d, -f1-2)"
     # Row 0, column 8 of the 16 px icon: the third value is its first pixel.
     pixel="$(echo "$icon" | tr -d ' ' | cut -d, -f11)"
     red=$(( (pixel >> 16) & 255 ))
