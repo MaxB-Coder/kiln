@@ -85,6 +85,8 @@ signingIdentity = "-"
 [package.metadata.packager.nsis]
 # Per-user install: no administrator rights needed, and the updater can replace it quietly.
 installMode = "currentUser"
+# Without it the installer shows NSIS's default icon.
+installerIcon = "../../assets/icon/kiln.ico"
 appdataPaths = ["$LOCALAPPDATA/Kiln"]
 
 [package.metadata.packager.deb]
