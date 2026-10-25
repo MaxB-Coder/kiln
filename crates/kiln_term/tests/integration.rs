@@ -3,7 +3,7 @@
 #![cfg(unix)]
 
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Mutex, MutexGuard, mpsc};
 use std::time::{Duration, Instant};
 
 use kiln_term::{Block, GridSize, Mark, Session, SessionEvent, SessionOptions, ShellCommand};
@@ -15,7 +15,16 @@ const SIZE: GridSize = GridSize {
     cell_height: 16,
 };
 
+/// One shell at a time: the prompt style lives in one file per process
+/// (`integration::prompt_mode_file`), and these tests use both styles. (In Kiln every session
+/// has the same style.)
+fn one_at_a_time() -> MutexGuard<'static, ()> {
+    static SHELLS: Mutex<()> = Mutex::new(());
+    SHELLS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn run_block(program: &str, args: &[&str], command: &str) -> Option<Block> {
+    let _one = one_at_a_time();
     if !Path::new(program).exists() {
         eprintln!("skipping: {program} not installed");
         return None;
@@ -147,6 +156,7 @@ type PromptLine = (String, usize);
 /// Runs a shell with Kiln's minimal prompt and returns its line before and after a failing
 /// command.
 fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptLine; 2]> {
+    let _one = one_at_a_time();
     use kiln_term::engine::grid::Dimensions as _;
     use kiln_term::engine::index::{Column, Line};
     use kiln_term::integration::MinimalPrompt;
