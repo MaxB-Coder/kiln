@@ -1197,10 +1197,8 @@ impl SettingsView {
                     .on_click(cx.listener(|this, _, _, cx| this.remove_image(cx))),
             )
         } else if self.icon_menu {
-            note.child(format!(
-                "Colour for {}. Each icon keeps its own colour.",
-                selected.title()
-            ))
+            // The pop-up speaks for itself.
+            note
         } else {
             note.child("Click the selected icon for its colours.")
         };
