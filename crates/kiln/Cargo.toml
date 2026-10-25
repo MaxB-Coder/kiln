@@ -84,6 +84,7 @@ resources = [
   "../../target/THIRD_PARTY_LICENSES.md",
   "../../assets/fonts/JetBrainsMono-OFL.txt",
   "../../assets/fonts/NerdFonts-LICENSE",
+  "../../assets/themes/THEME-LICENSES.md",
 ]
 
 [package.metadata.packager.macos]

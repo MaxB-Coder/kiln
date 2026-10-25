@@ -162,6 +162,21 @@ impl Shots {
         self.pump(Duration::from_millis(200));
     }
 
+    /// Scrolls whatever is under (x, y) by `dy` points (negative: down the page).
+    fn scroll(&mut self, x: f32, y: f32, dy: f32) {
+        let window: AnyWindowHandle = self.window.into();
+        let event = PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+            position: Point::new(px(x), px(y)),
+            delta: gpui::ScrollDelta::Pixels(Point::new(px(0.), px(dy))),
+            modifiers: Modifiers::default(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        let _ = self
+            .cx
+            .update_window(window, |_, window, cx| window.dispatch_event(event, cx));
+        self.pump(Duration::from_millis(300));
+    }
+
     fn workspace<R>(&mut self, f: impl FnOnce(&Workspace) -> R) -> R {
         self.cx.update(|cx| f(self.window.read(cx).unwrap()))
     }
@@ -794,6 +809,48 @@ fn settings(s: &mut Shots) {
         broken,
         "a broken file is not written"
     );
+    s.keystroke("escape");
+
+    // Themes: each card applies at once, the pop-up included.
+    std::fs::write(&path, user).unwrap();
+    s.keystroke("cmd-,");
+    let view = s.workspace(|w| w.settings_view()).unwrap();
+    for (i, (name, _)) in kiln::settings_theme::CARDS.iter().enumerate() {
+        if *name == kiln::theme::CUSTOM {
+            continue;
+        }
+        s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme(name, cx)));
+        s.pump(Duration::from_millis(600));
+        s.shot(&format!("t{i}-{name}"));
+    }
+    // Custom from Tokyo Night: the file gets name, base and every colour.
+    s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("tokyo-night", cx)));
+    s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme(kiln::theme::CUSTOM, cx)));
+    s.pump(Duration::from_millis(600));
+    s.shot("t6-custom");
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("name = \"custom\"") && written.contains("base = \"tokyo-night\""));
+    assert!(
+        written.contains("# My Kiln settings"),
+        "the user's comment survives"
+    );
+    std::fs::copy(&path, s.out.join("t6-kiln-custom.toml")).unwrap();
+    // The picker, on the accent.
+    s.cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.open_picker(kiln::settings::Target::Colour(9), cx)
+        })
+    });
+    s.pump(Duration::from_millis(400));
+    // Down to the picker and the terminal colours.
+    s.scroll(590., 500., -420.);
+    s.shot("t7-custom-picker");
+    s.scroll(590., 500., 2000.);
+    // A preset over custom colours: the note offers to clear them.
+    s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("nord", cx)));
+    s.pump(Duration::from_millis(600));
+    s.shot("t8-overrides-note");
+    s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("kiln-dark", cx)));
     s.keystroke("escape");
 
     // The Windows preview: no Option row, the Windows keys.

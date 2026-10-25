@@ -21,6 +21,7 @@ pub mod rail;
 pub mod remote;
 pub mod search;
 pub mod settings;
+pub mod settings_theme;
 pub mod shortcuts;
 pub mod state;
 pub mod terminal_view;

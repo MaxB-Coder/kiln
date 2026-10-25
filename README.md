@@ -71,7 +71,8 @@ header shows the project, the branch with its change count, and the runtimes the
 ## Settings
 
 **⌘,** (Ctrl+Shift+, on Windows and Linux) opens Settings: the app icon (Terracotta, Black or
-White), font size, blinking cursor, sidebar, prompt, reopening sessions, notifications, remote
+White), the theme (Kiln Dark, Kiln Light, Follow system, Catppuccin Mocha, Tokyo Night, Nord,
+or Custom, with every colour editable), font size, blinking cursor, sidebar, prompt, reopening sessions, notifications, remote
 tints, Option as Alt (macOS) and update checks. A change applies at once and is written into
 `~/.config/kiln/kiln.toml` (`%APPDATA%\Kiln\kiln.toml` on Windows), changing only that line:
 your comments and other settings stay as they are. A file with an error is shown, never
@@ -98,6 +99,10 @@ check = true                    # once a day; nothing installs without asking
 
 [projects."~/code/app"]
 color = "#83a598"
+
+[theme]
+name = "nord"                   # or kiln-dark, kiln-light, system, catppuccin-mocha, tokyo-night, custom
+fg = "#eceff4"                  # any colour on top of the theme
 ```
 
 ## Privacy and security
@@ -145,6 +150,8 @@ alacritty_terminal's event loop and stays under Apache-2.0 only.
 Unless you explicitly state otherwise, any contribution you submit for inclusion in Kiln, as
 defined in the Apache-2.0 licence, is dual licensed as above, without any additional terms.
 
-Kiln bundles JetBrains Mono (SIL OFL 1.1) with Nerd Fonts patches (MIT). Every package carries
-both Kiln licences, the font licences, and `THIRD_PARTY_LICENSES.md` with the licences of all
-the crates in the binary.
+Kiln bundles JetBrains Mono (SIL OFL 1.1) with Nerd Fonts patches (MIT). The Catppuccin
+Mocha, Tokyo Night and Nord themes use those projects' palettes (MIT; see
+`assets/themes/THEME-LICENSES.md`). Every package carries both Kiln licences, the font and
+theme licences, and `THIRD_PARTY_LICENSES.md` with the licences of all the crates in the
+binary.

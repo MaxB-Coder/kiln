@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiln themes</title>
+<!-- Approved mockup (2026-10-25) for the theme picker in the settings pop-up.
+     The palettes below are the exact values to ship. The app icon tiles are
+     simplified here; kiln-settings.html has the real ones. -->
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;padding:24px;background:#141414}
+.app{--veil:rgba(14,14,14,.6);position:relative;background:var(--bg);border-radius:14px;height:760px;max-width:900px;overflow:hidden;font-family:'JetBrains Mono',ui-monospace,monospace;color:var(--fg);display:flex;transition:background .2s}
+.side{width:150px;background:var(--bar);padding:40px 12px;font-size:11px;color:var(--fgdim);display:flex;flex-direction:column;gap:9px}
+.side .on{color:var(--fg)} .side .on::before{content:"● ";color:var(--accent)}
+.main{flex:1;padding:22px 26px;font-size:11.5px;line-height:1.75;white-space:pre;color:var(--fg)}
+.cmd{color:var(--fg)} .fl{color:var(--accent)} .dim{color:var(--muted)}
+.veil{position:absolute;inset:0;background:var(--veil);display:flex;align-items:flex-start;justify-content:center;padding-top:18px}
+.panel{width:500px;max-height:724px;overflow-y:auto;background:var(--bar);border-radius:12px;box-shadow:0 0 0 1px var(--bg1);padding:14px 0 10px;font-size:12px;scrollbar-width:thin;scrollbar-color:var(--bg2) transparent}
+.ph{display:flex;justify-content:space-between;align-items:center;padding:0 18px 6px}
+.ph .t{font-weight:700;font-size:12.5px;color:var(--fg)} .ph .m,.sec{color:var(--bg3);font-size:10.5px}
+.sec{padding:11px 18px 5px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:5px 18px;color:var(--fgdim)}
+.themes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px 10px;padding:4px 18px 6px}
+.th{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;color:var(--muted);font-size:10px;text-align:center}
+.th svg{border-radius:8px;outline:2px solid transparent;outline-offset:3px;box-shadow:0 0 0 1px var(--bg1)}
+.th.on svg{outline-color:var(--accent)} .th.on{color:var(--fg)}
+.custom{display:none;margin:4px 18px 4px;padding:10px 12px 12px;border-radius:10px;background:var(--bg);box-shadow:0 0 0 1px var(--bg1)}
+.custom.open{display:block}
+.chead{display:flex;justify-content:space-between;align-items:center;color:var(--fgdim);font-size:11px;margin-bottom:8px}
+.chead select{font:inherit;font-size:11px;background:var(--bar);color:var(--fg);border:1px solid var(--bg1);border-radius:6px;padding:2px 6px}
+.cgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
+.cr{display:flex;align-items:center;gap:7px;color:var(--fgdim);font-size:10.5px}
+.cr span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw-in{appearance:none;-webkit-appearance:none;width:18px;height:18px;border:none;border-radius:5px;padding:0;cursor:pointer;background:none;box-shadow:0 0 0 1px var(--bg2)}
+.sw-in::-webkit-color-swatch-wrapper{padding:0}.sw-in::-webkit-color-swatch{border:none;border-radius:5px}.sw-in::-moz-color-swatch{border:none;border-radius:5px}
+.hex{width:62px;font:inherit;font-size:10.5px;background:var(--bar);color:var(--fg);border:1px solid var(--bg1);border-radius:5px;padding:1px 5px}
+.ansi{display:grid;grid-template-columns:44px repeat(8,1fr);gap:6px;align-items:center;margin-top:10px;color:var(--bg3);font-size:10px}
+.ansi .sw-in{width:100%;height:20px}
+.cfoot{display:flex;justify-content:space-between;margin-top:10px;font-size:10px;color:var(--bg3)}
+.cfoot a{color:var(--fgdim);cursor:pointer}.cfoot a:hover{color:var(--accent)}
+.sw{width:30px;height:17px;border-radius:999px;background:var(--bg1);position:relative;cursor:pointer;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--fgdim);transition:left .15s}
+.sw.on{background:var(--accent)}.sw.on::after{left:15px;background:var(--bar)}
+.seg{display:flex;background:var(--bg);border-radius:7px;padding:2px;gap:2px}
+.seg span{padding:2px 9px;border-radius:5px;color:var(--muted);cursor:pointer;font-size:11px}
+.seg span.on{background:var(--bg1);color:var(--fg)}
+.step{display:flex;align-items:center;gap:8px;color:var(--fg)}
+.step b{width:20px;height:20px;border-radius:6px;background:var(--bg);color:var(--fgdim);display:flex;align-items:center;justify-content:center;font-weight:400}
+.icons{display:flex;gap:14px;padding:4px 18px}
+.ic{width:44px;height:44px;border-radius:10px}
+.ic.on{outline:2px solid var(--accent);outline-offset:3px}
+.foot{display:flex;justify-content:space-between;padding:10px 18px 2px;color:var(--bg3);font-size:10.5px}
+.foot a{color:var(--fgdim)}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="side"><div class="on">kiln</div><div>dotfiles</div><div>api · ssh prod</div><div>Home</div></div>
+  <div class="main"><span class="fl">▲</span> <span class="cmd">git status --short</span>
+<span style="color:var(--a1)"> M src/settings.rs</span>
+<span style="color:var(--a2)">A  assets/icon/variants/kiln-black.svg</span>
+<span style="color:var(--a2)">A  assets/icon/variants/kiln-white.svg</span>
+
+<span class="fl">▲</span> <span class="cmd">ls</span>
+<span style="color:var(--a4)">assets  crates  notes  scripts</span>  Cargo.toml  README.md
+
+<span class="fl">▲</span> <span class="cmd">cargo test -q</span>
+test result: <span style="color:var(--a2)">ok</span>. 214 passed; <span style="color:var(--a3)">2 ignored</span> <span class="dim">· 4.1s</span>
+<span style="color:var(--a5)">warning</span>: unused import <span style="color:var(--a6)">`std::fmt`</span></div>
+
+  <div class="veil">
+    <div class="panel">
+      <div class="ph"><span class="t">Settings</span><span class="m">esc</span></div>
+
+      <div class="sec">App icon</div>
+      <div class="icons">
+        <div class="ic on" style="background:linear-gradient(#ee8a48,#c25b22)"></div>
+        <div class="ic" style="background:linear-gradient(#3d3834,#161413)"></div>
+        <div class="ic" style="background:linear-gradient(#f8f3ec,#e1d5c4)"></div>
+      </div>
+
+      <div class="sec">Theme</div>
+      <div class="themes" id="themes"></div>
+
+      <div class="custom" id="custom">
+        <div class="chead"><span>Custom colours</span><label style="display:flex;gap:6px;align-items:center">Start from <select id="base"></select></label></div>
+        <div class="cgrid" id="cgrid"></div>
+        <div class="ansi" id="ansi"></div>
+        <div class="cfoot"><span>Saved to kiln.toml as you edit</span><a id="reset">Reset to base</a></div>
+      </div>
+
+      <div class="sec">Appearance</div>
+      <div class="row"><span>Font size</span><span class="step"><b>−</b>13 pt<b>+</b></span></div>
+      <div class="row"><span>Blinking cursor</span><span class="sw on"></span></div>
+      <div class="row"><span>Sidebar</span><span class="sw on"></span></div>
+      <div class="row"><span>Prompt</span><span class="seg"><span class="on">Kiln flame</span><span>Shell's own</span></span></div>
+
+      <div class="sec">Behaviour</div>
+      <div class="row"><span>Reopen sessions at launch</span><span class="sw on"></span></div>
+      <div class="row"><span>Notify when a command finishes</span><span class="step"><b>−</b>10 s<b>+</b></span></div>
+      <div class="row"><span>Tint remote sessions</span><span class="sw on"></span></div>
+      <div class="row"><span>Option key as Alt</span><span class="sw"></span></div>
+
+      <div class="sec">Updates</div>
+      <div class="row"><span>Check for updates daily</span><span class="sw on"></span></div>
+
+      <div class="foot"><a>Open config file</a><span>⌘,</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Keys match the Palette fields in crates/kiln/src/theme.rs (fgdim = fg_dim); a = the 16 ANSI colours.
+const T = {
+  'kiln-dark': {name:'Kiln Dark', p:{bg:'#282828',bar:'#1d2021',raised:'#32302f',bg1:'#3c3836',bg2:'#504945',bg3:'#665c54',muted:'#928374',fg:'#ebdbb2',fgdim:'#bdae93',accent:'#e07b39',failed:'#b8645a',ok:'#8f9a6c',modified:'#c4a35e'},
+    a:['#282828','#cc241d','#98971a','#d79921','#458588','#b16286','#689d6a','#a89984','#928374','#fb4934','#b8bb26','#fabd2f','#83a598','#d3869b','#8ec07c','#ebdbb2']},
+  'kiln-light': {name:'Kiln Light', p:{bg:'#f8f3ea',bar:'#efe7d9',raised:'#fffcf6',bg1:'#e4d9c6',bg2:'#d3c5ae',bg3:'#a99a83',muted:'#8a7d6c',fg:'#3c3836',fgdim:'#5f554b',accent:'#c4622a',failed:'#a8564c',ok:'#6b7a45',modified:'#9a7a32'},
+    a:['#ebe3d5','#cc241d','#98971a','#d79921','#458588','#b16286','#689d6a','#7c6f64','#928374','#9d0006','#79740e','#b57614','#076678','#8f3f71','#427b58','#3c3836']},
+  'catppuccin-mocha': {name:'Catppuccin Mocha', p:{bg:'#1e1e2e',bar:'#181825',raised:'#262637',bg1:'#313244',bg2:'#45475a',bg3:'#585b70',muted:'#7f849c',fg:'#cdd6f4',fgdim:'#a6adc8',accent:'#fab387',failed:'#eba0ac',ok:'#a6e3a1',modified:'#f9e2af'},
+    a:['#45475a','#f38ba8','#a6e3a1','#f9e2af','#89b4fa','#f5c2e7','#94e2d5','#bac2de','#585b70','#f38ba8','#a6e3a1','#f9e2af','#89b4fa','#f5c2e7','#94e2d5','#a6adc8']},
+  'tokyo-night': {name:'Tokyo Night', p:{bg:'#1a1b26',bar:'#16161e',raised:'#1f2335',bg1:'#292e42',bg2:'#3b4261',bg3:'#545c7e',muted:'#737aa2',fg:'#c0caf5',fgdim:'#a9b1d6',accent:'#ff9e64',failed:'#f7768e',ok:'#9ece6a',modified:'#e0af68'},
+    a:['#15161e','#f7768e','#9ece6a','#e0af68','#7aa2f7','#bb9af7','#7dcfff','#a9b1d6','#414868','#f7768e','#9ece6a','#e0af68','#7aa2f7','#bb9af7','#7dcfff','#c0caf5']},
+  'nord': {name:'Nord', p:{bg:'#2e3440',bar:'#272c36',raised:'#353b49',bg1:'#3b4252',bg2:'#434c5e',bg3:'#4c566a',muted:'#616e88',fg:'#d8dee9',fgdim:'#aeb7c6',accent:'#d08770',failed:'#bf616a',ok:'#a3be8c',modified:'#ebcb8b'},
+    a:['#3b4252','#bf616a','#a3be8c','#ebcb8b','#81a1c1','#b48ead','#88c0d0','#e5e9f0','#4c566a','#bf616a','#a3be8c','#ebcb8b','#81a1c1','#b48ead','#8fbcbb','#eceff4']},
+};
+const LABELS = {bg:'Background',bar:'Sidebar & header',raised:'Pop-ups & input',bg1:'Borders & selection',bg2:'Dividers',bg3:'Faint text',muted:'Muted text',fg:'Text',fgdim:'Dim text',accent:'Accent & flame',failed:'Failed',ok:'Succeeded',modified:'Changed'};
+const clone = id => ({base:id, p:{...T[id].p}, a:[...T[id].a]});
+let custom = clone('kiln-dark');
+let current = 'kiln-dark';
+const sysDark = () => !window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches;
+const resolve = id => id === 'system' ? T[sysDark() ? 'kiln-dark' : 'kiln-light'] : id === 'custom' ? custom : T[id];
+const lum = h => { const n = parseInt(h.slice(1),16); return (0.299*(n>>16) + 0.587*((n>>8)&255) + 0.114*(n&255))/255; };
+
+function apply(t) {
+  const s = document.getElementById('app').style;
+  for (const [k,v] of Object.entries(t.p)) s.setProperty('--'+k, v);
+  t.a.forEach((v,i) => s.setProperty('--a'+i, v));
+  s.setProperty('--veil', lum(t.p.bg) > .5 ? 'rgba(60,45,30,.28)' : 'rgba(10,10,10,.6)');
+}
+
+function mini(t, id) {
+  const p = t.p, a = t.a;
+  return `<clipPath id="c${id}"><rect width="96" height="60" rx="8"/></clipPath><g clip-path="url(#c${id})">
+    <rect width="96" height="60" fill="${p.bg}"/><rect width="22" height="60" fill="${p.bar}"/>
+    <rect x="5" y="9" width="12" height="3" rx="1.5" fill="${p.fg}"/><rect x="5" y="17" width="10" height="3" rx="1.5" fill="${p.muted}"/><rect x="5" y="25" width="11" height="3" rx="1.5" fill="${p.muted}"/>
+    <path transform="translate(29 8) scale(.55)" d="M6 1 C8 4 10.5 6 10.5 9.5 C10.5 12.8 8.4 15 6 15 C3.6 15 1.5 12.8 1.5 9.5 C1.5 7 3.2 5.6 4 4 C4.3 5.5 5 6.3 5.6 6.5 C5.6 4.5 5.4 2.8 6 1 Z" fill="${p.accent}"/>
+    <rect x="38" y="10" width="34" height="3.4" rx="1.7" fill="${p.fg}"/><rect x="29" y="20" width="44" height="3.4" rx="1.7" fill="${a[1]}"/><rect x="29" y="28" width="52" height="3.4" rx="1.7" fill="${a[2]}"/><rect x="29" y="36" width="30" height="3.4" rx="1.7" fill="${p.fgdim}"/>
+    ${[1,2,3,4,5,6].map((i,n) => `<circle cx="${32+n*9}" cy="50" r="2.8" fill="${a[i]}"/>`).join('')}</g>`;
+}
+
+function renderThemes() {
+  const ids = ['system','kiln-dark','kiln-light','catppuccin-mocha','tokyo-night','nord','custom'];
+  const names = {system:'Follow system', custom:'Custom'};
+  document.getElementById('themes').innerHTML = ids.map(id => {
+    let svg;
+    if (id === 'system') svg = mini(T['kiln-dark'],'sd') + `<clipPath id="half"><polygon points="96,0 96,60 0,60"/></clipPath><g clip-path="url(#half)">${mini(T['kiln-light'],'sl')}</g>`;
+    else svg = mini(resolve(id), id.replace(/-/g,''));
+    return `<div class="th ${id===current?'on':''}" data-id="${id}"><svg width="96" height="60" viewBox="0 0 96 60">${svg}</svg>${names[id] || T[id].name}</div>`;
+  }).join('');
+  document.querySelectorAll('.th').forEach(el => el.onclick = () => choose(el.dataset.id));
+}
+
+function renderCustom() {
+  document.getElementById('base').innerHTML = Object.entries(T).map(([id,t]) => `<option value="${id}" ${id===custom.base?'selected':''}>${t.name}</option>`).join('');
+  document.getElementById('cgrid').innerHTML = Object.keys(LABELS).map(k =>
+    `<div class="cr"><input type="color" class="sw-in" data-k="${k}" value="${custom.p[k]}"><span>${LABELS[k]}</span><input class="hex" data-k="${k}" value="${custom.p[k]}" spellcheck="false"></div>`).join('');
+  const sw = r => custom.a.slice(r*8, r*8+8).map((v,i) => `<input type="color" class="sw-in" data-a="${r*8+i}" value="${v}" title="colour ${r*8+i}">`).join('');
+  document.getElementById('ansi').innerHTML = `<span>normal</span>${sw(0)}<span>bright</span>${sw(1)}`;
+  document.querySelectorAll('#cgrid input, #ansi input').forEach(inp => inp.oninput = () => {
+    const v = inp.value.trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+    if (inp.dataset.k) { custom.p[inp.dataset.k] = v; document.querySelectorAll(`[data-k="${inp.dataset.k}"]`).forEach(o => { if (o !== inp) o.value = v; }); }
+    else custom.a[+inp.dataset.a] = v;
+    apply(custom); renderThemes();
+  });
+}
+
+function choose(id) {
+  current = id;
+  apply(resolve(id));
+  renderThemes();
+  document.getElementById('custom').classList.toggle('open', id === 'custom');
+}
+
+document.getElementById('base').onchange = e => { custom = clone(e.target.value); renderCustom(); apply(custom); renderThemes(); };
+document.getElementById('reset').onclick = () => { custom = clone(custom.base); renderCustom(); apply(custom); renderThemes(); };
+document.querySelectorAll('.sw').forEach(el => el.onclick = () => el.classList.toggle('on'));
+document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('span').forEach(s => s.onclick = () => seg.querySelectorAll('span').forEach(x => x.classList.toggle('on', x === s))));
+renderCustom();
+choose('kiln-dark');
+</script>
+</body>
+</html>

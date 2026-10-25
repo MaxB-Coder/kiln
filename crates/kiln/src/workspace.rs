@@ -151,6 +151,10 @@ impl Workspace {
         };
         this._config_watch = this.watch_config(window, cx);
         crate::app_icon::apply(config.icon, window, true);
+        // The "system" theme follows the OS appearance, as it changes.
+        follow_appearance(window);
+        cx.observe_window_appearance(window, |_, window, _| follow_appearance(window))
+            .detach();
         cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active()
                 && let Some(tab) = this.tabs.get_mut(this.active)
@@ -656,6 +660,11 @@ impl Workspace {
     /// Whether the Settings pop-up is open.
     pub fn settings_open(&self) -> bool {
         self.settings.is_some()
+    }
+
+    /// The Settings pop-up, while it is open.
+    pub fn settings_view(&self) -> Option<Entity<SettingsView>> {
+        self.settings.as_ref().map(|(view, _)| view.clone())
     }
 
     /// The Settings pop-up (⌘, or Ctrl+Shift+,): opens over everything; Esc, a click outside
@@ -1712,11 +1721,24 @@ impl Workspace {
     }
 }
 
+/// Records the window's appearance (dark or light) and, when it changed, recomputes the
+/// palette: the "system" theme is Kiln Dark or Kiln Light with it. Dark where it cannot be told.
+fn follow_appearance(window: &mut Window) {
+    let dark = !matches!(
+        window.appearance(),
+        gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight
+    );
+    if theme::set_system_dark(dark) {
+        config::set_current(config::current());
+        window.refresh();
+    }
+}
+
 /// The veil behind the palette and the shortcuts pop-up, and how far down they sit.
 const SCRIM_TOP: f32 = 52.;
 
 fn scrim() -> gpui::Hsla {
-    theme::hsla(0x121212).opacity(0.62)
+    palette().veil()
 }
 
 /// The find bar's right side: "2 of 5 · ⏎ next · ⇧⏎ previous · esc".
@@ -2051,7 +2073,7 @@ impl Render for Workspace {
                 .items_center()
                 .pt(px(22.))
                 .px(px(24.))
-                .bg(theme::hsla(0x0e0e0e).opacity(0.62))
+                .bg(scrim())
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| {

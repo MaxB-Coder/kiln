@@ -44,7 +44,7 @@ case "$(uname -s)" in
     cp target/dist/kiln "$dir/kiln"
     cp assets/icon/kiln-256.png "$dir/kiln.png"
     cp target/THIRD_PARTY_LICENSES.md assets/fonts/JetBrainsMono-OFL.txt \
-      assets/fonts/NerdFonts-LICENSE "$dir/"
+      assets/fonts/NerdFonts-LICENSE assets/themes/THEME-LICENSES.md "$dir/"
     cat > "$dir/kiln.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application

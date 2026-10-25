@@ -1,6 +1,5 @@
-//! Kiln's palette (Gruvbox dark plus the orange accent) and terminal colour resolution.
-//!
-//! Same values as ~/dotfiles/home/dot_config/wezterm/palette.lua.
+//! Kiln's palettes (the built-in themes; Kiln Dark is Gruvbox dark plus the orange accent) and
+//! terminal colour resolution.
 
 use gpui::{Hsla, Rgba};
 use kiln_term::engine::term::color::Colors;
@@ -45,6 +44,167 @@ pub const DEFAULT_PALETTE: Palette = Palette {
         0xebdbb2, // bright
     ],
 };
+
+const fn preset(p: [u32; 13], ansi: [u32; 16]) -> Palette {
+    Palette {
+        bg: p[0],
+        bar: p[1],
+        raised: p[2],
+        bg1: p[3],
+        bg2: p[4],
+        bg3: p[5],
+        muted: p[6],
+        fg: p[7],
+        fg_dim: p[8],
+        accent: p[9],
+        failed: p[10],
+        ok: p[11],
+        modified: p[12],
+        ansi,
+    }
+}
+
+/// A built-in theme: its key in kiln.toml (`[theme] name`), its title, its palette.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Preset {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub palette: Palette,
+}
+
+/// The built-in themes. Kiln Dark is the default. Catppuccin Mocha
+/// (github.com/catppuccin/catppuccin), Tokyo Night (github.com/folke/tokyonight.nvim) and Nord
+/// (github.com/nordtheme/nord) are MIT-licensed palettes, credited in
+/// assets/themes/THEME-LICENSES.md (shipped in every package).
+pub const PRESETS: [Preset; 5] = [
+    Preset {
+        id: "kiln-dark",
+        title: "Kiln Dark",
+        palette: DEFAULT_PALETTE,
+    },
+    Preset {
+        id: "kiln-light",
+        title: "Kiln Light",
+        palette: preset(
+            [
+                0xf8f3ea, 0xefe7d9, 0xfffcf6, 0xe4d9c6, 0xd3c5ae, 0xa99a83, 0x8a7d6c, 0x3c3836,
+                0x5f554b, 0xc4622a, 0xa8564c, 0x6b7a45, 0x9a7a32,
+            ],
+            [
+                0xebe3d5, 0xcc241d, 0x98971a, 0xd79921, 0x458588, 0xb16286, 0x689d6a, 0x7c6f64,
+                0x928374, 0x9d0006, 0x79740e, 0xb57614, 0x076678, 0x8f3f71, 0x427b58, 0x3c3836,
+            ],
+        ),
+    },
+    Preset {
+        id: "catppuccin-mocha",
+        title: "Catppuccin Mocha",
+        palette: preset(
+            [
+                0x1e1e2e, 0x181825, 0x262637, 0x313244, 0x45475a, 0x585b70, 0x7f849c, 0xcdd6f4,
+                0xa6adc8, 0xfab387, 0xeba0ac, 0xa6e3a1, 0xf9e2af,
+            ],
+            [
+                0x45475a, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xbac2de,
+                0x585b70, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xa6adc8,
+            ],
+        ),
+    },
+    Preset {
+        id: "tokyo-night",
+        title: "Tokyo Night",
+        palette: preset(
+            [
+                0x1a1b26, 0x16161e, 0x1f2335, 0x292e42, 0x3b4261, 0x545c7e, 0x737aa2, 0xc0caf5,
+                0xa9b1d6, 0xff9e64, 0xf7768e, 0x9ece6a, 0xe0af68,
+            ],
+            [
+                0x15161e, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xa9b1d6,
+                0x414868, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xc0caf5,
+            ],
+        ),
+    },
+    Preset {
+        id: "nord",
+        title: "Nord",
+        palette: preset(
+            [
+                0x2e3440, 0x272c36, 0x353b49, 0x3b4252, 0x434c5e, 0x4c566a, 0x616e88, 0xd8dee9,
+                0xaeb7c6, 0xd08770, 0xbf616a, 0xa3be8c, 0xebcb8b,
+            ],
+            [
+                0x3b4252, 0xbf616a, 0xa3be8c, 0xebcb8b, 0x81a1c1, 0xb48ead, 0x88c0d0, 0xe5e9f0,
+                0x4c566a, 0xbf616a, 0xa3be8c, 0xebcb8b, 0x81a1c1, 0xb48ead, 0x8fbcbb, 0xeceff4,
+            ],
+        ),
+    },
+];
+
+pub fn preset_by_id(id: &str) -> Option<&'static Preset> {
+    PRESETS.iter().find(|p| p.id == id)
+}
+
+/// The theme names `[theme] name` takes: the presets, "system" (Kiln Dark or Light with the
+/// OS) and "custom" (`base` plus the colours in the file).
+pub const SYSTEM: &str = "system";
+pub const CUSTOM: &str = "custom";
+
+/// The preset a theme name stands for, given whether the system appearance is dark. Unknown
+/// names are `None` (the caller warns and uses Kiln Dark).
+pub fn resolve_name(name: &str, base: Option<&str>, system_dark: bool) -> Option<&'static Preset> {
+    match name {
+        SYSTEM => preset_by_id(if system_dark {
+            "kiln-dark"
+        } else {
+            "kiln-light"
+        }),
+        CUSTOM => preset_by_id(base.unwrap_or("kiln-dark")),
+        id => preset_by_id(id),
+    }
+}
+
+static SYSTEM_DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether the OS appearance is dark (true where it cannot be told).
+pub fn system_dark() -> bool {
+    SYSTEM_DARK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Records the OS appearance; returns whether it changed.
+pub fn set_system_dark(dark: bool) -> bool {
+    SYSTEM_DARK.swap(dark, std::sync::atomic::Ordering::Relaxed) != dark
+}
+
+/// Perceived brightness, 0 (black) to 1 (white).
+pub fn luminance(hex: u32) -> f32 {
+    let (r, g, b) = ((hex >> 16) & 255, (hex >> 8) & 255, hex & 255);
+    (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.
+}
+
+impl Palette {
+    /// A light theme (by its background).
+    pub fn is_light(&self) -> bool {
+        luminance(self.bg) > 0.5
+    }
+
+    /// The veil behind pop-ups: warm and light on light themes, near black on dark ones.
+    pub fn veil(&self) -> Hsla {
+        if self.is_light() {
+            gpui::rgba(0x3c2d1e47).into()
+        } else {
+            gpui::rgba(0x0a0a0a99).into()
+        }
+    }
+
+    /// A pop-up's drop shadow.
+    pub fn shadow(&self) -> Hsla {
+        if self.is_light() {
+            gpui::rgba(0x3c2d1e2e).into()
+        } else {
+            gpui::rgba(0x00000073).into()
+        }
+    }
+}
 
 static CURRENT: std::sync::RwLock<Palette> = std::sync::RwLock::new(DEFAULT_PALETTE);
 
@@ -141,5 +301,42 @@ pub fn dim(rgb: Rgb) -> Rgb {
         r: f(rgb.r),
         g: f(rgb.g),
         b: f(rgb.b),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_preset_is_complete_and_distinct() {
+        assert_eq!(PRESETS[0].palette, DEFAULT_PALETTE);
+        for (i, preset) in PRESETS.iter().enumerate() {
+            assert_eq!(preset.palette.ansi.len(), 16);
+            assert!(
+                preset.palette.ansi.iter().all(|c| *c <= 0xffffff),
+                "{}",
+                preset.id
+            );
+            assert_eq!(preset_by_id(preset.id), Some(preset));
+            for other in &PRESETS[i + 1..] {
+                assert_ne!(preset.palette, other.palette, "{} {}", preset.id, other.id);
+            }
+        }
+        assert!(preset_by_id("kiln-light").unwrap().palette.is_light());
+        assert!(PRESETS.iter().filter(|p| p.palette.is_light()).count() == 1);
+    }
+
+    #[test]
+    fn system_follows_the_appearance_and_custom_its_base() {
+        assert_eq!(resolve_name(SYSTEM, None, true).unwrap().id, "kiln-dark");
+        assert_eq!(resolve_name(SYSTEM, None, false).unwrap().id, "kiln-light");
+        assert_eq!(resolve_name(CUSTOM, Some("nord"), true).unwrap().id, "nord");
+        assert_eq!(resolve_name(CUSTOM, None, false).unwrap().id, "kiln-dark");
+        assert_eq!(
+            resolve_name("tokyo-night", None, false).unwrap().id,
+            "tokyo-night"
+        );
+        assert!(resolve_name("solarized", None, true).is_none());
     }
 }

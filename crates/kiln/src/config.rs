@@ -137,10 +137,16 @@ pub struct WindowConfig {
     pub restore: bool,
 }
 
-/// Palette overrides, as "#rrggbb" strings. Keys match the palette's names.
+/// The theme: a built-in one by name, and colour overrides on top of it, as "#rrggbb" strings
+/// (keys match the palette's names).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ThemeConfig {
+    /// "kiln-dark" (the default), "kiln-light", "system", "catppuccin-mocha", "tokyo-night",
+    /// "nord" or "custom".
+    pub name: Option<String>,
+    /// The theme "custom" starts from (default "kiln-dark").
+    pub base: Option<String>,
     pub bg: Option<String>,
     pub bar: Option<String>,
     pub raised: Option<String>,
@@ -189,10 +195,26 @@ impl Default for WindowConfig {
 }
 
 impl Config {
-    /// The palette with this config's overrides applied. Bad colours are ignored (and logged).
+    /// The palette: the theme's preset (for "system", the one that suits the OS appearance)
+    /// with this config's colour overrides on top. Unknown names and bad colours are logged
+    /// and ignored.
     pub fn palette(&self) -> Palette {
-        let mut p = DEFAULT_PALETTE;
+        self.palette_for(crate::theme::system_dark())
+    }
+
+    pub fn palette_for(&self, system_dark: bool) -> Palette {
         let t = &self.theme;
+        let name = t.name.as_deref().unwrap_or("kiln-dark");
+        let mut p = match crate::theme::resolve_name(name, t.base.as_deref(), system_dark) {
+            Some(preset) => preset.palette,
+            None => {
+                log::warn!(
+                    "config: theme {name:?} (base {:?}) is not a theme Kiln has",
+                    t.base
+                );
+                DEFAULT_PALETTE
+            }
+        };
         let set = |slot: &mut u32, value: &Option<String>, name: &str| {
             if let Some(value) = value {
                 match parse_hex(value) {
@@ -352,7 +374,11 @@ check = true
 # color = "#e07b39"
 
 [theme]
-# Any palette colour, as "#rrggbb":
+# "kiln-dark", "kiln-light", "system" (dark or light with your OS), "catppuccin-mocha",
+# "tokyo-night", "nord", or "custom" (start from `base`, then set colours below).
+name = "kiln-dark"
+# base = "kiln-dark"
+# Any palette colour, as "#rrggbb", on top of the theme:
 # bg = "#282828"
 # bar = "#1d2021"
 # fg = "#ebdbb2"
@@ -372,7 +398,10 @@ mod tests {
 
     #[test]
     fn template_parses_to_the_defaults() {
-        assert_eq!(parse(TEMPLATE).unwrap(), Config::default());
+        // The template names the default theme; no name means the same.
+        let mut defaults = Config::default();
+        defaults.theme.name = Some("kiln-dark".into());
+        assert_eq!(parse(TEMPLATE).unwrap(), defaults);
     }
 
     #[test]
@@ -383,6 +412,50 @@ mod tests {
             assert_eq!(config.icon, icon);
         }
         assert!(parse("icon = \"pink\"\n").is_err());
+    }
+
+    #[test]
+    fn themes_resolve_by_name_with_overrides_on_top() {
+        let palette = |text: &str, dark: bool| parse(text).unwrap().palette_for(dark);
+        // An old config: overrides, no name, is Kiln Dark with them, as before.
+        let old = palette("[theme]\naccent = \"#ff0000\"\n", true);
+        assert_eq!(
+            old,
+            Palette {
+                accent: 0xff0000,
+                ..DEFAULT_PALETTE
+            }
+        );
+        let nord = crate::theme::preset_by_id("nord").unwrap().palette;
+        assert_eq!(palette("[theme]\nname = \"nord\"\n", true), nord);
+        assert_eq!(
+            palette("[theme]\nname = \"nord\"\nfg = \"#010203\"\n", true),
+            Palette {
+                fg: 0x010203,
+                ..nord
+            }
+        );
+        let light = crate::theme::preset_by_id("kiln-light").unwrap().palette;
+        assert_eq!(palette("[theme]\nname = \"system\"\n", false), light);
+        assert_eq!(
+            palette("[theme]\nname = \"system\"\n", true),
+            DEFAULT_PALETTE
+        );
+        assert_eq!(
+            palette(
+                "[theme]\nname = \"custom\"\nbase = \"kiln-light\"\nbg = \"#ffffff\"\n",
+                true
+            ),
+            Palette {
+                bg: 0xffffff,
+                ..light
+            }
+        );
+        // Unknown names fall back to Kiln Dark.
+        assert_eq!(
+            palette("[theme]\nname = \"solarized\"\n", false),
+            DEFAULT_PALETTE
+        );
     }
 
     #[test]

@@ -202,9 +202,10 @@ pub fn project_color(root: &str, config: &crate::config::Config) -> u32 {
             return color;
         }
     }
-    // Muted colours from the palette's family; none of them is the orange accent.
-    const COLORS: [u32; 8] = [
-        0x83a598, 0x8ec07c, 0xd3869b, 0xc4a35e, 0x8f9a6c, 0xa89984, 0x689d6a, 0xb16286,
+    // Muted colours from the theme; none of them is the accent.
+    let p = crate::theme::palette();
+    let colors: [u32; 8] = [
+        p.ansi[12], p.ansi[14], p.ansi[13], p.modified, p.ok, p.ansi[7], p.ansi[6], p.ansi[5],
     ];
     // FNV-1a: stable across runs and Rust versions.
     let mut hash: u32 = 0x811c9dc5;
@@ -212,7 +213,7 @@ pub fn project_color(root: &str, config: &crate::config::Config) -> u32 {
         hash ^= *byte as u32;
         hash = hash.wrapping_mul(0x01000193);
     }
-    COLORS[hash as usize % COLORS.len()]
+    colors[hash as usize % colors.len()]
 }
 
 fn expand_home(path: &str) -> String {

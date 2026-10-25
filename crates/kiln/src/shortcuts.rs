@@ -193,7 +193,7 @@ impl Render for ShortcutsView {
                     inset: false,
                 },
                 BoxShadow {
-                    color: gpui::black().opacity(0.45),
+                    color: p.shadow(),
                     offset: point(px(0.), px(12.)),
                     blur_radius: px(32.),
                     spread_radius: px(0.),

@@ -32,6 +32,7 @@ pub struct TextInput {
     cursor: usize,
     marked: Option<String>,
     placeholder: SharedString,
+    size: Pixels,
 }
 
 impl TextInput {
@@ -42,6 +43,22 @@ impl TextInput {
             cursor: 0,
             marked: None,
             placeholder: placeholder.into(),
+            size: px(13.),
+        }
+    }
+
+    /// A smaller field (the hex values in Settings).
+    pub fn with_size(mut self, size: Pixels) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// Replaces the text without reporting a change (the owner set it).
+    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.text != text {
+            self.text = text.to_string();
+            self.cursor = self.text.len();
+            cx.notify();
         }
     }
 
@@ -188,8 +205,10 @@ impl Focusable for TextInput {
 }
 
 impl Render for TextInput {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette();
+        let focused = self.focus.is_focused(window);
+        let caret = self.size * 1.25;
         let entity = cx.entity();
         let focus = self.focus.clone();
         let (before, after) = self.text.split_at(self.cursor);
@@ -215,17 +234,19 @@ impl Render for TextInput {
             .overflow_hidden()
             .whitespace_nowrap()
             .font_family(FONT_FAMILY)
-            .text_size(px(13.))
+            .text_size(self.size)
             .text_color(theme::hsla(p.fg))
             .child(input_handler)
             .when(empty, |d| {
-                d.child(div().w(px(2.)).h(px(16.)).bg(theme::hsla(p.accent)))
-                    .child(
-                        div()
-                            .pl(px(2.))
-                            .text_color(theme::hsla(p.muted))
-                            .child(self.placeholder.clone()),
-                    )
+                d.when(focused, |d| {
+                    d.child(div().w(px(2.)).h(caret).bg(theme::hsla(p.accent)))
+                })
+                .child(
+                    div()
+                        .pl(px(2.))
+                        .text_color(theme::hsla(p.muted))
+                        .child(self.placeholder.clone()),
+                )
             })
             .when(!empty, |d| {
                 d.child(before.to_string())
@@ -237,7 +258,9 @@ impl Render for TextInput {
                                 .child(marked),
                         )
                     })
-                    .child(div().w(px(2.)).h(px(16.)).bg(theme::hsla(p.accent)))
+                    .when(focused, |d| {
+                        d.child(div().w(px(2.)).h(caret).bg(theme::hsla(p.accent)))
+                    })
                     .child(after.to_string())
             })
     }

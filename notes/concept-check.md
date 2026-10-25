@@ -69,3 +69,22 @@ folder of its own; it never touches yours). The mockup, rendered with WebKit, be
 
 Deliberate difference: the footer shows this platform's key only (⌘, or Ctrl+Shift+,), where
 the mockup lists both.
+
+## Themes (notes/concept/kiln-themes.html)
+
+Same run. The mockup's app-icon tiles are simplified; kiln-settings.html is the reference for
+those. Comparisons: [Custom](screenshots/settings/compare-themes.png),
+[Kiln Light](screenshots/settings/compare-themes-light.png).
+
+| Item | Kiln | Verdict |
+| --- | --- | --- |
+| Seven 96×60 cards, four per row, each drawn from its own palette; Follow system split diagonally; the chosen one ringed | [t0](screenshots/settings/t0-system.png) to [t5](screenshots/settings/t5-nord.png) | Matches |
+| A card applies its theme to everything at once, the pop-up and veil included (light veil on light themes) | [t2 Kiln Light](screenshots/settings/t2-kiln-light.png), [t3](screenshots/settings/t3-catppuccin-mocha.png), [t4](screenshots/settings/t4-tokyo-night.png) | Matches |
+| Custom: Start from, 13 colours with swatch and hex, 16 terminal colours, Reset to base, "Saved to kiln.toml as you edit" | [t6](screenshots/settings/t6-custom.png); the file then holds name, base and every colour ([toml](screenshots/settings/t6-kiln-custom.toml)), the user's comments intact | Matches |
+| Colour picker (hue strip and saturation/value square) | [t7](screenshots/settings/t7-custom-picker.png) | Matches |
+| A preset over colour overrides: "N colours overridden in kiln.toml · clear" | [t8](screenshots/settings/t8-overrides-note.png) | Matches |
+| Palettes are the mockup's values | `theme::tests`, `config::tests::themes_resolve_by_name_with_overrides_on_top` | Matches |
+
+Not shown in pictures: Follow system switching with the OS (unit-tested in
+`theme::tests::system_follows_the_appearance_and_custom_its_base`; the live switch uses GPUI's
+appearance observer, not run headless).

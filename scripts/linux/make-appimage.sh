@@ -67,7 +67,7 @@ cp "$root/assets/icon/kiln-256.png" "$app/kiln.png"
 ln -s kiln.png "$app/.DirIcon"
 ln -s usr/bin/kiln "$app/AppRun"
 for f in target/THIRD_PARTY_LICENSES.md LICENSE-MIT LICENSE-APACHE \
-  assets/fonts/JetBrainsMono-OFL.txt assets/fonts/NerdFonts-LICENSE; do
+  assets/fonts/JetBrainsMono-OFL.txt assets/fonts/NerdFonts-LICENSE assets/themes/THEME-LICENSES.md; do
   if [ -f "$root/$f" ]; then install -m 644 "$root/$f" "$app/usr/share/doc/kiln/"; fi
 done
 

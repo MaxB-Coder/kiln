@@ -34,32 +34,50 @@ pub fn check(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `text` with the setting at `path` (`["window", "sidebar"]`) set to `value`. An existing
-/// value keeps its spacing and trailing comment; a missing key is added to its table, and a
-/// missing table at the end of the file.
+/// One change: the key's path (`["window", "sidebar"]`) and its new value, or `None` to
+/// remove the key.
+pub type Edit<'a> = (&'a [&'a str], Option<Value>);
+
+/// `text` with the setting at `path` set to `value`. An existing value keeps its spacing and
+/// trailing comment; a missing key is added to its table, and a missing table at the end of
+/// the file.
 pub fn with_setting(text: &str, path: &[&str], value: Value) -> Result<String, WriteError> {
+    with_edits(text, &[(path, Some(value))])
+}
+
+/// `text` with several changes at once (see `with_setting`); removing a key that is not there
+/// does nothing.
+pub fn with_edits(text: &str, edits: &[Edit]) -> Result<String, WriteError> {
     check(text).map_err(WriteError::Broken)?;
     let mut doc: DocumentMut = text
         .parse()
         .map_err(|err: toml_edit::TomlError| WriteError::Broken(err.to_string()))?;
-    let Some((key, tables)) = path.split_last() else {
-        return Err(WriteError::Broken("no key".into()));
-    };
-    let mut table: &mut dyn TableLike = doc.as_table_mut();
-    for name in tables {
-        let item = table.entry(name).or_insert_with(toml_edit::table);
-        table = item
-            .as_table_like_mut()
-            .ok_or_else(|| WriteError::Broken(format!("{name} is not a table")))?;
-    }
-    match table.get_mut(key).and_then(Item::as_value_mut) {
-        Some(old) => {
-            let decor = old.decor().clone();
-            *old = value;
-            *old.decor_mut() = decor;
+    for (path, value) in edits {
+        let Some((key, tables)) = path.split_last() else {
+            return Err(WriteError::Broken("no key".into()));
+        };
+        let mut table: &mut dyn TableLike = doc.as_table_mut();
+        for name in tables {
+            if value.is_none() && !table.contains_key(name) {
+                break;
+            }
+            let item = table.entry(name).or_insert_with(toml_edit::table);
+            table = item
+                .as_table_like_mut()
+                .ok_or_else(|| WriteError::Broken(format!("{name} is not a table")))?;
         }
-        None => {
-            table.insert(key, Item::Value(value));
+        match (table.get_mut(key).and_then(Item::as_value_mut), value) {
+            (Some(old), Some(value)) => {
+                let decor = old.decor().clone();
+                *old = value.clone();
+                *old.decor_mut() = decor;
+            }
+            (None, Some(value)) => {
+                table.insert(key, Item::Value(value.clone()));
+            }
+            (_, None) => {
+                table.remove(key);
+            }
         }
     }
     Ok(doc.to_string())
@@ -68,6 +86,11 @@ pub fn with_setting(text: &str, path: &[&str], value: Value) -> Result<String, W
 /// Writes the setting into the config file at `path` (created from the template when missing)
 /// and returns the config it now holds. Atomic: a temporary file next to it is renamed over it.
 pub fn write_setting(path: &Path, key: &[&str], value: Value) -> Result<Config, WriteError> {
+    write_edits(path, &[(key, Some(value))])
+}
+
+/// Like `write_setting`, with several changes in one write.
+pub fn write_edits(path: &Path, edits: &[Edit]) -> Result<Config, WriteError> {
     // Through a symlink, write the file it points to (dotfile managers link it).
     let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let text = match std::fs::read_to_string(&target) {
@@ -75,7 +98,7 @@ pub fn write_setting(path: &Path, key: &[&str], value: Value) -> Result<Config, 
         Err(err) if err.kind() == io::ErrorKind::NotFound => config::TEMPLATE.to_string(),
         Err(err) => return Err(WriteError::Io(err.to_string())),
     };
-    let new = with_setting(&text, key, value)?;
+    let new = with_edits(&text, edits)?;
     let config = config::parse(&new).map_err(|err| WriteError::Broken(err.to_string()))?;
     write_atomically(&target, &new).map_err(|err| WriteError::Io(err.to_string()))?;
     Ok(config)
@@ -142,6 +165,25 @@ mod tests {
         )
         .unwrap();
         assert!(!config::parse(&new).unwrap().window.restore);
+    }
+
+    #[test]
+    fn theme_keys_round_trip() {
+        let text =
+            "[theme]\nname = \"nord\" # cool\nfg = \"#010203\"\n\n[window]\nsidebar = true\n";
+        // A preset: only the name changes; the override stays.
+        let new = with_setting(text, &["theme", "name"], "tokyo-night".into()).unwrap();
+        assert_eq!(new, text.replace("\"nord\"", "\"tokyo-night\""));
+        // Clearing the overrides removes exactly those keys.
+        let cleared =
+            with_edits(&new, &[(&["theme", "fg"], None), (&["theme", "bg"], None)]).unwrap();
+        assert_eq!(cleared, new.replace("fg = \"#010203\"\n", ""));
+        // The ANSI colours as an array.
+        let ansi: toml_edit::Array = (0..16).map(|i| format!("#0000{i:02x}")).collect();
+        let with_ansi = with_setting(text, &["theme", "ansi"], ansi.into()).unwrap();
+        let config = config::parse(&with_ansi).unwrap();
+        assert_eq!(config.theme.ansi.unwrap()[15], "#00000f");
+        assert!(with_ansi.ends_with("[window]\nsidebar = true\n"));
     }
 
     #[test]

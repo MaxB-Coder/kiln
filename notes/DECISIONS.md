@@ -297,3 +297,19 @@ Newest at the bottom.
   sets `_NET_WM_ICON` on X11 windows (x11rb, already in the tree); on Wayland an app cannot
   set its window icon (no stable protocol; `xdg-toplevel-icon` is not widely available), so
   the compositor shows the desktop file's terracotta icon.
+- **Themes** (`[theme] name`): Kiln Dark (the default palette, unchanged), Kiln Light, System
+  (Kiln Dark or Light with the OS appearance, followed live through GPUI's window appearance
+  on all three systems; dark where it is not known), Catppuccin Mocha, Tokyo Night and Nord
+  (MIT palettes, credited in `assets/themes/THEME-LICENSES.md`, which every package ships),
+  and Custom (`base` plus the colours in the file). They are a table in `theme.rs`, not files.
+  The colour keys stay overrides on top of whichever theme applies, so a config with overrides
+  and no name looks as it did; an unknown name logs a warning and gives Kiln Dark. Choosing a
+  theme in Settings writes only `name` and leaves overrides alone (a note offers to clear
+  them); Custom from a base writes `name`, `base` and every colour, so the file describes the
+  theme on its own. The picker (a saturation/value square and a hue strip, drawn with GPUI
+  gradients) shows a colour while it is dragged and writes it on release; hex fields write on
+  each valid `#rrggbb`. Everything takes its colours from the palette: the flame's inner colour
+  is `blend(accent, fg, 0.45)` (from `failed` after a failure), project dots use palette
+  colours, and the veil and pop-up shadows are warm and light on light themes, near black on
+  dark ones (by background luminance). The Windows close button keeps the system red. The app
+  icon is its own setting, not tied to the theme.

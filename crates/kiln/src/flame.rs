@@ -22,9 +22,8 @@ const SOURCES: [&str; FRAMES] = [
 const VIEW_W: f32 = 12.;
 const VIEW_H: f32 = 16.;
 
-/// Inner colours; the outer ones are the accent and the failed colour.
-const INNER_OK: u32 = 0xf2b36b;
-const INNER_FAILED: u32 = 0xd0927f;
+/// How much of the text colour lightens the inner flame.
+const INNER_LIGHT: f32 = 0.45;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Segment {
@@ -127,11 +126,21 @@ pub fn paint(
     window: &mut Window,
 ) {
     let p = palette();
-    let colors = if failed {
-        [p.failed, INNER_FAILED]
-    } else {
-        [p.accent, INNER_OK]
-    };
+    paint_in(&p, frame, failed, opacity, bounds, window);
+}
+
+/// `paint` with a given palette (the theme previews in Settings).
+pub fn paint_in(
+    p: &theme::Palette,
+    frame: usize,
+    failed: bool,
+    opacity: f32,
+    bounds: Bounds<Pixels>,
+    window: &mut Window,
+) {
+    // From the theme: the accent (the failed colour after a failure), lighter inside.
+    let outer = if failed { p.failed } else { p.accent };
+    let colors = [outer, theme::blend(outer, p.fg, INNER_LIGHT)];
     let scale = (
         f32::from(bounds.size.width) / VIEW_W,
         f32::from(bounds.size.height) / VIEW_H,

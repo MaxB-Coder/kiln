@@ -5,17 +5,21 @@
 
 use std::sync::Arc;
 
+use gpui::AppContext as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, Context, Div, EventEmitter, FocusHandle, Focusable, Image, ImageFormat,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, img, px, relative,
+    App, Bounds, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, Image, ImageFormat,
+    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Window, canvas, div, img, linear_color_stop, linear_gradient, px, relative,
 };
 use toml_edit::Value;
 
 use crate::config::{self, AppIcon, Config, PromptStyle};
 use crate::config_write::{self, WriteError};
 use crate::grid_paint::FONT_FAMILY;
+use crate::settings_theme::{self as themes, CARDS, COLOURS};
+use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
 
 pub enum SettingsEvent {
@@ -44,10 +48,66 @@ pub enum Change {
     TintRemote(bool),
     OptionAsAlt(bool),
     UpdatesCheck(bool),
+    /// A theme by name (presets and "system"); the colour overrides stay.
+    Theme(&'static str),
+    /// Custom, starting from a preset: name, base and every colour, so the file says it all.
+    CustomFrom(&'static str),
+    /// An interface colour (index into `COLOURS`) or a terminal colour of the custom theme.
+    Colour(usize, u32),
+    Ansi(usize, u32),
+    /// Removes the colour overrides.
+    ClearOverrides,
+}
+
+/// A change as key paths and values (`None` removes the key).
+type Edits = Vec<(Vec<&'static str>, Option<Value>)>;
+
+fn ansi_value(ansi: &[u32; 16]) -> Value {
+    let array: toml_edit::Array = ansi.iter().map(|c| themes::hex(*c)).collect();
+    array.into()
 }
 
 impl Change {
-    /// The key in kiln.toml and its new value.
+    /// What the change writes, given the config it changes.
+    pub fn edits(self, config: &Config) -> Edits {
+        match self {
+            Change::Theme(name) => vec![(vec!["theme", "name"], Some(name.into()))],
+            Change::CustomFrom(base) => {
+                let p = theme::preset_by_id(base).map_or(theme::DEFAULT_PALETTE, |p| p.palette);
+                let mut edits: Edits = vec![
+                    (vec!["theme", "name"], Some(theme::CUSTOM.into())),
+                    (vec!["theme", "base"], Some(base.into())),
+                ];
+                for (i, (key, _)) in COLOURS.iter().enumerate() {
+                    edits.push((
+                        vec!["theme", key],
+                        Some(themes::hex(themes::slot(&p, i)).into()),
+                    ));
+                }
+                edits.push((vec!["theme", "ansi"], Some(ansi_value(&p.ansi))));
+                edits
+            }
+            Change::Colour(i, color) => {
+                vec![(vec!["theme", COLOURS[i].0], Some(themes::hex(color).into()))]
+            }
+            Change::Ansi(i, color) => {
+                let mut ansi = config.palette().ansi;
+                ansi[i] = color;
+                vec![(vec!["theme", "ansi"], Some(ansi_value(&ansi)))]
+            }
+            Change::ClearOverrides => COLOURS
+                .iter()
+                .map(|(key, _)| (vec!["theme", *key], None))
+                .chain([(vec!["theme", "ansi"], None)])
+                .collect(),
+            simple => {
+                let (key, value) = simple.entry();
+                vec![(key.to_vec(), Some(value))]
+            }
+        }
+    }
+
+    /// The key in kiln.toml and its new value, for the one-key settings.
     pub fn entry(self) -> (&'static [&'static str], Value) {
         match self {
             Change::Icon(icon) => (&["icon"], icon.key().into()),
@@ -62,6 +122,7 @@ impl Change {
             Change::TintRemote(on) => (&["tints", "remote"], on.into()),
             Change::OptionAsAlt(on) => (&["option_as_alt"], on.into()),
             Change::UpdatesCheck(on) => (&["updates", "check"], on.into()),
+            _ => unreachable!("theme changes write several keys (see `edits`)"),
         }
     }
 }
@@ -106,6 +167,7 @@ fn font_label(size: f32) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Control {
     Icon,
+    Theme,
     FontSize,
     CursorBlink,
     Sidebar,
@@ -132,6 +194,34 @@ pub struct SettingsView {
     mac: bool,
     shortcut: String,
     tiles: Vec<(AppIcon, Arc<Image>)>,
+    /// The custom theme's hex fields, one per interface colour.
+    hex: Vec<Entity<TextInput>>,
+    _hex_events: Vec<Subscription>,
+    /// "Start from" is open.
+    base_menu: bool,
+    picker: Option<Picker>,
+}
+
+/// The colour picker under the custom theme's colours.
+#[derive(Clone, Copy, Debug)]
+struct Picker {
+    target: Target,
+    hsv: (f32, f32, f32),
+    dragging: Option<Area>,
+    square: Option<Bounds<Pixels>>,
+    strip: Option<Bounds<Pixels>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Colour(usize),
+    Ansi(usize),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Area {
+    Square,
+    Strip,
 }
 
 impl SettingsView {
@@ -145,6 +235,30 @@ impl SettingsView {
                 (icon, Arc::new(Image::from_bytes(ImageFormat::Png, png)))
             })
             .collect();
+        let mut hex = Vec::new();
+        let mut hex_events = Vec::new();
+        for i in 0..COLOURS.len() {
+            let input = cx.new(|cx| TextInput::new("#rrggbb", cx).with_size(px(10.5)));
+            hex_events.push(cx.subscribe_in(
+                &input,
+                window,
+                move |this, input, event, window, cx| match event {
+                    TextInputEvent::Changed => {
+                        let text = input.read(cx).text().trim().to_string();
+                        if let Some(color) = config::parse_hex(&text)
+                            && color != themes::slot(&this.config.palette(), i)
+                        {
+                            this.set(Change::Colour(i, color), cx);
+                        }
+                    }
+                    TextInputEvent::Cancel | TextInputEvent::Submit { .. } => {
+                        window.focus(&this.focus, cx);
+                    }
+                    _ => {}
+                },
+            ));
+            hex.push(input);
+        }
         let mut this = Self {
             focus,
             config: config::current(),
@@ -155,9 +269,138 @@ impl SettingsView {
             mac,
             shortcut,
             tiles,
+            hex,
+            _hex_events: hex_events,
+            base_menu: false,
+            picker: None,
         };
-        this.reload();
+        this.reload_and_sync(cx);
         this
+    }
+
+    /// `reload`, then the hex fields show the colours.
+    pub fn reload_and_sync(&mut self, cx: &mut Context<Self>) {
+        self.reload();
+        self.sync_hex(cx);
+    }
+
+    /// The hex fields follow the colours (a field being typed in only changes once its text is
+    /// a whole colour, which it then already shows).
+    fn sync_hex(&mut self, cx: &mut Context<Self>) {
+        let p = self.config.palette();
+        for (i, input) in self.hex.iter().enumerate() {
+            let text = themes::hex(themes::slot(&p, i));
+            input.update(cx, |input, cx| input.set_text(&text, cx));
+        }
+    }
+
+    /// The theme name in the config ("kiln-dark" when none is set).
+    fn theme_name(&self) -> &str {
+        self.config.theme.name.as_deref().unwrap_or("kiln-dark")
+    }
+
+    /// The preset Custom starts from when chosen now: the theme on screen.
+    fn custom_base(&self) -> &'static str {
+        match theme::resolve_name(
+            self.theme_name(),
+            self.config.theme.base.as_deref(),
+            theme::system_dark(),
+        ) {
+            Some(preset) => preset.id,
+            None => "kiln-dark",
+        }
+    }
+
+    pub fn open_picker(&mut self, target: Target, cx: &mut Context<Self>) {
+        if self.picker.is_some_and(|p| p.target == target) {
+            self.picker = None;
+        } else {
+            let p = self.config.palette();
+            let color = match target {
+                Target::Colour(i) => themes::slot(&p, i),
+                Target::Ansi(i) => p.ansi[i],
+            };
+            self.picker = Some(Picker {
+                target,
+                hsv: themes::to_hsv(color),
+                dragging: None,
+                square: None,
+                strip: None,
+            });
+        }
+        cx.notify();
+    }
+
+    /// A press or drag in the picker: the colour under the pointer, applied (not yet saved).
+    fn pick(&mut self, area: Area, at: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(picker) = self.picker.as_mut() else {
+            return;
+        };
+        let bounds = match area {
+            Area::Square => picker.square,
+            Area::Strip => picker.strip,
+        };
+        let Some(b) = bounds else {
+            return;
+        };
+        let fx = (f32::from(at.x - b.origin.x) / f32::from(b.size.width)).clamp(0., 1.);
+        let fy = (f32::from(at.y - b.origin.y) / f32::from(b.size.height)).clamp(0., 1.);
+        let (hue, sat, val) = picker.hsv;
+        picker.hsv = match area {
+            Area::Square => (hue, fx, 1. - fy),
+            Area::Strip => (fx * 359.9, sat, val),
+        };
+        picker.dragging = Some(area);
+        let (target, (h, s2, v)) = (picker.target, picker.hsv);
+        self.preview(target, themes::from_hsv(h, s2, v), cx);
+    }
+
+    /// Shows a colour everywhere without writing it (while the picker is dragged).
+    fn preview(&mut self, target: Target, color: u32, cx: &mut Context<Self>) {
+        let mut config = self.config.clone();
+        match target {
+            Target::Colour(i) => {
+                *themes::override_slot(&mut config.theme, i) = Some(themes::hex(color))
+            }
+            Target::Ansi(i) => {
+                let mut ansi = config.palette().ansi;
+                ansi[i] = color;
+                config.theme.ansi = Some(ansi.iter().map(|c| themes::hex(*c)).collect());
+            }
+        }
+        self.config = config.clone();
+        self.sync_hex(cx);
+        cx.emit(SettingsEvent::Changed(Box::new(config)));
+        cx.notify();
+    }
+
+    /// The drag ended: the picked colour is written.
+    fn end_drag(&mut self, cx: &mut Context<Self>) {
+        let Some(picker) = self.picker.as_mut() else {
+            return;
+        };
+        if picker.dragging.take().is_none() {
+            return;
+        }
+        let (h, s2, v) = picker.hsv;
+        let color = themes::from_hsv(h, s2, v);
+        let change = match picker.target {
+            Target::Colour(i) => Change::Colour(i, color),
+            Target::Ansi(i) => Change::Ansi(i, color),
+        };
+        self.set(change, cx);
+    }
+
+    pub fn choose_theme(&mut self, name: &'static str, cx: &mut Context<Self>) {
+        if name == self.theme_name() {
+            return;
+        }
+        self.picker = None;
+        if name == theme::CUSTOM {
+            self.set(Change::CustomFrom(self.custom_base()), cx);
+        } else {
+            self.set(Change::Theme(name), cx);
+        }
     }
 
     /// Reads the file again (it changed, or the pop-up opened): its values, or its error.
@@ -175,6 +418,7 @@ impl SettingsView {
     fn controls(&self) -> Vec<Control> {
         let mut controls = vec![
             Control::Icon,
+            Control::Theme,
             Control::FontSize,
             Control::CursorBlink,
             Control::Sidebar,
@@ -204,11 +448,16 @@ impl SettingsView {
             cx.notify();
             return;
         };
-        let (key, value) = change.entry();
-        match config_write::write_setting(&path, key, value) {
+        let edits = change.edits(&self.config);
+        let edits: Vec<config_write::Edit> = edits
+            .iter()
+            .map(|(key, value)| (key.as_slice(), value.clone()))
+            .collect();
+        match config_write::write_edits(&path, &edits) {
             Ok(config) => {
                 self.failed = None;
                 self.config = config.clone();
+                self.sync_hex(cx);
                 cx.emit(SettingsEvent::Changed(Box::new(config)));
             }
             Err(WriteError::Broken(message)) => self.broken = Some(message),
@@ -226,6 +475,16 @@ impl SettingsView {
                 let at = AppIcon::ALL.iter().position(|i| *i == c.icon).unwrap_or(0) as i32;
                 let next = (at + if flip { 1 } else { step }).rem_euclid(3) as usize;
                 Change::Icon(AppIcon::ALL[next])
+            }
+            Control::Theme => {
+                let name = c.theme.name.as_deref().unwrap_or("kiln-dark");
+                let at = CARDS.iter().position(|(id, _)| *id == name).unwrap_or(1) as i32;
+                let next = CARDS[(at + if flip { 1 } else { step }).rem_euclid(7) as usize].0;
+                if next == theme::CUSTOM {
+                    Change::CustomFrom(self.custom_base())
+                } else {
+                    Change::Theme(next)
+                }
             }
             Control::FontSize if !flip => Change::FontSize(step_font_size(c.font_size, step > 0)),
             Control::NotifyAfter if !flip => {
@@ -501,6 +760,478 @@ impl SettingsView {
     }
 }
 
+impl SettingsView {
+    fn theme_cards(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let p = palette();
+        let current = self.theme_name().to_string();
+        // Custom's card: the custom colours, or the theme it would start from.
+        let custom = if current == theme::CUSTOM {
+            self.config.palette()
+        } else {
+            theme::preset_by_id(self.custom_base()).map_or(theme::DEFAULT_PALETTE, |p| p.palette)
+        };
+        let lit = self.lit(Control::Theme);
+        let card = |i: usize, id: &'static str, title: &'static str, cx: &mut Context<Self>| {
+            let on = current == id;
+            div()
+                .id(("theme", i))
+                .w(px(themes::CARD_W))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.))
+                .cursor_pointer()
+                .text_size(px(10.))
+                .text_color(theme::hsla(if on { p.fg } else { p.muted }))
+                .whitespace_nowrap()
+                .on_click(cx.listener(move |this, _, _, cx| this.choose_theme(id, cx)))
+                .child(
+                    div()
+                        .relative()
+                        .w(px(themes::CARD_W))
+                        .h(px(themes::CARD_H))
+                        .child(
+                            canvas(
+                                |_, _, _| {},
+                                move |bounds, _, window, _| {
+                                    themes::paint_card(id, &custom, bounds, window)
+                                },
+                            )
+                            .size_full(),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .rounded(px(8.))
+                                .border_1()
+                                .border_color(theme::hsla(p.bg1)),
+                        )
+                        .when(on, |d| {
+                            // The ring sits 3 px outside the card, as an outline would.
+                            d.child(
+                                div()
+                                    .absolute()
+                                    .top(px(-5.))
+                                    .left(px(-5.))
+                                    .right(px(-5.))
+                                    .bottom(px(-5.))
+                                    .rounded(px(13.))
+                                    .border_2()
+                                    .border_color(theme::hsla(p.accent)),
+                            )
+                        }),
+                )
+                .child(title)
+        };
+        let mut rows = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .px(px(18.))
+            .pt(px(6.))
+            .pb(px(6.))
+            .when(lit, |d| d.bg(theme::hsla(p.bg)));
+        for (r, chunk) in CARDS.chunks(4).enumerate() {
+            let mut row = div().flex().flex_row().gap(px(10.));
+            for (k, (id, title)) in chunk.iter().enumerate() {
+                row = row.child(card(r * 4 + k, id, title, cx));
+            }
+            rows = rows.child(row);
+        }
+        rows
+    }
+
+    /// "N colours overridden in kiln.toml · clear", when a preset is chosen.
+    fn overrides_note(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let p = palette();
+        let n = themes::overrides(&self.config.theme);
+        (n > 0 && self.theme_name() != theme::CUSTOM).then(|| {
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(6.))
+                .px(px(18.))
+                .pb(px(4.))
+                .text_size(px(10.5))
+                .text_color(theme::hsla(p.bg3))
+                .child(SharedString::from(format!(
+                    "{n} colour{} overridden in kiln.toml ·",
+                    if n == 1 { "" } else { "s" }
+                )))
+                .child(
+                    div()
+                        .id("clear-overrides")
+                        .cursor_pointer()
+                        .text_color(theme::hsla(p.fg_dim))
+                        .hover(|s| s.text_color(theme::hsla(p.accent)))
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.set(Change::ClearOverrides, cx)),
+                        )
+                        .child("clear"),
+                )
+        })
+    }
+
+    fn swatch(
+        &self,
+        id: (&'static str, usize),
+        color: u32,
+        target: Target,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        let p = palette();
+        let open = self.picker.is_some_and(|pk| pk.target == target);
+        div()
+            .id(id)
+            .flex_none()
+            .rounded(px(5.))
+            .bg(theme::hsla(color))
+            .border_1()
+            .border_color(theme::hsla(if open { p.accent } else { p.bg2 }))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| this.open_picker(target, cx)))
+    }
+
+    fn custom_editor(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let p = palette();
+        let c = self.config.palette();
+        let base = self
+            .config
+            .theme
+            .base
+            .clone()
+            .unwrap_or_else(|| "kiln-dark".into());
+        let base_title = theme::preset_by_id(&base).map_or("Kiln Dark", |p| p.title);
+        let field = |i: usize, this: &Self, cx: &mut Context<Self>| {
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(7.))
+                .text_size(px(10.5))
+                .text_color(theme::hsla(p.fg_dim))
+                .child(
+                    this.swatch(("colour", i), themes::slot(&c, i), Target::Colour(i), cx)
+                        .size(px(18.)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(COLOURS[i].1),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(64.))
+                        .px(px(5.))
+                        .rounded(px(5.))
+                        .bg(theme::hsla(p.bar))
+                        .border_1()
+                        .border_color(theme::hsla(p.bg1))
+                        .child(this.hex[i].clone()),
+                )
+        };
+        let mut grid = div().flex().flex_col().gap(px(6.));
+        for r in 0..COLOURS.len().div_ceil(2) {
+            let mut row = div()
+                .flex()
+                .flex_row()
+                .gap(px(14.))
+                .child(field(2 * r, self, cx));
+            row = if 2 * r + 1 < COLOURS.len() {
+                row.child(field(2 * r + 1, self, cx))
+            } else {
+                row.child(div().flex_1())
+            };
+            grid = grid.child(row);
+        }
+        let ansi_row = |label: &'static str, from: usize, this: &Self, cx: &mut Context<Self>| {
+            let mut row = div().flex().flex_row().items_center().gap(px(6.)).child(
+                div()
+                    .w(px(44.))
+                    .flex_none()
+                    .text_size(px(10.))
+                    .text_color(theme::hsla(p.bg3))
+                    .child(label),
+            );
+            for i in from..from + 8 {
+                row = row.child(
+                    this.swatch(("ansi", i), c.ansi[i], Target::Ansi(i), cx)
+                        .flex_1()
+                        .h(px(20.)),
+                );
+            }
+            row
+        };
+        let base_menu = self.base_menu.then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .mb(px(8.))
+                .p(px(4.))
+                .rounded(px(6.))
+                .bg(theme::hsla(p.bar))
+                .border_1()
+                .border_color(theme::hsla(p.bg1))
+                .children(theme::PRESETS.iter().enumerate().map(|(i, preset)| {
+                    let id = preset.id;
+                    div()
+                        .id(("base", i))
+                        .px(px(8.))
+                        .py(px(3.))
+                        .rounded(px(4.))
+                        .cursor_pointer()
+                        .text_size(px(11.))
+                        .text_color(theme::hsla(if id == base { p.fg } else { p.fg_dim }))
+                        .hover(|s| s.bg(theme::hsla(p.bg1)))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.base_menu = false;
+                            this.set(Change::CustomFrom(id), cx);
+                        }))
+                        .child(preset.title)
+                }))
+        });
+        let picker = self.picker.map(|picker| self.picker_view(picker, cx));
+        let reset_base = theme::preset_by_id(&base).map_or("kiln-dark", |p| p.id);
+        div()
+            .mx(px(18.))
+            .my(px(4.))
+            .px(px(12.))
+            .pt(px(10.))
+            .pb(px(12.))
+            .rounded(px(10.))
+            .bg(theme::hsla(p.bg))
+            .border_1()
+            .border_color(theme::hsla(p.bg1))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_between()
+                    .items_center()
+                    .mb(px(8.))
+                    .text_size(px(11.))
+                    .text_color(theme::hsla(p.fg_dim))
+                    .child("Custom colours")
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(6.))
+                            .child("Start from")
+                            .child(
+                                div()
+                                    .id("start-from")
+                                    .px(px(6.))
+                                    .py(px(1.))
+                                    .rounded(px(6.))
+                                    .bg(theme::hsla(p.bar))
+                                    .border_1()
+                                    .border_color(theme::hsla(p.bg1))
+                                    .text_color(theme::hsla(p.fg))
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.base_menu = !this.base_menu;
+                                        cx.notify();
+                                    }))
+                                    .child(SharedString::from(format!("{base_title} ▾"))),
+                            ),
+                    ),
+            )
+            .children(base_menu)
+            .child(grid)
+            .children(picker)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .mt(px(10.))
+                    .child(ansi_row("normal", 0, self, cx))
+                    .child(ansi_row("bright", 8, self, cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_between()
+                    .mt(px(10.))
+                    .text_size(px(10.))
+                    .text_color(theme::hsla(p.bg3))
+                    .child("Saved to kiln.toml as you edit")
+                    .child(
+                        div()
+                            .id("reset-base")
+                            .cursor_pointer()
+                            .text_color(theme::hsla(p.fg_dim))
+                            .hover(|s| s.text_color(theme::hsla(p.accent)))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set(Change::CustomFrom(reset_base), cx)
+                            }))
+                            .child("Reset to base"),
+                    ),
+            )
+    }
+
+    /// The picker: saturation and value in a square, hue in a strip under it, the colour and
+    /// its hex beside them.
+    fn picker_view(&self, picker: Picker, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let p = palette();
+        let (hue, sat, val) = picker.hsv;
+        let color = themes::from_hsv(hue, sat, val);
+        let pure = themes::from_hsv(hue, 1., 1.);
+        let (w, h) = (170., 90.);
+        let view = cx.entity();
+        let view2 = view.clone();
+        let white = gpui::white();
+        let black = gpui::black();
+        let square = div()
+            .id("picker-square")
+            .relative()
+            .w(px(w))
+            .h(px(h))
+            .rounded(px(6.))
+            .overflow_hidden()
+            .bg(theme::hsla(pure))
+            .cursor_crosshair()
+            .child(div().absolute().size_full().bg(linear_gradient(
+                90.,
+                linear_color_stop(white, 0.),
+                linear_color_stop(white.opacity(0.), 1.),
+            )))
+            .child(div().absolute().size_full().bg(linear_gradient(
+                180.,
+                linear_color_stop(black.opacity(0.), 0.),
+                linear_color_stop(black, 1.),
+            )))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(sat * w - 5.))
+                    .top(px((1. - val) * h - 5.))
+                    .size(px(10.))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(white),
+            )
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, _, cx| {
+                        view.update(cx, |v, _| {
+                            if let Some(p) = v.picker.as_mut() {
+                                p.square = Some(bounds);
+                            }
+                        })
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                    this.pick(Area::Square, e.position, cx)
+                }),
+            );
+        let hues = [0., 60., 120., 180., 240., 300., 360.];
+        let strip = div()
+            .id("picker-strip")
+            .relative()
+            .mt(px(8.))
+            .w(px(w))
+            .h(px(12.))
+            .rounded(px(6.))
+            .overflow_hidden()
+            .flex()
+            .flex_row()
+            .cursor_pointer()
+            .children(hues.windows(2).map(|pair| {
+                div().flex_1().h_full().bg(linear_gradient(
+                    90.,
+                    linear_color_stop(theme::hsla(themes::from_hsv(pair[0], 1., 1.)), 0.),
+                    linear_color_stop(theme::hsla(themes::from_hsv(pair[1] - 0.01, 1., 1.)), 1.),
+                ))
+            }))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(hue / 360. * w - 2.))
+                    .top_0()
+                    .w(px(4.))
+                    .h_full()
+                    .rounded(px(2.))
+                    .border_1()
+                    .border_color(white),
+            )
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, _, cx| {
+                        view2.update(cx, |v, _| {
+                            if let Some(p) = v.picker.as_mut() {
+                                p.strip = Some(bounds);
+                            }
+                        })
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                    this.pick(Area::Strip, e.position, cx)
+                }),
+            );
+        div()
+            .mt(px(10.))
+            .flex()
+            .flex_row()
+            .gap(px(12.))
+            .child(div().flex().flex_col().child(square).child(strip))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .text_size(px(10.5))
+                    .text_color(theme::hsla(p.fg_dim))
+                    .child(
+                        div()
+                            .size(px(28.))
+                            .rounded(px(6.))
+                            .bg(theme::hsla(color))
+                            .border_1()
+                            .border_color(theme::hsla(p.bg2)),
+                    )
+                    .child(SharedString::from(themes::hex(color)))
+                    .child(
+                        div()
+                            .id("picker-done")
+                            .cursor_pointer()
+                            .text_color(theme::hsla(p.fg_dim))
+                            .hover(|s| s.text_color(theme::hsla(p.accent)))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.picker = None;
+                                cx.notify();
+                            }))
+                            .child("Done"),
+                    ),
+            )
+    }
+}
+
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette();
@@ -512,6 +1243,12 @@ impl Render for SettingsView {
         body = body
             .child(section("App icon"))
             .child(self.icon_tiles(cx))
+            .child(section("Theme"))
+            .child(self.theme_cards(cx))
+            .children(self.overrides_note(cx))
+            .when(self.theme_name() == theme::CUSTOM, |d| {
+                d.child(self.custom_editor(cx))
+            })
             .child(section("Appearance"))
             .child(self.row(
                 Control::FontSize,
@@ -636,6 +1373,18 @@ impl Render for SettingsView {
             // About a browser's normal line height, as in the mockup.
             .line_height(relative(1.3))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            // Dragging in the colour picker.
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                if e.pressed_button == Some(MouseButton::Left)
+                    && let Some(area) = this.picker.and_then(|p| p.dragging)
+                {
+                    this.pick(area, e.position, cx);
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.end_drag(cx)),
+            )
             .child(
                 div()
                     .flex()
