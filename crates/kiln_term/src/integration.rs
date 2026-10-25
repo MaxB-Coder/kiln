@@ -89,8 +89,20 @@ pub fn install(dir: &Path) -> io::Result<Installed> {
     })
 }
 
+/// The file Kiln writes "kiln" or "shell" into, for the prompt setting. The scripts read it
+/// before each prompt (its path is `KILN_PROMPT_FILE`), so a change reaches sessions that are
+/// already open. One per Kiln process, so test runs and other copies of Kiln keep their own.
+pub fn prompt_mode_file() -> PathBuf {
+    std::env::temp_dir().join(format!("kiln-prompt-{}", std::process::id()))
+}
+
+/// Sets the prompt for every session of this Kiln, from their next prompt on.
+pub fn set_prompt_mode(kiln: bool) -> io::Result<()> {
+    fs::write(prompt_mode_file(), if kiln { "kiln\n" } else { "shell\n" })
+}
+
 /// Adjusts the command and environment so the shell loads the integration (and, with
-/// `prompt`, shows Kiln's minimal prompt). Returns `false` for shells Kiln has no integration
+/// `prompt`, starts with Kiln's minimal prompt; `set_prompt_mode` changes it later). Returns `false` for shells Kiln has no integration
 /// for.
 pub fn apply(
     installed: &Installed,
@@ -99,15 +111,21 @@ pub fn apply(
     prompt: Option<MinimalPrompt>,
 ) -> bool {
     env.insert("KILN_SHELL_INTEGRATION".into(), "1".into());
-    if let Some(prompt) = prompt {
-        env.insert("KILN_PROMPT".into(), "kiln".into());
-        let path = installed.dir.join("starship-kiln.toml");
-        match write_if_changed(&path, &prompt.starship_config()) {
-            Ok(()) => {
-                env.insert("KILN_STARSHIP_CONFIG".into(), path_string(&path));
-            }
-            Err(err) => log::warn!("could not write the Starship prompt config: {err}"),
+    // Either prompt can be switched to later, so both are always set up.
+    let mode = if prompt.is_some() { "kiln" } else { "shell" };
+    env.insert("KILN_PROMPT".into(), mode.into());
+    match set_prompt_mode(prompt.is_some()) {
+        Ok(()) => {
+            env.insert("KILN_PROMPT_FILE".into(), path_string(&prompt_mode_file()));
         }
+        Err(err) => log::warn!("could not write the prompt mode file: {err}"),
+    }
+    let path = installed.dir.join("starship-kiln.toml");
+    match write_if_changed(&path, &MinimalPrompt.starship_config()) {
+        Ok(()) => {
+            env.insert("KILN_STARSHIP_CONFIG".into(), path_string(&path));
+        }
+        Err(err) => log::warn!("could not write the Starship prompt config: {err}"),
     }
     match shell_kind(&shell.program).as_str() {
         "zsh" => {
@@ -151,6 +169,7 @@ pub fn apply(
                 "PROMPT_COMMAND/u",
                 "KILN_SHELL_INTEGRATION/u",
                 "KILN_PROMPT/u",
+                "KILN_PROMPT_FILE/p",
                 "KILN_STARSHIP_CONFIG/p",
                 "TERM_PROGRAM/u",
                 "TERM_PROGRAM_VERSION/u",
@@ -168,6 +187,7 @@ pub fn apply(
             for var in [
                 "KILN_SHELL_INTEGRATION",
                 "KILN_PROMPT",
+                "KILN_PROMPT_FILE",
                 "KILN_STARSHIP_CONFIG",
             ] {
                 env.remove(var);
@@ -288,12 +308,21 @@ mod tests {
 
     #[test]
     fn the_minimal_prompt_brings_a_starship_config() {
-        let dir = std::env::temp_dir().join(format!("kiln-prompt-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kiln-prompt-test-{}", std::process::id()));
         let installed = install(&dir).unwrap();
         let mut env = HashMap::new();
         let mut zsh = ShellCommand::new("/bin/zsh", ["-l"]);
         assert!(apply(&installed, &mut zsh, &mut env, Some(MinimalPrompt)));
         assert_eq!(env["KILN_PROMPT"], "kiln");
+        // (The file is this process's, shared by the tests running alongside: its contents
+        // are not checked here.)
+        assert_eq!(env["KILN_PROMPT_FILE"], path_string(&prompt_mode_file()));
+        // The shell's own prompt still gets the file and the Starship config, to switch later.
+        let mut env = HashMap::new();
+        assert!(apply(&installed, &mut zsh, &mut env, None));
+        assert_eq!(env["KILN_PROMPT"], "shell");
+        assert!(env.contains_key("KILN_PROMPT_FILE"));
+        assert!(env.contains_key("KILN_STARSHIP_CONFIG"));
         let starship = fs::read_to_string(&env["KILN_STARSHIP_CONFIG"]).unwrap();
         assert!(starship.contains("format = \"  \""));
         assert!(!starship.contains("character"));

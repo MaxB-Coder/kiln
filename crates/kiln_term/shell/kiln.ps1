@@ -3,13 +3,16 @@
 # Marks the prompt, the command and its output (OSC 133) and reports the current folder
 # (OSC 7). Kiln loads it with -NoExit -EncodedCommand. With KILN_PROMPT=kiln the prompt is two
 # blank cells, where Kiln draws its flame (Starship gets a config that prints only those);
-# otherwise the user's own prompt stays.
+# otherwise the user's own prompt stays. Before each prompt the mode is read from
+# KILN_PROMPT_FILE (Kiln writes it when the setting changes), so switching applies to open
+# sessions too.
 
 if ($global:__KilnIntegrated) { return }
 $global:__KilnIntegrated = $true
 $global:__KilnRunning = $false
-# Whether the last command succeeded, for the prompt's colour (the profile does not count).
 $global:__KilnUserPrompt = $function:prompt
+# The user's Starship config, to put back when the shell's own prompt is chosen.
+$global:__KilnUserStarship = $env:STARSHIP_CONFIG
 
 function global:__KilnEncode([string] $s) {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($s)
@@ -28,8 +31,17 @@ function global:__KilnEncode([string] $s) {
 function global:prompt {
     $ok = $?
     $code = $global:LASTEXITCODE
+    if ($env:KILN_PROMPT_FILE -and (Test-Path -LiteralPath $env:KILN_PROMPT_FILE)) {
+        $mode = (Get-Content -LiteralPath $env:KILN_PROMPT_FILE -Raw -ErrorAction SilentlyContinue)
+        if ($mode) { $mode = $mode.Trim() }
+        if ($mode -eq 'kiln' -or $mode -eq 'shell') { $env:KILN_PROMPT = $mode }
+    }
     $kiln = $env:KILN_PROMPT -eq 'kiln'
-    if ($kiln -and $env:KILN_STARSHIP_CONFIG) { $env:STARSHIP_CONFIG = $env:KILN_STARSHIP_CONFIG }
+    if ($kiln -and $env:KILN_STARSHIP_CONFIG) {
+        $env:STARSHIP_CONFIG = $env:KILN_STARSHIP_CONFIG
+    } elseif ($env:KILN_STARSHIP_CONFIG -and $env:STARSHIP_CONFIG -eq $env:KILN_STARSHIP_CONFIG) {
+        $env:STARSHIP_CONFIG = $global:__KilnUserStarship
+    }
     $esc = [char]27
     $bel = [char]7
     $out = ''
@@ -54,6 +66,8 @@ function global:prompt {
         $global:__KilnTools = $tools
         $out += "$esc]1337;KilnTools=$(__KilnEncode $tools)$bel"
     }
+    # Whose prompt follows: Kiln draws the flame only over its own.
+    $out += "$esc]1337;KilnPrompt=$(if ($kiln) { 'kiln' } else { 'shell' })$bel"
     $out += "$esc]133;A$bel"
     # Starship's own prompt function, not $env:STARSHIP_SHELL (inherited from wherever Kiln was
     # started).

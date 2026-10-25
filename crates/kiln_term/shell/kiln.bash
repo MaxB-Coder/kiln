@@ -4,14 +4,29 @@
 # prompt, the command and its output (OSC 133) and reports the current folder (OSC 7).
 # Commands are marked through PS0 (bash 4.4 and later); older bash still gets prompts.
 # With KILN_PROMPT=kiln the prompt is two blank cells, where Kiln draws its flame (Starship gets
-# a config that prints only those); readline and completion are untouched.
+# a config that prints only those). Before each prompt the mode is read from KILN_PROMPT_FILE
+# (Kiln writes it when the setting changes), so switching applies to open sessions too.
+# Readline and completion are untouched.
 
 if [[ -n "${_KILN_INTEGRATED-}" ]]; then
   return 0 2>/dev/null || true
 fi
 _KILN_INTEGRATED=1
 _kiln_first=1
-# The last command's exit status, for the prompt's colour (startup files do not count).
+# Kiln's prompt, as PS1 holds it; and the shell's own, to put back for "shell".
+_kiln_ours='\[\e]133;A\a\]  \[\e]133;B\a\]'
+_kiln_shell_ps1=
+# The user's Starship config, to put back when the shell's own prompt is chosen.
+_kiln_user_starship=${STARSHIP_CONFIG-}
+
+# The prompt setting, as Kiln last wrote it.
+_kiln_read_mode() {
+  local mode=
+  [[ -n ${KILN_PROMPT_FILE-} && -r $KILN_PROMPT_FILE ]] || return 0
+  read -r mode < "$KILN_PROMPT_FILE"
+  if [[ $mode == kiln || $mode == shell ]]; then export KILN_PROMPT=$mode; fi
+  return 0
+}
 
 # Remove the bootstrap from PROMPT_COMMAND; keep whatever the user's startup files added.
 _kiln_user_pc=${PROMPT_COMMAND//"[ -n \"\$KILN_BASH_INTEGRATION\" ] && . \"\$KILN_BASH_INTEGRATION\""/}
@@ -32,8 +47,21 @@ _kiln_urlencode() {
 
 _kiln_prompt_command() {
   local ret=$?
+  _kiln_read_mode
   if [[ ${KILN_PROMPT-} == kiln && -n ${KILN_STARSHIP_CONFIG-} ]]; then
     export STARSHIP_CONFIG=$KILN_STARSHIP_CONFIG
+  elif [[ -n ${KILN_STARSHIP_CONFIG-} && ${STARSHIP_CONFIG-} == "$KILN_STARSHIP_CONFIG" ]]; then
+    if [[ -n $_kiln_user_starship ]]; then
+      export STARSHIP_CONFIG=$_kiln_user_starship
+    else
+      unset STARSHIP_CONFIG
+    fi
+  fi
+  # Whose prompt follows: Kiln draws the flame only over its own.
+  if [[ ${KILN_PROMPT-} == kiln ]]; then
+    printf '\e]1337;KilnPrompt=kiln\a'
+  else
+    printf '\e]1337;KilnPrompt=shell\a'
   fi
   if [[ -z $_kiln_first ]]; then
     printf '\e]133;D;%d\a' "$ret"
@@ -78,10 +106,14 @@ fi
 # Runs last in PROMPT_COMMAND (after any prompt theme): sets Kiln's prompt, then from here on
 # the next command is the user's.
 _kiln_arm() {
+  # Whatever is not Kiln's prompt is the shell's own (a theme may have rebuilt it).
+  if [[ $PS1 != "$_kiln_ours" ]]; then _kiln_shell_ps1=$PS1; fi
   # Starship's own hook, not $STARSHIP_SHELL: that variable is inherited from wherever Kiln
   # was started.
   if [[ ${KILN_PROMPT-} == kiln ]] && ! declare -F starship_precmd >/dev/null; then
-    PS1='\[\e]133;A\a\]  \[\e]133;B\a\]'
+    PS1=$_kiln_ours
+  elif [[ $PS1 == "$_kiln_ours" ]]; then
+    PS1=$_kiln_shell_ps1
   fi
   _kiln_at_prompt=1
 }

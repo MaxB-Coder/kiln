@@ -897,6 +897,14 @@ impl Workspace {
         if config.icon != old.icon {
             crate::app_icon::apply(config.icon, window, false);
         }
+        // Open sessions switch at their next prompt (the scripts read this file).
+        if config.shell.prompt != old.shell.prompt
+            && let Err(err) = kiln_term::integration::set_prompt_mode(
+                config.shell.prompt == config::PromptStyle::Kiln,
+            )
+        {
+            log::warn!("could not switch the prompt: {err}");
+        }
         if let Some((settings, _)) = &self.settings {
             settings.update(cx, |settings, cx| {
                 settings.reload();

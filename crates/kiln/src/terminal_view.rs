@@ -1521,6 +1521,27 @@ impl TerminalView {
     }
 
     /// The last row (absolute) at or after `from` that holds anything, or the cursor's row.
+    /// The first row from `from` that holds anything, at most the cursor's: prompts that start
+    /// with an empty line (Starship's `add_newline`) do not open the input box with a gap.
+    fn first_used_row(term: &EngineTerm, from: usize, cursor_abs: usize) -> usize {
+        let grid = term.grid();
+        let history = grid.history_size();
+        let columns = grid.columns();
+        let mut abs = from;
+        while abs < cursor_abs {
+            let row = &grid[Line(abs as i32 - history as i32)];
+            let used = (0..columns).any(|c| {
+                let cell = &row[Column(c)];
+                cell.c != ' ' || cell.bg != Color::Named(NamedColor::Background)
+            });
+            if used {
+                break;
+            }
+            abs += 1;
+        }
+        abs
+    }
+
     fn last_used_row(term: &EngineTerm, from: usize, cursor_abs: usize) -> usize {
         let grid = term.grid();
         let history = grid.history_size();
@@ -2089,19 +2110,26 @@ impl Render for TerminalView {
                 }
             } else {
                 let cursor_abs = history + grid.cursor.point.line.0.max(0) as usize;
+                // The shell says whose prompt it draws (it can switch while open); until it
+                // has, the setting it started with.
+                let kiln_prompt = self.session.integration_loaded()
+                    && live.kiln_prompt.unwrap_or(self.session.minimal_prompt());
                 let prompt = (live.phase == Phase::Prompt).then(|| {
-                    let top = live.prompt_top.unwrap_or(cursor_abs).min(cursor_abs);
+                    let mut top = live.prompt_top.unwrap_or(cursor_abs).min(cursor_abs);
+                    // Kiln's own prompt is blank cells by design; the shell's may open with
+                    // an empty line.
+                    if !kiln_prompt {
+                        top = Self::first_used_row(&term, top, cursor_abs);
+                    }
                     let last = Self::last_used_row(&term, top, cursor_abs);
                     (top, last - top + 1)
                 });
                 // Ctrl-C (130) is not a failure; the startup files never report one.
                 let failed = live.last_exit.is_some_and(|code| code != 0 && code != 130);
-                let flame = prompt
-                    .filter(|_| self.session.minimal_prompt())
-                    .map(|(top, _)| {
-                        let row = live.prompt_top.map_or(0, |p| p.saturating_sub(top));
-                        (row, live.prompt_column, failed)
-                    });
+                let flame = prompt.filter(|_| kiln_prompt).map(|(top, _)| {
+                    let row = live.prompt_top.map_or(0, |p| p.saturating_sub(top));
+                    (row, live.prompt_column, failed)
+                });
                 Layout::Blocks { prompt, flame }
             }
         };

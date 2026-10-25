@@ -39,6 +39,9 @@ pub struct LiveState {
     pub prompt_top: Option<usize>,
     /// The column the prompt starts at (its OSC 133 start mark), on `prompt_top`.
     pub prompt_column: usize,
+    /// Whether the shell draws Kiln's minimal prompt (blank cells for the flame), as it last
+    /// reported; `None` before its first report.
+    pub kiln_prompt: Option<bool>,
     /// First row of the running command's output.
     pub output_top: Option<usize>,
     /// The running command.
@@ -202,6 +205,10 @@ impl BlockRecorder {
             }
             Mark::Tools(tools) => {
                 live.tools = tools.clone();
+                None
+            }
+            Mark::PromptMode { kiln } => {
+                live.kiln_prompt = Some(*kiln);
                 None
             }
         }

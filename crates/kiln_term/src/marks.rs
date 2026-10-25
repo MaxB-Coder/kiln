@@ -23,6 +23,9 @@ pub enum Mark {
     /// `OSC 1337 ; KilnTools=name=path;…`: language runtimes on the shell's PATH (node,
     /// python3, …). Kiln's own key in iTerm2's namespace, which other terminals ignore.
     Tools(Vec<(String, String)>),
+    /// `OSC 1337 ; KilnPrompt=kiln|shell`: whose prompt the shell is drawing (Kiln's blank
+    /// cells for the flame, or the shell's own), sent before each prompt.
+    PromptMode { kiln: bool },
 }
 
 /// A mark plus where the cursor was when it arrived.
@@ -86,6 +89,11 @@ fn parse_osc(params: &[&[u8]]) -> Option<Mark> {
                     .and_then(|code| std::str::from_utf8(code).ok()?.parse().ok());
                 Some(Mark::CommandEnd { exit_code })
             }
+            _ => None,
+        },
+        [b"1337", kv] if kv.starts_with(b"KilnPrompt=") => match &kv[b"KilnPrompt=".len()..] {
+            b"kiln" => Some(Mark::PromptMode { kiln: true }),
+            b"shell" => Some(Mark::PromptMode { kiln: false }),
             _ => None,
         },
         [b"1337", kv] => {
@@ -157,6 +165,23 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn the_prompt_mode_is_reported() {
+        let marks: Vec<Mark> = scan_all(
+            b"\x1b]1337;KilnPrompt=kiln\x07\x1b]1337;KilnPrompt=shell\x07\x1b]1337;KilnPrompt=x\x07",
+        )
+        .into_iter()
+        .map(|(_, mark)| mark)
+        .collect();
+        assert_eq!(
+            marks,
+            [
+                Mark::PromptMode { kiln: true },
+                Mark::PromptMode { kiln: false }
+            ]
+        );
     }
 
     #[test]
