@@ -165,7 +165,8 @@ Newest at the bottom.
   `scripts/make-icons.sh` makes every format from the SVG: the .icns keeps the macOS grid's
   margin (824 of 1024); the .ico and the Linux PNGs are cut to the body (248 of 256), as
   Windows and Linux icons fill their tile. kiln.exe now carries the .ico as a resource
-  (`build.rs`, winresource; before, Explorer showed the default program icon), and
+  (`build.rs`, winresource; before, Explorer showed the default program icon), the installer
+  shows it too (`installerIcon`; it had NSIS's default), and
   `scripts/check-icons.sh` / `.ps1` check every package against the assets, byte for byte,
   in the release workflow (and the exe in CI).
 - **Daily security check**: `security.yml` runs the RustSec advisories check every day, so a
