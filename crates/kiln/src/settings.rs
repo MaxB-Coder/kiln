@@ -526,7 +526,9 @@ impl SettingsView {
             Control::Theme => {
                 let name = c.theme.effective_name();
                 let at = CARDS.iter().position(|(id, _)| *id == name).unwrap_or(1) as i32;
-                let next = CARDS[(at + if flip { 1 } else { step }).rem_euclid(7) as usize].0;
+                let next = CARDS
+                    [(at + if flip { 1 } else { step }).rem_euclid(CARDS.len() as i32) as usize]
+                    .0;
                 if next == theme::CUSTOM {
                     self.custom_change()
                 } else {
@@ -1581,8 +1583,8 @@ mod tests {
     #[test]
     fn presets_are_exact_and_custom_comes_back() {
         let nord = theme::preset_by_id("nord").unwrap().palette;
-        // A custom theme from Tokyo Night, then one colour changed.
-        let text = apply(config::TEMPLATE, Change::CustomFrom("tokyo-night"));
+        // A custom theme from Everforest, then one colour changed.
+        let text = apply(config::TEMPLATE, Change::CustomFrom("everforest"));
         let text = apply(&text, Change::Colour(0, 0x123456));
         let custom = config::parse(&text).unwrap();
         assert_eq!(custom.theme.effective_name(), theme::CUSTOM);

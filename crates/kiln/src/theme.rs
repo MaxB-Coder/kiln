@@ -73,10 +73,11 @@ pub struct Preset {
 }
 
 /// The built-in themes. Kiln Dark is the default. Catppuccin Mocha
-/// (github.com/catppuccin/catppuccin), Tokyo Night (github.com/folke/tokyonight.nvim) and Nord
-/// (github.com/nordtheme/nord) are MIT-licensed palettes, credited in
+/// (github.com/catppuccin/catppuccin), Everforest (github.com/sainnhe/everforest), Nord
+/// (github.com/nordtheme/nord) and Kanagawa (github.com/rebelot/kanagawa.nvim) are MIT-licensed
+/// palettes, credited in
 /// assets/themes/THEME-LICENSES.md (shipped in every package).
-pub const PRESETS: [Preset; 5] = [
+pub const PRESETS: [Preset; 6] = [
     Preset {
         id: "kiln-dark",
         title: "Kiln Dark",
@@ -111,16 +112,16 @@ pub const PRESETS: [Preset; 5] = [
         ),
     },
     Preset {
-        id: "tokyo-night",
-        title: "Tokyo Night",
+        id: "everforest",
+        title: "Everforest",
         palette: preset(
             [
-                0x1a1b26, 0x16161e, 0x1f2335, 0x292e42, 0x3b4261, 0x545c7e, 0x737aa2, 0xc0caf5,
-                0xa9b1d6, 0xff9e64, 0xf7768e, 0x9ece6a, 0xe0af68,
+                0x2d353b, 0x232a2e, 0x343f44, 0x3d484d, 0x475258, 0x56635f, 0x859289, 0xd3c6aa,
+                0x9da9a0, 0xe69875, 0xe67e80, 0xa7c080, 0xdbbc7f,
             ],
             [
-                0x15161e, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xa9b1d6,
-                0x414868, 0xf7768e, 0x9ece6a, 0xe0af68, 0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xc0caf5,
+                0x475258, 0xe67e80, 0xa7c080, 0xdbbc7f, 0x7fbbb3, 0xd699b6, 0x83c092, 0xd3c6aa,
+                0x56635f, 0xe67e80, 0xa7c080, 0xdbbc7f, 0x7fbbb3, 0xd699b6, 0x83c092, 0xd3c6aa,
             ],
         ),
     },
@@ -135,6 +136,20 @@ pub const PRESETS: [Preset; 5] = [
             [
                 0x3b4252, 0xbf616a, 0xa3be8c, 0xebcb8b, 0x81a1c1, 0xb48ead, 0x88c0d0, 0xe5e9f0,
                 0x4c566a, 0xbf616a, 0xa3be8c, 0xebcb8b, 0x81a1c1, 0xb48ead, 0x8fbcbb, 0xeceff4,
+            ],
+        ),
+    },
+    Preset {
+        id: "kanagawa",
+        title: "Kanagawa",
+        palette: preset(
+            [
+                0x1f1f28, 0x16161d, 0x2a2a37, 0x363646, 0x54546d, 0x54546d, 0x727169, 0xdcd7ba,
+                0xc8c093, 0xffa066, 0xe46876, 0x98bb6c, 0xe6c384,
+            ],
+            [
+                0x16161d, 0xc34043, 0x76946a, 0xc0a36e, 0x7e9cd8, 0x957fb8, 0x6a9589, 0xc8c093,
+                0x727169, 0xe82424, 0x98bb6c, 0xe6c384, 0x7fb4ca, 0x938aa9, 0x7aa89f, 0xdcd7ba,
             ],
         ),
     },
@@ -334,9 +349,11 @@ mod tests {
         assert_eq!(resolve_name(CUSTOM, Some("nord"), true).unwrap().id, "nord");
         assert_eq!(resolve_name(CUSTOM, None, false).unwrap().id, "kiln-dark");
         assert_eq!(
-            resolve_name("tokyo-night", None, false).unwrap().id,
-            "tokyo-night"
+            resolve_name("everforest", None, false).unwrap().id,
+            "everforest"
         );
+        // Tokyo Night was removed: a config naming it gets the fallback.
+        assert!(resolve_name("tokyo-night", None, true).is_none());
         assert!(resolve_name("solarized", None, true).is_none());
     }
 }

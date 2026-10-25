@@ -1,0 +1,28 @@
+# My Kiln settings
+font_size = 13    # comfortable on this screen
+
+[shell]
+program = "/bin/zsh" # not in Settings: stays as it is
+
+[window]
+sidebar = true
+
+[theme]
+name = "nord"
+
+[theme.custom]
+base = "everforest"
+bg = "#2d353b"
+bar = "#232a2e"
+raised = "#343f44"
+bg1 = "#3d484d"
+bg2 = "#475258"
+bg3 = "#56635f"
+muted = "#859289"
+fg = "#d3c6aa"
+fg_dim = "#9da9a0"
+accent = "#ff3d8b"
+failed = "#e67e80"
+ok = "#a7c080"
+modified = "#dbbc7f"
+ansi = ["#475258", "#e67e80", "#a7c080", "#dbbc7f", "#7fbbb3", "#d699b6", "#83c092", "#d3c6aa", "#56635f", "#e67e80", "#a7c080", "#dbbc7f", "#7fbbb3", "#d699b6", "#83c092", "#d3c6aa"]

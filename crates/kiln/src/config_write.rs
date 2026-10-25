@@ -172,8 +172,8 @@ mod tests {
         let text =
             "[theme]\nname = \"nord\" # cool\nfg = \"#010203\"\n\n[window]\nsidebar = true\n";
         // Only the name changes; the rest of the table stays as it was.
-        let new = with_setting(text, &["theme", "name"], "tokyo-night".into()).unwrap();
-        assert_eq!(new, text.replace("\"nord\"", "\"tokyo-night\""));
+        let new = with_setting(text, &["theme", "name"], "kanagawa".into()).unwrap();
+        assert_eq!(new, text.replace("\"nord\"", "\"kanagawa\""));
         // Removing keys removes exactly those.
         let cleared =
             with_edits(&new, &[(&["theme", "fg"], None), (&["theme", "bg"], None)]).unwrap();

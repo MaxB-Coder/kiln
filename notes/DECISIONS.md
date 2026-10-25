@@ -299,7 +299,7 @@ Newest at the bottom.
   the compositor shows the desktop file's terracotta icon.
 - **Themes** (`[theme] name`): Kiln Dark (the default palette, unchanged), Kiln Light, System
   (Kiln Dark or Light with the OS appearance, followed live through GPUI's window appearance
-  on all three systems; dark where it is not known), Catppuccin Mocha, Tokyo Night and Nord
+  on all three systems; dark where it is not known), Catppuccin Mocha, Everforest, Nord and Kanagawa
   (MIT palettes, credited in `assets/themes/THEME-LICENSES.md`, which every package ships),
   and Custom. They are a table in `theme.rs`, not files. Custom lives in its own table,
   `[theme.custom]` (`base` plus colours), used only when `name = "custom"`: Custom is one more
@@ -325,3 +325,12 @@ Newest at the bottom.
   its style (`OSC 1337;KilnPrompt=kiln|shell`), and Kiln draws the flame only where the shell
   printed Kiln's two blank cells; the blank first line Starship adds is not kept above a shell
   prompt in the input box.
+- **Everforest and Kanagawa replace Tokyo Night**: eight cards, two full rows. A config still
+  naming `tokyo-night` gets Kiln Dark with the unknown-name warning. Everforest is the dark,
+  medium palette (sainnhe/everforest `autoload/everforest.vim`); every value matches upstream.
+  Its bright black is `bg5` (#56635f), where upstream repeats black (#475258), so bright black
+  stays visible. Kanagawa is the wave palette (rebelot/kanagawa.nvim `colors.lua`, `themes.lua`),
+  with two corrections to the values first proposed: faint text #625e5a is the Dragon
+  variant's `dragonBlack6`, so it is wave's `sumiInk6` #54546d (its non-text colour, the same
+  as the dividers); ANSI black #090618 is the old terminal extras, so it is #16161d
+  (`sumiInk0`, what wave's terminal palette uses now).

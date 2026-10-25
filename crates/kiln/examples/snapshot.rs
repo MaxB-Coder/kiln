@@ -830,18 +830,18 @@ fn settings(s: &mut Shots) {
         s.pump(Duration::from_millis(600));
         s.shot(&format!("t{i}-{name}"));
     }
-    // Custom from Tokyo Night: the file gets name, base and every colour.
-    s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("tokyo-night", cx)));
+    // Custom from Everforest: the file gets name, base and every colour.
+    s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("everforest", cx)));
     s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme(kiln::theme::CUSTOM, cx)));
     s.pump(Duration::from_millis(600));
-    s.shot("t6-custom");
+    s.shot("c1-custom");
     let written = std::fs::read_to_string(&path).unwrap();
-    assert!(written.contains("name = \"custom\"") && written.contains("base = \"tokyo-night\""));
+    assert!(written.contains("name = \"custom\"") && written.contains("base = \"everforest\""));
     assert!(
         written.contains("# My Kiln settings"),
         "the user's comment survives"
     );
-    std::fs::copy(&path, s.out.join("t6-kiln-custom.toml")).unwrap();
+    std::fs::copy(&path, s.out.join("c1-kiln-custom.toml")).unwrap();
     // The picker, on the accent.
     s.cx.update(|cx| {
         view.update(cx, |v, cx| {
@@ -851,7 +851,7 @@ fn settings(s: &mut Shots) {
     s.pump(Duration::from_millis(400));
     // Down to the picker and the terminal colours.
     s.scroll(590., 500., -420.);
-    s.shot("t7-custom-picker");
+    s.shot("c2-custom-picker");
     s.scroll(590., 500., 2000.);
     // A pink accent, then Nord: exactly Nord, nothing left over.
     s.cx.update(|cx| {
@@ -861,7 +861,7 @@ fn settings(s: &mut Shots) {
     });
     s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("nord", cx)));
     s.pump(Duration::from_millis(600));
-    s.shot("t8-preset-after-custom");
+    s.shot("c3-preset-after-custom");
     let nord = kiln::theme::preset_by_id("nord").unwrap().palette;
     let on_file = || kiln::config::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(
@@ -870,11 +870,11 @@ fn settings(s: &mut Shots) {
         "a preset is exactly itself"
     );
     assert_eq!(kiln::theme::palette(), nord, "and on screen");
-    std::fs::copy(&path, s.out.join("t8-kiln-nord.toml")).unwrap();
+    std::fs::copy(&path, s.out.join("c3-kiln-nord.toml")).unwrap();
     // Custom again: the pink accent comes back.
     s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme(kiln::theme::CUSTOM, cx)));
     s.pump(Duration::from_millis(600));
-    s.shot("t9-custom-again");
+    s.shot("c4-custom-again");
     assert_eq!(on_file().palette_for(true).accent, 0xff3d8b);
     assert_eq!(kiln::theme::palette().accent, 0xff3d8b);
     s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("kiln-dark", cx)));

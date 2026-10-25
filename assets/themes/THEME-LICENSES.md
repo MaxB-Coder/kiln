@@ -1,10 +1,11 @@
 # Theme palettes
 
-Three of Kiln's built-in themes use colours from these projects, under the MIT licence below.
+Four of Kiln's built-in themes use colours from these projects, under the MIT licence below.
 
 - **Catppuccin Mocha**: <https://github.com/catppuccin/catppuccin>, Copyright (c) 2021 Catppuccin
-- **Tokyo Night**: <https://github.com/folke/tokyonight.nvim>, Copyright (c) 2021 Folke Lemaitre
+- **Everforest** (dark, medium): <https://github.com/sainnhe/everforest>, Copyright (c) 2019 sainnhe
 - **Nord**: <https://github.com/nordtheme/nord>, Copyright (c) 2016-present Sven Greb
+- **Kanagawa** (wave): <https://github.com/rebelot/kanagawa.nvim>, Copyright (c) 2021 Tommaso Laurenzi
 
 ## MIT License
 

@@ -143,8 +143,8 @@ pub struct WindowConfig {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ThemeConfig {
-    /// "kiln-dark" (the default), "kiln-light", "system", "catppuccin-mocha", "tokyo-night",
-    /// "nord" or "custom".
+    /// "kiln-dark" (the default), "kiln-light", "system", "catppuccin-mocha", "everforest",
+    /// "nord", "kanagawa" or "custom".
     pub name: Option<String>,
     /// Where an older Custom theme started (now `[theme.custom] base`).
     pub base: Option<String>,
@@ -446,7 +446,7 @@ check = true
 
 [theme]
 # "kiln-dark", "kiln-light", "system" (dark or light with your OS), "catppuccin-mocha",
-# "tokyo-night", "nord", or "custom" (the colours in [theme.custom] below).
+# "everforest", "nord", "kanagawa", or "custom" (the colours in [theme.custom] below).
 name = "kiln-dark"
 # Any palette colour, as "#rrggbb", on top of the theme. For a theme of your own, put them in
 # [theme.custom] with the preset it starts from (`base = "kiln-dark"`) and set name = "custom":

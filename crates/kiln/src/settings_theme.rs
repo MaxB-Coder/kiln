@@ -24,13 +24,14 @@ pub const COLOURS: [(&str, &str); 13] = [
 ];
 
 /// The theme cards, in order: the name in kiln.toml and the card's title.
-pub const CARDS: [(&str, &str); 7] = [
+pub const CARDS: [(&str, &str); 8] = [
     (theme::SYSTEM, "Follow system"),
     ("kiln-dark", "Kiln Dark"),
     ("kiln-light", "Kiln Light"),
     ("catppuccin-mocha", "Catppuccin Mocha"),
-    ("tokyo-night", "Tokyo Night"),
+    ("everforest", "Everforest"),
     ("nord", "Nord"),
+    ("kanagawa", "Kanagawa"),
     (theme::CUSTOM, "Custom"),
 ];
 
