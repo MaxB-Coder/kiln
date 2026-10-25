@@ -60,7 +60,7 @@ folder of its own; it never touches yours). The mockup, rendered with WebKit, be
 | Item | Kiln | Verdict |
 | --- | --- | --- |
 | Panel: veil, #1d2021, radius 12, ring #3c3836, 470 wide, "Settings" and "esc" | [s01](screenshots/settings/s01-settings.png) | Matches |
-| App icon tiles, 60 px, 2 px #e07b39 ring 3 px out | [s01](screenshots/settings/s01-settings.png), [s03](screenshots/settings/s03-icon-black.png) (Black picked; the file gets `icon = "black"`) | Matches |
+| App icon tiles, 60 px, 2 px #e07b39 ring 3 px out | [s01](screenshots/settings/s01-settings.png), [s03](screenshots/settings/s03-icon-flame.png) (→ picks Flame; the file gets `icon = "flame"`) | Matches |
 | Rows, toggles, segmented prompt, steppers ("off" at 0) | [s01](screenshots/settings/s01-settings.png), [s04](screenshots/settings/s04-changed.png) | Matches |
 | Keyboard: Tab/↑↓ move (the row lights), ←→ change, Space/Enter, Esc closes | [s02](screenshots/settings/s02-keyboard.png), [s04](screenshots/settings/s04-changed.png); asserted | Matches |
 | Writes keep the file: only changed lines change, comments stay | [before](screenshots/settings/s00-kiln-before.toml) → [after](screenshots/settings/s04-kiln-after.toml); tests in `config_write.rs` | Matches |
@@ -86,6 +86,26 @@ those. Comparisons: [Custom](screenshots/settings/compare-themes.png),
 | Custom is one more card: a preset after custom colours is exactly the preset, and Custom again brings the colours back (replaces the "N colours overridden · clear" note) | [c3](screenshots/settings/c3-preset-after-custom.png) Nord with a pink custom accent kept in `[theme.custom]` ([toml](screenshots/settings/c3-kiln-nord.toml)); [c4](screenshots/settings/c4-custom-again.png) Custom again, pink accent back. Tests: `settings::tests::presets_are_exact_and_custom_comes_back`, `colours_from_before_the_custom_table_move_into_it` | Matches |
 | Palettes are the mockup's values | `theme::tests`, `config::tests::themes_resolve_by_name_with_overrides_on_top` | Matches |
 | Prompt: Kiln flame / Shell's own switches every session, open and new, at its next prompt | [ps1](screenshots/settings/ps1-kiln.png) flame; [ps2](screenshots/settings/ps2-open-session-shell.png) the open session after "Shell's own"; [ps3](screenshots/settings/ps3-new-session-shell.png) a new one; [ps4](screenshots/settings/ps4-new-session-kiln.png), [ps5](screenshots/settings/ps5-open-session-kiln.png) back to the flame in both. Test: `kiln_term/tests/prompt_switch.rs` (zsh, bash; PowerShell in CI) | Matches |
+
+
+## App icon row (notes/concept/kiln-icons.html)
+
+Same run (`snapshot settings`). The mockup's grid of every design in every colour, against the
+generated masters: the same shapes and colours (checked by eye, rendered side by side).
+
+| Item | Kiln | Verdict |
+| --- | --- | --- |
+| Five tiles in one row: Kiln, Flame, Beehive, Line, Custom ("+" dashed until there is an image); the chosen one ringed, with a colour-dot badge and "▾" | [i1](screenshots/settings/i1-icon-row.png) | Matches |
+| Clicking the chosen tile opens the colour pop-up under it: seven round swatches in equal 58 px columns, names below, the current one ringed; "Colour for Kiln. Each icon keeps its own colour." | [i2](screenshots/settings/i2-colour-popup.png); Esc closes the pop-up first (asserted); ←→ change the colour while it is open | Matches |
+| Each design keeps its own colour; the tiles show theirs | [i3 Kiln in sage](screenshots/settings/i3-kiln-sage.png), [i4 Beehive in slate](screenshots/settings/i4-beehive-slate.png) (pop-up kept inside the panel), [i5 Line in ember](screenshots/settings/i5-line-ember.png); the file then has `[icon_colours]` ([toml](screenshots/settings/i5-kiln.toml)); back to Kiln gives sage again (asserted). Tests: `settings::tests::each_design_keeps_its_own_colour`, `config::tests::the_icon_keys_read_each_design_and_colour` | Matches |
+| Old `icon = "black"` loads as Kiln in black and is rewritten on the first write | `config::tests::icons_from_before_the_designs_are_the_kiln_design`, `settings::tests::icons_from_before_the_designs_are_rewritten_on_the_first_write` | Matches |
+| Custom: a 900×600 picture, cropped square from the middle, rounded, copied into the config folder; "Using sunset.png · 512×512 · Choose another… · Remove" | [i6](screenshots/settings/i6-custom.png) ([toml](screenshots/settings/i6-kiln.toml)); Remove goes back to Kiln in sage and deletes the copy (asserted). Tests: `custom_icon::tests` (crop, scale, JPEG, too large, over 4096 px, not an image) | Matches |
+| A file that is not PNG or JPEG is refused inline, nothing changes | [i7](screenshots/settings/i7-custom-refused.png) (a shell script named `.png`) | Matches |
+| Masters from the generator; Kiln terracotta is still the bundle icon | `scripts/make-icon-masters.py --check` (CI lint), `app_icon::tests::the_bundle_icon_is_the_default_master`; the old Kiln terracotta, black and white masters reproduced byte for byte | Matches |
+| Runtime switching | macOS: every Dock PNG and a custom one decode as `NSImage` (`app_icon::tests::dock_icons_decode_as_appkit_images`); Windows and Linux X11: CI smoke with `icon = "beehive"` and `beehive = "slate"` reads the window's icon back | Matches |
+
+Deliberate difference: the custom note shows the copy's size (at most 512 px), not the
+original's, so it reads the same after a restart.
 
 Not shown in pictures: Follow system switching with the OS (unit-tested in
 `theme::tests::system_follows_the_appearance_and_custom_its_base`; the live switch uses GPUI's

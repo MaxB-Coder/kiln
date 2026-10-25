@@ -8,14 +8,15 @@ use std::sync::Arc;
 use gpui::AppContext as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, Bounds, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, Image, ImageFormat,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    Window, canvas, div, img, linear_color_stop, linear_gradient, px, relative,
+    AnyElement, App, Bounds, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, Image,
+    ImageFormat, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window, canvas, div, img, linear_color_stop, linear_gradient, px,
+    relative,
 };
 use toml_edit::Value;
 
-use crate::config::{self, AppIcon, Config, PromptStyle};
+use crate::config::{self, Config, IconColour, IconDesign, PromptStyle};
 use crate::config_write::{self, WriteError};
 use crate::grid_paint::FONT_FAMILY;
 use crate::settings_theme::{self as themes, CARDS, COLOURS};
@@ -31,14 +32,22 @@ pub enum SettingsEvent {
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
 
+const PANEL_W: f32 = 470.;
 const FONT_SIZES: (f32, f32) = (9., 24.);
 const NOTIFY_STEP: u64 = 5;
 const NOTIFY_MAX: u64 = 120;
 
 /// One change, and the key it writes.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Change {
-    Icon(AppIcon),
+    /// The icon's design.
+    Icon(IconDesign),
+    /// One design's colour (each keeps its own).
+    IconColour(IconDesign, IconColour),
+    /// A custom image, already copied into Kiln's folder (`custom_icon::import`).
+    CustomIcon(std::path::PathBuf),
+    /// Back to the Kiln design, forgetting the image.
+    RemoveCustomIcon,
     FontSize(f32),
     CursorBlink(bool),
     Sidebar(bool),
@@ -97,10 +106,44 @@ fn tidy_theme(config: &Config) -> Edits {
     edits
 }
 
+/// `icon = "black"` and the like (from before the designs) become the Kiln design with that
+/// colour the first time Settings writes the file.
+fn tidy_icon(config: &Config) -> Edits {
+    let Some(colour) = config.icon.old_colour else {
+        return Vec::new();
+    };
+    let mut edits: Edits = vec![(vec!["icon"], Some(IconDesign::Kiln.key().into()))];
+    if config.icon_colours.kiln.is_none() {
+        edits.push((vec!["icon_colours", "kiln"], Some(colour.key().into())));
+    }
+    edits
+}
+
 impl Change {
     /// What the change writes, given the config it changes.
     pub fn edits(self, config: &Config) -> Edits {
+        let mut edits = tidy_icon(config);
+        edits.extend(self.own_edits(config));
+        edits
+    }
+
+    fn own_edits(self, config: &Config) -> Edits {
         match self {
+            Change::IconColour(design, colour) => vec![(
+                vec!["icon_colours", design.key()],
+                Some(colour.key().into()),
+            )],
+            Change::CustomIcon(path) => vec![
+                (vec!["icon"], Some(IconDesign::Custom.key().into())),
+                (
+                    vec!["icon_path"],
+                    Some(path.to_string_lossy().into_owned().into()),
+                ),
+            ],
+            Change::RemoveCustomIcon => vec![
+                (vec!["icon"], Some(IconDesign::Kiln.key().into())),
+                (vec!["icon_path"], None),
+            ],
             Change::Theme(name) => {
                 let mut edits = tidy_theme(config);
                 edits.push((vec!["theme", "name"], Some(name.into())));
@@ -150,7 +193,7 @@ impl Change {
     /// The key in kiln.toml and its new value, for the one-key settings.
     pub fn entry(self) -> (&'static [&'static str], Value) {
         match self {
-            Change::Icon(icon) => (&["icon"], icon.key().into()),
+            Change::Icon(design) => (&["icon"], design.key().into()),
             Change::FontSize(size) if size.fract() == 0. => (&["font_size"], (size as i64).into()),
             Change::FontSize(size) => (&["font_size"], f64::from(size).into()),
             Change::CursorBlink(on) => (&["cursor_blink"], on.into()),
@@ -233,7 +276,14 @@ pub struct SettingsView {
     /// Option as Alt is a macOS setting.
     mac: bool,
     shortcut: String,
-    tiles: Vec<(AppIcon, Arc<Image>)>,
+    /// Every drawn design in every colour (rows by design, columns by colour).
+    tiles: Vec<Vec<Arc<Image>>>,
+    /// The custom image's tile: its copy's path, the picture and its size in px.
+    custom_tile: Option<(std::path::PathBuf, Arc<Image>, u32)>,
+    /// The colour pop-up under the selected design is open.
+    icon_menu: bool,
+    /// Why the chosen image cannot be used.
+    icon_error: Option<String>,
     /// The custom theme's hex fields, one per interface colour.
     hex: Vec<Entity<TextInput>>,
     _hex_events: Vec<Subscription>,
@@ -268,11 +318,16 @@ impl SettingsView {
     pub fn new(mac: bool, shortcut: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        let tiles = AppIcon::ALL
+        let tiles = IconDesign::DRAWN
             .into_iter()
-            .map(|icon| {
-                let png = crate::app_icon::thumbnail(icon).to_vec();
-                (icon, Arc::new(Image::from_bytes(ImageFormat::Png, png)))
+            .map(|design| {
+                IconColour::ALL
+                    .into_iter()
+                    .map(|colour| {
+                        let png = crate::app_icon::thumbnail(design, colour).to_vec();
+                        Arc::new(Image::from_bytes(ImageFormat::Png, png))
+                    })
+                    .collect()
             })
             .collect();
         let mut hex = Vec::new();
@@ -309,6 +364,9 @@ impl SettingsView {
             mac,
             shortcut,
             tiles,
+            custom_tile: None,
+            icon_menu: false,
+            icon_error: None,
             hex,
             _hex_events: hex_events,
             base_menu: false,
@@ -518,10 +576,28 @@ impl SettingsView {
         let c = &self.config;
         let flip = step == 0;
         Some(match control {
-            Control::Icon => {
-                let at = AppIcon::ALL.iter().position(|i| *i == c.icon).unwrap_or(0) as i32;
-                let next = (at + if flip { 1 } else { step }).rem_euclid(3) as usize;
-                Change::Icon(AppIcon::ALL[next])
+            // With the colour pop-up open, the arrows change the colour.
+            Control::Icon if self.icon_menu && !flip => {
+                let design = c.icon.design;
+                let colour = c.icon_colour(design);
+                let at = IconColour::ALL
+                    .iter()
+                    .position(|x| *x == colour)
+                    .unwrap_or(0) as i32;
+                let next = (at + step).rem_euclid(IconColour::ALL.len() as i32) as usize;
+                Change::IconColour(design, IconColour::ALL[next])
+            }
+            // The arrows move between the designs (Custom once it has an image).
+            Control::Icon if !flip => {
+                let designs: Vec<IconDesign> = IconDesign::ALL
+                    .into_iter()
+                    .filter(|d| *d != IconDesign::Custom || c.icon_path.is_some())
+                    .collect();
+                let at = designs
+                    .iter()
+                    .position(|d| *d == c.icon.design)
+                    .unwrap_or(0) as i32;
+                Change::Icon(designs[(at + step).rem_euclid(designs.len() as i32) as usize])
             }
             Control::Theme => {
                 let name = c.theme.effective_name();
@@ -559,8 +635,13 @@ impl SettingsView {
         let current = controls[self.focused.min(count - 1)];
         let shift = event.keystroke.modifiers.shift;
         match event.keystroke.key.as_str() {
+            "escape" if self.icon_menu => {
+                self.icon_menu = false;
+                cx.notify();
+            }
             "escape" => cx.emit(SettingsEvent::Dismiss),
             "tab" | "down" | "up" => {
+                self.icon_menu = false;
                 let back = shift || event.keystroke.key == "up";
                 let at = self.focused.min(count - 1);
                 self.focused = if !self.keyboard {
@@ -585,6 +666,13 @@ impl SettingsView {
                 self.keyboard = true;
                 if current == Control::OpenFile {
                     cx.emit(SettingsEvent::OpenFile);
+                } else if current == Control::Icon {
+                    // The selected design's colours, or a new image for Custom.
+                    if self.config.icon.design == IconDesign::Custom {
+                        self.choose_image(cx);
+                    } else {
+                        self.icon_menu = !self.icon_menu;
+                    }
                 } else if let Some(change) = self.change_for(current, 0) {
                     self.set(change, cx);
                 }
@@ -687,7 +775,7 @@ impl SettingsView {
         div()
             .id(id)
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| this.set(change, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| this.set(change.clone(), cx)))
             .child(toggle(on))
     }
 
@@ -712,7 +800,7 @@ impl SettingsView {
                 .text_color(theme::hsla(p.ansi[7]))
                 .cursor_pointer()
                 .hover(|s| s.text_color(theme::hsla(p.fg)))
-                .on_click(cx.listener(move |this, _, _, cx| this.set(change, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| this.set(change.clone(), cx)))
                 .child(glyph)
         };
         div()
@@ -764,48 +852,367 @@ impl SettingsView {
             .child(option(1, "Shell's own", PromptStyle::Shell))
     }
 
-    fn icon_tiles(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// Opens the system's file picker for a custom icon.
+    fn choose_image(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Use as icon".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| this.use_image(path, cx));
+        })
+        .detach();
+    }
+
+    /// Checks `source` and, if it can be an icon, saves Kiln's copy and uses it.
+    pub fn use_image(&mut self, source: std::path::PathBuf, cx: &mut Context<Self>) {
+        let Some(folder) = crate::custom_icon::folder() else {
+            self.icon_error = Some("No folder for kiln.toml (HOME is not set)".into());
+            cx.notify();
+            return;
+        };
+        let task = cx.background_spawn({
+            let folder = folder.clone();
+            async move { crate::custom_icon::import(&source, &folder) }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(copy) => {
+                    this.icon_error = None;
+                    this.icon_menu = false;
+                    let old = this.config.icon_path.clone();
+                    this.set(Change::CustomIcon(copy.clone()), cx);
+                    if let Some(old) = old.filter(|old| *old != copy) {
+                        crate::custom_icon::remove_copy(&old, &folder);
+                    }
+                }
+                Err(rejected) => {
+                    this.icon_error = Some(rejected.to_string());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Back to the Kiln design; Kiln's copy of the image goes.
+    pub fn remove_image(&mut self, cx: &mut Context<Self>) {
+        let old = self.config.icon_path.clone();
+        self.icon_error = None;
+        self.set(Change::RemoveCustomIcon, cx);
+        if let (Some(old), Some(folder)) = (old, crate::custom_icon::folder()) {
+            crate::custom_icon::remove_copy(&old, &folder);
+        }
+    }
+
+    /// The custom image's tile, made again when the image changes.
+    fn custom_tile(&mut self) -> Option<(Arc<Image>, u32)> {
+        let path = self.config.icon_path.clone()?;
+        if self.custom_tile.as_ref().map(|(p, _, _)| p) != Some(&path) {
+            self.custom_tile = match crate::app_icon::custom_thumbnail(&path) {
+                Ok((png, side)) => Some((
+                    path,
+                    Arc::new(Image::from_bytes(ImageFormat::Png, png)),
+                    side,
+                )),
+                Err(err) => {
+                    log::warn!("the custom icon: {err}");
+                    None
+                }
+            };
+        }
+        self.custom_tile
+            .as_ref()
+            .map(|(_, image, side)| (image.clone(), *side))
+    }
+
+    /// Clicking a tile: another design is chosen and its colours shown; the chosen one shows
+    /// or hides them. Custom asks for an image when it has none or is already chosen.
+    pub fn click_icon(&mut self, design: IconDesign, cx: &mut Context<Self>) {
+        let current = self.config.icon.design;
+        if design == IconDesign::Custom {
+            self.icon_menu = false;
+            if current == IconDesign::Custom || self.config.icon_path.is_none() {
+                self.choose_image(cx);
+            } else {
+                self.set(Change::Icon(IconDesign::Custom), cx);
+            }
+            return;
+        }
+        if design == current {
+            self.icon_menu = !self.icon_menu;
+            cx.notify();
+        } else {
+            self.icon_menu = true;
+            self.set(Change::Icon(design), cx);
+        }
+    }
+
+    fn icon_tiles(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette();
         let lit = self.lit(Control::Icon);
-        div()
+        let selected = match self.config.app_icon() {
+            config::AppIcon::Custom(_) => IconDesign::Custom,
+            config::AppIcon::Drawn(design, _) => design,
+        };
+        let custom = self.custom_tile();
+        const TILE: f32 = 60.;
+        let label = |on: bool| {
+            if on {
+                p.fg
+            } else {
+                theme::blend(p.bg3, p.muted, 0.5)
+            }
+        };
+        // The ring sits 3 px outside the tile, as an outline would.
+        let ring = |on: bool, tile: AnyElement| {
+            div()
+                .relative()
+                .p(px(3.))
+                .rounded(px(17.))
+                .border_2()
+                .border_color(if on {
+                    theme::hsla(p.accent)
+                } else {
+                    gpui::transparent_black()
+                })
+                .child(tile)
+        };
+        let mut row = div()
             .flex()
             .flex_row()
-            .gap(px(14.))
+            .justify_between()
             .px(px(18.))
-            .py(px(4.))
-            .when(lit, |d| d.bg(theme::hsla(p.bg)))
-            .children(self.tiles.iter().enumerate().map(|(i, (icon, image))| {
-                let icon = *icon;
-                let on = self.config.icon == icon;
+            .py(px(4.));
+        for (i, design) in IconDesign::DRAWN.into_iter().enumerate() {
+            let on = selected == design;
+            let colour = self.config.icon_colour(design);
+            let column = IconColour::ALL
+                .iter()
+                .position(|c| *c == colour)
+                .unwrap_or(0);
+            let image = self.tiles[i][column].clone();
+            let (top, bottom) = colour.swatch();
+            let badge = div()
+                .absolute()
+                .right(px(-5.))
+                .bottom(px(-5.))
+                .size(px(18.))
+                .rounded_full()
+                .bg(theme::hsla(p.raised))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .size(px(12.))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(gpui::white().opacity(0.25))
+                        .bg(linear_gradient(
+                            180.,
+                            linear_color_stop(theme::hsla(top), 0.),
+                            linear_color_stop(theme::hsla(bottom), 1.),
+                        )),
+                );
+            let tile = div()
+                .relative()
+                .child(img(image).size(px(TILE)).rounded(px(14.)))
+                .when(on, |d| d.child(badge))
+                .into_any_element();
+            row = row.child(
                 div()
                     .id(("icon", i))
+                    .w(px(76.))
                     .flex()
                     .flex_col()
                     .items_center()
                     .gap(px(6.))
                     .cursor_pointer()
                     .text_size(px(10.5))
-                    .text_color(theme::hsla(if on {
-                        p.fg
+                    .text_color(theme::hsla(label(on)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.click_icon(design, cx)))
+                    .child(ring(on, tile))
+                    .child(if on {
+                        format!("{} ▾", design.title())
                     } else {
-                        theme::blend(p.bg3, p.muted, 0.5)
-                    }))
-                    .on_click(cx.listener(move |this, _, _, cx| this.set(Change::Icon(icon), cx)))
-                    // The ring sits 3 px outside the tile, as an outline would.
-                    .child(
+                        design.title().to_string()
+                    }),
+            );
+        }
+        // Custom: the image, or a dashed "+" until there is one.
+        let on = selected == IconDesign::Custom;
+        let tile = match &custom {
+            Some((image, _)) => img(image.clone())
+                .size(px(TILE))
+                .rounded(px(14.))
+                .into_any_element(),
+            None => div()
+                .size(px(TILE))
+                .rounded(px(14.))
+                .border_2()
+                .border_dashed()
+                .border_color(theme::hsla(p.bg2))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(22.))
+                .text_color(theme::hsla(label(false)))
+                .child("+")
+                .into_any_element(),
+        };
+        row = row.child(
+            div()
+                .id(("icon", IconDesign::DRAWN.len()))
+                .w(px(76.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.))
+                .cursor_pointer()
+                .text_size(px(10.5))
+                .text_color(theme::hsla(label(on)))
+                .on_click(cx.listener(|this, _, _, cx| this.click_icon(IconDesign::Custom, cx)))
+                .child(ring(on, tile))
+                .child(IconDesign::Custom.title()),
+        );
+
+        let menu = (self.icon_menu && selected != IconDesign::Custom).then(|| {
+            let at = IconDesign::DRAWN
+                .iter()
+                .position(|d| *d == selected)
+                .unwrap_or(0);
+            let current = self.config.icon_colour(selected);
+            // Under its tile, kept inside the panel.
+            let width = 7. * 58. + 24.;
+            let left = (at as f32 * 95. - 2.).clamp(4., PANEL_W - width - 4.);
+            div()
+                .id("icon-colours")
+                .ml(px(left))
+                .mt(px(8.))
+                .w(px(width))
+                .px(px(12.))
+                .py(px(10.))
+                .rounded(px(10.))
+                .bg(theme::hsla(p.raised))
+                .border_1()
+                .border_color(theme::hsla(p.bg1))
+                .shadow(vec![gpui::BoxShadow {
+                    color: p.shadow(),
+                    offset: gpui::point(px(0.), px(10.)),
+                    blur_radius: px(30.),
+                    spread_radius: px(0.),
+                    inset: false,
+                }])
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.icon_menu = false;
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .mb(px(8.))
+                        .text_size(px(10.))
+                        .text_color(theme::hsla(p.muted))
+                        .child("Colour"),
+                )
+                .child(div().flex().flex_row().children(
+                    IconColour::ALL.into_iter().enumerate().map(|(i, colour)| {
+                        let on = colour == current;
+                        let (top, bottom) = colour.swatch();
+                        // Equal columns, the swatch centred and its name below.
                         div()
-                            .p(px(3.))
-                            .rounded(px(17.))
-                            .border_2()
-                            .border_color(if on {
-                                theme::hsla(p.accent)
-                            } else {
-                                gpui::transparent_black()
-                            })
-                            .child(img(image.clone()).size(px(60.)).rounded(px(14.))),
-                    )
-                    .child(icon.title())
-            }))
+                            .id(("icon-colour", i))
+                            .w(px(58.))
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap(px(5.))
+                            .cursor_pointer()
+                            .text_size(px(9.5))
+                            .text_color(theme::hsla(if on { p.fg } else { p.fg_dim }))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set(Change::IconColour(selected, colour), cx)
+                            }))
+                            .child(
+                                div()
+                                    .p(px(2.))
+                                    .rounded_full()
+                                    .border_2()
+                                    .border_color(if on {
+                                        theme::hsla(p.accent)
+                                    } else {
+                                        gpui::transparent_black()
+                                    })
+                                    .child(div().size(px(24.)).rounded_full().bg(linear_gradient(
+                                        180.,
+                                        linear_color_stop(theme::hsla(top), 0.),
+                                        linear_color_stop(theme::hsla(bottom), 1.),
+                                    ))),
+                            )
+                            .child(colour.title())
+                    }),
+                ))
+        });
+
+        // The line under the row.
+        let link = |id: &'static str, text: &'static str| {
+            div()
+                .id(id)
+                .cursor_pointer()
+                .text_color(theme::hsla(p.accent))
+                .child(text)
+        };
+        let note = div()
+            .px(px(18.))
+            .pt(px(8.))
+            .flex()
+            .flex_row()
+            .gap(px(10.))
+            .text_size(px(10.5))
+            .text_color(theme::hsla(p.bg3));
+        let note = if let Some(error) = &self.icon_error {
+            note.child(div().text_color(theme::hsla(p.failed)).child(error.clone()))
+        } else if selected == IconDesign::Custom
+            && let (Some((_, side)), Some(path)) = (&custom, &self.config.icon_path)
+        {
+            note.child(format!(
+                "Using {} · {side}×{side}",
+                crate::custom_icon::display_name(path)
+            ))
+            .child(
+                link("icon-another", "Choose another…")
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_image(cx))),
+            )
+            .child(
+                link("icon-remove", "Remove")
+                    .on_click(cx.listener(|this, _, _, cx| this.remove_image(cx))),
+            )
+        } else if self.icon_menu {
+            note.child(format!(
+                "Colour for {}. Each icon keeps its own colour.",
+                selected.title()
+            ))
+        } else {
+            note.child("Click the selected icon for its colours.")
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .pb(px(4.))
+            .when(lit, |d| d.bg(theme::hsla(p.bg)))
+            .child(row)
+            .children(menu)
+            .child(note)
     }
 }
 
@@ -1363,7 +1770,7 @@ impl Render for SettingsView {
             .id("settings")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
-            .w(px(470.))
+            .w(px(PANEL_W))
             .max_w_full()
             .max_h(px(max_h))
             .flex()
@@ -1515,8 +1922,9 @@ mod tests {
         let text = config::TEMPLATE;
         for (change, check) in [
             (
-                Change::Icon(AppIcon::White),
-                Box::new(|c: &Config| c.icon == AppIcon::White) as Box<dyn Fn(&Config) -> bool>,
+                Change::Icon(IconDesign::Flame),
+                Box::new(|c: &Config| c.icon.design == IconDesign::Flame)
+                    as Box<dyn Fn(&Config) -> bool>,
             ),
             (
                 Change::FontSize(15.),
@@ -1555,7 +1963,7 @@ mod tests {
                 Box::new(|c: &Config| !c.updates.check),
             ),
         ] {
-            let (key, value) = change.entry();
+            let (key, value) = change.clone().entry();
             let new = config_write::with_setting(text, key, value).unwrap();
             let config = config::parse(&new).unwrap();
             assert!(check(&config), "{change:?}");
@@ -1568,6 +1976,68 @@ mod tests {
                 .count();
             assert_eq!(changed, 1, "{change:?}");
         }
+    }
+
+    #[test]
+    fn icons_from_before_the_designs_are_rewritten_on_the_first_write() {
+        let old = "icon = \"black\"\nfont_size = 14\n";
+        let text = apply(old, Change::FontSize(15.));
+        let config = config::parse(&text).unwrap();
+        assert_eq!(config.icon.old_colour, None, "{text}");
+        assert_eq!(
+            config.app_icon(),
+            config::AppIcon::Drawn(IconDesign::Kiln, IconColour::Black)
+        );
+        assert!(
+            text.contains("icon = \"kiln\"") && text.contains("[icon_colours]\nkiln = \"black\"")
+        );
+        // Choosing another design keeps Kiln's colour for later.
+        let text = apply(old, Change::Icon(IconDesign::Line));
+        let config = config::parse(&text).unwrap();
+        assert_eq!(
+            config.app_icon(),
+            config::AppIcon::Drawn(IconDesign::Line, IconColour::Terracotta)
+        );
+        assert_eq!(config.icon_colour(IconDesign::Kiln), IconColour::Black);
+    }
+
+    #[test]
+    fn each_design_keeps_its_own_colour() {
+        let text = apply(
+            config::TEMPLATE,
+            Change::IconColour(IconDesign::Kiln, IconColour::Sage),
+        );
+        let text = apply(&text, Change::Icon(IconDesign::Beehive));
+        let text = apply(
+            &text,
+            Change::IconColour(IconDesign::Beehive, IconColour::Slate),
+        );
+        let config = config::parse(&text).unwrap();
+        assert_eq!(
+            config.app_icon(),
+            config::AppIcon::Drawn(IconDesign::Beehive, IconColour::Slate)
+        );
+        let text = apply(&text, Change::Icon(IconDesign::Kiln));
+        assert_eq!(
+            config::parse(&text).unwrap().app_icon(),
+            config::AppIcon::Drawn(IconDesign::Kiln, IconColour::Sage)
+        );
+        // A custom image, then Remove: Kiln again, with its colour.
+        let text = apply(
+            &text,
+            Change::CustomIcon("/c/icons/1234abcd-a.png.png".into()),
+        );
+        assert_eq!(
+            config::parse(&text).unwrap().app_icon(),
+            config::AppIcon::Custom("/c/icons/1234abcd-a.png.png".into())
+        );
+        let text = apply(&text, Change::RemoveCustomIcon);
+        let config = config::parse(&text).unwrap();
+        assert_eq!(config.icon_path, None);
+        assert_eq!(
+            config.app_icon(),
+            config::AppIcon::Drawn(IconDesign::Kiln, IconColour::Sage)
+        );
     }
 
     /// Applies `change` to `text` as Settings would.

@@ -8,6 +8,7 @@ pub mod config;
 pub mod config_write;
 pub mod context;
 pub mod copy;
+pub mod custom_icon;
 pub mod flame;
 pub mod git;
 pub mod grid_paint;

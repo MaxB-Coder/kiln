@@ -6,10 +6,12 @@
 #   assets/icon/kiln.ico       Windows exe and installer (16, 24, 32, 48, 64, 128, 256)
 #   assets/icon/kiln-*.png     Linux .deb, AppImage and tarball (16, 32, 128, 256, 512)
 #
-# and, for each variant in assets/icon/variants/kiln-<name>.svg (the app-icon setting), the
-# PNGs Kiln embeds to switch icons while it runs, in assets/icon/variants/<name>/:
-#   mac-128.png, mac-512.png         the Settings tiles and the macOS Dock (with the margin)
-#   tile-{16,24,32,48,64,128,256}.png  the window icon on Windows and Linux (filling the tile)
+# and, for each variant in assets/icon/variants/<design>-<colour>.svg (the app-icon setting;
+# written by scripts/make-icon-masters.py), the PNGs Kiln embeds to switch icons while it runs,
+# in assets/icon/variants/<design>-<colour>/:
+#   mac-128.png                     the Settings tile, on every platform (with the margin)
+#   mac-256.png                     the macOS Dock (with the margin; 128 pt at 2x is its largest)
+#   tile-{16,24,32,48,64,128}.png   the window icon on Windows and Linux (filling the tile)
 #
 # kiln.svg is the default variant and must be the same file as variants/kiln-terracotta.svg.
 #
@@ -75,18 +77,19 @@ else
 fi
 
 # The variants, for switching while Kiln runs.
-for variant_svg in "$icon"/variants/kiln-*.svg; do
+count=0
+for variant_svg in "$icon"/variants/*-*.svg; do
   name="$(basename "$variant_svg" .svg)"
-  name="${name#kiln-}"
   out="$icon/variants/$name"
   mkdir -p "$out"
   render "$variant_svg" 128 "$out/mac-128.png"
-  render "$variant_svg" 512 "$out/mac-512.png"
+  render "$variant_svg" 256 "$out/mac-256.png"
   tile_svg "$variant_svg" "$work/tile-$name.svg"
-  for size in 16 24 32 48 64 128 256; do
+  for size in 16 24 32 48 64 128; do
     render "$work/tile-$name.svg" "$size" "$out/tile-$size.png"
   done
-  echo "made variants/$name/"
+  count=$((count + 1))
 done
+echo "made $count variants in variants/<design>-<colour>/"
 
 echo "made kiln.icns, kiln.ico and kiln-{16,32,128,256,512}.png from kiln.svg"

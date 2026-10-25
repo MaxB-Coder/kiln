@@ -148,11 +148,16 @@ mod tests {
     #[test]
     fn missing_keys_and_tables_are_added() {
         // A top-level key goes before the first table.
-        let new = with_setting(USER, &["icon"], "black".into()).unwrap();
+        let new = with_setting(USER, &["icon"], "beehive".into()).unwrap();
         assert!(
-            new.starts_with("# my settings\nfont_size   = 13    # big enough\nicon = \"black\"\n")
+            new.starts_with(
+                "# my settings\nfont_size   = 13    # big enough\nicon = \"beehive\"\n"
+            )
         );
-        assert_eq!(config::parse(&new).unwrap().icon, config::AppIcon::Black);
+        assert_eq!(
+            config::parse(&new).unwrap().icon.design,
+            config::IconDesign::Beehive
+        );
         // A missing table goes at the end; nothing before it moves.
         let new = with_setting(USER, &["updates", "check"], false.into()).unwrap();
         assert!(new.starts_with(USER));
@@ -203,12 +208,12 @@ mod tests {
         }
         // A missing file starts from the template.
         std::fs::remove_file(&path).unwrap();
-        let config = write_setting(&path, &["icon"], "white".into()).unwrap();
-        assert_eq!(config.icon, config::AppIcon::White);
+        let config = write_setting(&path, &["icon"], "line".into()).unwrap();
+        assert_eq!(config.icon.design, config::IconDesign::Line);
         let written = std::fs::read_to_string(&path).unwrap();
         assert_eq!(
             written,
-            config::TEMPLATE.replace("icon = \"terracotta\"", "icon = \"white\"")
+            config::TEMPLATE.replace("icon = \"kiln\"", "icon = \"line\"")
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

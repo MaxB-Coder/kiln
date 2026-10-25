@@ -48,12 +48,13 @@ $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bound
 $bitmap.Save("smoke/windows-$name.png")
 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
-# 3. The icon setting: with icon = "black" (in a config of its own), the window's big icon is
-#    the black variant (its top edge is dark, where terracotta's is orange).
+# 3. The icon setting: with the Beehive design in slate (in a config of its own; not the default
+#    design or colour), the window's big icon is that icon: its top edge is blue-grey (more
+#    blue than red), where the default's is orange and black's is warm grey.
 if (-not $Wsl) {
     $config = Join-Path ([System.IO.Path]::GetTempPath()) "kiln-smoke-config"
     New-Item -ItemType Directory -Force (Join-Path $config "Kiln") | Out-Null
-    Set-Content -Path (Join-Path $config "Kiln\kiln.toml") -Value 'icon = "black"'
+    Set-Content -Path (Join-Path $config "Kiln\kiln.toml") -Value @('icon = "beehive"', '[icon_colours]', 'beehive = "slate"')
     $appdata = $env:APPDATA
     $env:APPDATA = $config
     $proc = Start-Process -FilePath $Kiln -ArgumentList @("--fresh", "--cols", "80", "--rows", "20", "--", "powershell.exe", "-NoLogo", "-Command", "Start-Sleep 30") -PassThru
@@ -76,6 +77,6 @@ if (-not $Wsl) {
     $pixel = $icon.GetPixel([int]($icon.Width / 2), 1)
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     "window icon $($icon.Width) px, top edge pixel R=$($pixel.R) G=$($pixel.G) B=$($pixel.B)"
-    if ($pixel.R -ge 128) { throw "the window icon is not the black variant" }
-    "ok: the window icon follows icon = `"black`""
+    if ($pixel.B -le $pixel.R) { throw "the window icon is not Beehive in slate" }
+    "ok: the window icon follows icon = `"beehive`" in slate"
 }

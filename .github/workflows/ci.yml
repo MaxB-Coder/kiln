@@ -147,6 +147,8 @@ jobs:
         with:
           shared-key: linux-x64
       - run: cargo fmt --all --check
+      # The icon masters are what the generator writes (the Kiln terracotta one is the bundle's).
+      - run: python3 scripts/make-icon-masters.py --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
   deny:

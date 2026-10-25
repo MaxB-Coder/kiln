@@ -1,0 +1,15 @@
+# My Kiln settings
+font_size = 13    # comfortable on this screen
+icon = "custom"
+icon_path = "/var/folders/zk/_pbt5krn5lvcrh8q2q948dp40000gn/T/kiln-snapshot-config-61674/kiln/icons/e954a64e-sunset.png.png"
+
+[shell]
+program = "/bin/zsh" # not in Settings: stays as it is
+
+[window]
+sidebar = true
+
+[icon_colours]
+kiln = "sage"
+beehive = "slate"
+line = "ember"

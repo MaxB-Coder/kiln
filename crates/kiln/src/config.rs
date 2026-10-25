@@ -13,8 +13,12 @@ use crate::theme::{DEFAULT_PALETTE, Palette};
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
-    /// The app icon (the Dock on macOS, the window icon on Windows and Linux).
-    pub icon: AppIcon,
+    /// The app icon's design (the Dock on macOS, the window icon on Windows and Linux).
+    pub icon: IconKey,
+    /// Each design's colour; a design not listed is terracotta.
+    pub icon_colours: IconColours,
+    /// The custom icon: Kiln's own PNG copy of the chosen image (see `custom_icon`).
+    pub icon_path: Option<PathBuf>,
     /// Font size in points.
     pub font_size: f32,
     /// Lines of scrollback per running command.
@@ -33,35 +37,201 @@ pub struct Config {
     pub projects: std::collections::BTreeMap<String, ProjectConfig>,
 }
 
-/// The app icon's variants (assets/icon/variants).
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum AppIcon {
-    /// Fired clay; the icon the app ships with.
+/// The app icon's designs (assets/icon/variants, from scripts/make-icon-masters.py), and
+/// Custom, an image of the user's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum IconDesign {
+    /// The kiln's door with the prompt's flame; the icon the app ships with.
     #[default]
-    Terracotta,
-    Black,
-    White,
+    Kiln,
+    Flame,
+    Beehive,
+    Line,
+    Custom,
 }
 
-impl AppIcon {
-    pub const ALL: [AppIcon; 3] = [AppIcon::Terracotta, AppIcon::Black, AppIcon::White];
+impl IconDesign {
+    /// The drawn designs, in the Settings row's order (Custom comes last).
+    pub const DRAWN: [IconDesign; 4] = [
+        IconDesign::Kiln,
+        IconDesign::Flame,
+        IconDesign::Beehive,
+        IconDesign::Line,
+    ];
+    pub const ALL: [IconDesign; 5] = [
+        IconDesign::Kiln,
+        IconDesign::Flame,
+        IconDesign::Beehive,
+        IconDesign::Line,
+        IconDesign::Custom,
+    ];
 
     /// The value in kiln.toml.
     pub fn key(self) -> &'static str {
         match self {
-            AppIcon::Terracotta => "terracotta",
-            AppIcon::Black => "black",
-            AppIcon::White => "white",
+            IconDesign::Kiln => "kiln",
+            IconDesign::Flame => "flame",
+            IconDesign::Beehive => "beehive",
+            IconDesign::Line => "line",
+            IconDesign::Custom => "custom",
         }
     }
 
     pub fn title(self) -> &'static str {
         match self {
-            AppIcon::Terracotta => "Terracotta",
-            AppIcon::Black => "Black",
-            AppIcon::White => "White",
+            IconDesign::Kiln => "Kiln",
+            IconDesign::Flame => "Flame",
+            IconDesign::Beehive => "Beehive",
+            IconDesign::Line => "Line",
+            IconDesign::Custom => "Custom",
         }
+    }
+
+    pub fn from_key(key: &str) -> Option<IconDesign> {
+        Self::ALL.into_iter().find(|d| d.key() == key)
+    }
+}
+
+/// The colours every drawn design comes in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum IconColour {
+    #[default]
+    Terracotta,
+    Black,
+    White,
+    Ember,
+    Slate,
+    Sage,
+    Sand,
+}
+
+impl IconColour {
+    pub const ALL: [IconColour; 7] = [
+        IconColour::Terracotta,
+        IconColour::Black,
+        IconColour::White,
+        IconColour::Ember,
+        IconColour::Slate,
+        IconColour::Sage,
+        IconColour::Sand,
+    ];
+
+    /// The value in kiln.toml.
+    pub fn key(self) -> &'static str {
+        match self {
+            IconColour::Terracotta => "terracotta",
+            IconColour::Black => "black",
+            IconColour::White => "white",
+            IconColour::Ember => "ember",
+            IconColour::Slate => "slate",
+            IconColour::Sage => "sage",
+            IconColour::Sand => "sand",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            IconColour::Terracotta => "Terracotta",
+            IconColour::Black => "Black",
+            IconColour::White => "White",
+            IconColour::Ember => "Ember",
+            IconColour::Slate => "Slate",
+            IconColour::Sage => "Sage",
+            IconColour::Sand => "Sand",
+        }
+    }
+
+    /// The tile's gradient, top and bottom (the swatches in Settings).
+    pub fn swatch(self) -> (u32, u32) {
+        match self {
+            IconColour::Terracotta => (0xee8a48, 0xc25b22),
+            IconColour::Black => (0x3d3834, 0x161413),
+            IconColour::White => (0xf8f3ec, 0xe1d5c4),
+            IconColour::Ember => (0xb0473a, 0x6e2219),
+            IconColour::Slate => (0x5d6b78, 0x323b45),
+            IconColour::Sage => (0x8a9a78, 0x55654a),
+            IconColour::Sand => (0xe3c89a, 0xbf9a62),
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<IconColour> {
+        Self::ALL.into_iter().find(|c| c.key() == key)
+    }
+}
+
+impl<'de> Deserialize<'de> for IconColour {
+    /// An unknown colour warns and is terracotta.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let key = String::deserialize(d)?;
+        Ok(IconColour::from_key(&key).unwrap_or_else(|| {
+            log::warn!("unknown icon colour {key:?}; using terracotta");
+            IconColour::default()
+        }))
+    }
+}
+
+/// `icon` in kiln.toml: a design, or (from before the designs) a colour, which means the Kiln
+/// design in that colour. Settings rewrites the old form the first time it writes the file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IconKey {
+    pub design: IconDesign,
+    /// `icon = "black"` and the like.
+    pub old_colour: Option<IconColour>,
+}
+
+impl<'de> Deserialize<'de> for IconKey {
+    /// An unknown value warns and is the Kiln design.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let key = String::deserialize(d)?;
+        if let Some(design) = IconDesign::from_key(&key) {
+            return Ok(IconKey {
+                design,
+                old_colour: None,
+            });
+        }
+        if let Some(colour) = IconColour::from_key(&key) {
+            return Ok(IconKey {
+                design: IconDesign::Kiln,
+                old_colour: Some(colour),
+            });
+        }
+        log::warn!("unknown icon {key:?}; using kiln");
+        Ok(IconKey::default())
+    }
+}
+
+/// `[icon_colours]`: each drawn design's colour.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct IconColours {
+    pub kiln: Option<IconColour>,
+    pub flame: Option<IconColour>,
+    pub beehive: Option<IconColour>,
+    pub line: Option<IconColour>,
+}
+
+impl IconColours {
+    pub fn get(&self, design: IconDesign) -> Option<IconColour> {
+        match design {
+            IconDesign::Kiln => self.kiln,
+            IconDesign::Flame => self.flame,
+            IconDesign::Beehive => self.beehive,
+            IconDesign::Line => self.line,
+            IconDesign::Custom => None,
+        }
+    }
+}
+
+/// The icon to show: a drawn design in a colour, or the custom image.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AppIcon {
+    Drawn(IconDesign, IconColour),
+    Custom(PathBuf),
+}
+
+impl Default for AppIcon {
+    fn default() -> Self {
+        AppIcon::Drawn(IconDesign::Kiln, IconColour::Terracotta)
     }
 }
 
@@ -263,7 +433,9 @@ impl ThemeConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            icon: AppIcon::default(),
+            icon: IconKey::default(),
+            icon_colours: IconColours::default(),
+            icon_path: None,
             font_size: 13.,
             scrollback: 10_000,
             cursor_blink: true,
@@ -291,6 +463,25 @@ impl Default for WindowConfig {
 }
 
 impl Config {
+    /// The colour `design` shows in: its own, or terracotta.
+    pub fn icon_colour(&self, design: IconDesign) -> IconColour {
+        self.icon_colours
+            .get(design)
+            .or(self.icon.old_colour.filter(|_| design == IconDesign::Kiln))
+            .unwrap_or_default()
+    }
+
+    /// The icon in use. Custom without an image is the Kiln design.
+    pub fn app_icon(&self) -> AppIcon {
+        match (self.icon.design, &self.icon_path) {
+            (IconDesign::Custom, Some(path)) => AppIcon::Custom(path.clone()),
+            (IconDesign::Custom, None) => {
+                AppIcon::Drawn(IconDesign::Kiln, self.icon_colour(IconDesign::Kiln))
+            }
+            (design, _) => AppIcon::Drawn(design, self.icon_colour(design)),
+        }
+    }
+
     /// The palette: the theme's preset (for "system", the one that suits the OS appearance)
     /// with this config's colour overrides on top. Unknown names and bad colours are logged
     /// and ignored.
@@ -402,8 +593,11 @@ pub const TEMPLATE: &str = r##"# Kiln config. Every setting is optional; delete 
 # Kiln reloads this file when you save it. Settings (⌘, or Ctrl+Shift+,) changes the common
 # ones here too, keeping your comments.
 
-# The app icon: "terracotta", "black" or "white".
-icon = "terracotta"
+# The app icon: "kiln", "flame", "beehive", "line", or "custom" (an image, chosen in Settings).
+icon = "kiln"
+# Each design's colour: "terracotta", "black", "white", "ember", "slate", "sage" or "sand".
+# [icon_colours]
+# kiln = "terracotta"
 font_size = 13
 scrollback = 10000
 cursor_blink = true
@@ -477,13 +671,59 @@ mod tests {
     }
 
     #[test]
-    fn the_icon_key_reads_each_variant() {
-        assert_eq!(Config::default().icon, AppIcon::Terracotta);
-        for icon in AppIcon::ALL {
-            let config = parse(&format!("icon = \"{}\"\n", icon.key())).unwrap();
-            assert_eq!(config.icon, icon);
+    fn the_icon_keys_read_each_design_and_colour() {
+        assert_eq!(Config::default().app_icon(), AppIcon::default());
+        for design in IconDesign::DRAWN {
+            for colour in IconColour::ALL {
+                let text = format!(
+                    "icon = \"{}\"\n[icon_colours]\n{} = \"{}\"\n",
+                    design.key(),
+                    design.key(),
+                    colour.key()
+                );
+                assert_eq!(
+                    parse(&text).unwrap().app_icon(),
+                    AppIcon::Drawn(design, colour)
+                );
+            }
         }
-        assert!(parse("icon = \"pink\"\n").is_err());
+        // Each design keeps its own colour; one not listed is terracotta.
+        let config = parse("icon = \"beehive\"\n[icon_colours]\nkiln = \"sand\"\n").unwrap();
+        assert_eq!(config.icon_colour(IconDesign::Kiln), IconColour::Sand);
+        assert_eq!(
+            config.app_icon(),
+            AppIcon::Drawn(IconDesign::Beehive, IconColour::Terracotta)
+        );
+        // Custom: the image, or the Kiln design while there is none.
+        let custom = parse("icon = \"custom\"\nicon_path = \"/x/i.png\"\n").unwrap();
+        assert_eq!(custom.app_icon(), AppIcon::Custom("/x/i.png".into()));
+        assert_eq!(
+            parse("icon = \"custom\"\n").unwrap().app_icon(),
+            AppIcon::default()
+        );
+        // Unknown values warn and fall back.
+        assert_eq!(
+            parse("icon = \"pink\"\n").unwrap().app_icon(),
+            AppIcon::default()
+        );
+        let odd = parse("icon = \"line\"\n[icon_colours]\nline = \"pink\"\n").unwrap();
+        assert_eq!(
+            odd.app_icon(),
+            AppIcon::Drawn(IconDesign::Line, IconColour::Terracotta)
+        );
+    }
+
+    #[test]
+    fn icons_from_before_the_designs_are_the_kiln_design() {
+        for colour in IconColour::ALL {
+            let config = parse(&format!("icon = \"{}\"\n", colour.key())).unwrap();
+            assert_eq!(config.icon.design, IconDesign::Kiln);
+            assert_eq!(config.icon.old_colour, Some(colour));
+            assert_eq!(config.app_icon(), AppIcon::Drawn(IconDesign::Kiln, colour));
+        }
+        // A colour set for Kiln wins over the old key.
+        let both = parse("icon = \"black\"\n[icon_colours]\nkiln = \"sage\"\n").unwrap();
+        assert_eq!(both.icon_colour(IconDesign::Kiln), IconColour::Sage);
     }
 
     #[test]

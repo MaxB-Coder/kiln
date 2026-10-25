@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Kiln app icon, Flame design, "slate": blue-grey slate body. The prompt's flame, large, over a warm glow.
+       Written by scripts/make-icon-masters.py from notes/concept/kiln-icons.html; the
+       drawing is on the mockup's 100 grid (tile at 10..90), scaled onto the 1024 grid. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d6b78"/><stop offset="1" stop-color="#323b45"/></linearGradient>
+    <radialGradient id="glow" cx="50%" cy="62%" r="45%"><stop offset="0" stop-color="#ff8a3a" stop-opacity="0.45"/><stop offset="1" stop-color="#ff7a2e" stop-opacity="0"/></radialGradient>
+    <radialGradient id="sheen" cx="50%" cy="0%" r="75%"><stop offset="0" stop-color="#ffffff" stop-opacity="0.2"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#glow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <g transform="translate(311.2 223.6) scale(33.48)">
+    <path fill="#ee8a48" d="M6 1 C8 4 10.5 6 10.5 9.5 C10.5 12.8 8.4 15 6 15 C3.6 15 1.5 12.8 1.5 9.5 C1.5 7 3.2 5.6 4 4 C4.3 5.5 5 6.3 5.6 6.5 C5.6 4.5 5.4 2.8 6 1 Z"/>
+    <path fill="#f6c08a" d="M6 8 C7.2 9.4 8 10.4 8 11.8 C8 13.2 7.1 14 6 14 C4.9 14 4 13.2 4 11.8 C4 10.6 4.8 9.6 5.3 9.2 C5.4 9.9 5.7 10.2 6 10.3 C6 9.4 5.8 8.7 6 8 Z"/>
+  </g>
+</svg>

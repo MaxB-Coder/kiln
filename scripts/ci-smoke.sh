@@ -24,12 +24,13 @@ if [[ "$(uname)" == "Linux" ]]; then
   import -window root smoke/linux.png
   kill "$pid" || true
 
-  # 3. The icon setting (X11): with icon = "black", the window's _NET_WM_ICON is the black
-  #    variant (its top edge is dark, where terracotta's is orange).
+  # 3. The icon setting (X11): with the Beehive design in slate (not the default design or
+  #    colour), the window's _NET_WM_ICON is that icon: its top edge is blue-grey (more blue
+  #    than red), where the default's is orange and black's is warm grey.
   if command -v xprop >/dev/null; then
     config_home="$(mktemp -d)"
     mkdir -p "$config_home/kiln"
-    echo 'icon = "black"' > "$config_home/kiln/kiln.toml"
+    printf 'icon = "beehive"\n[icon_colours]\nbeehive = "slate"\n' > "$config_home/kiln/kiln.toml"
     XDG_CONFIG_HOME="$config_home" KILN_STATE_FILE="$config_home/state.json" \
       "$kiln" --fresh --cols 80 --rows 20 -- /bin/sh -c 'sleep 30' &
     pid=$!
@@ -42,11 +43,12 @@ if [[ "$(uname)" == "Linux" ]]; then
     # Row 0, column 8 of the 16 px icon: the third value is its first pixel.
     pixel="$(echo "$icon" | tr -d ' ' | cut -d, -f11)"
     red=$(( (pixel >> 16) & 255 ))
-    echo "window $window, top edge pixel $(printf '#%06x' $(( pixel & 0xffffff ))) (red $red)"
-    if [ -z "$pixel" ] || [ "$red" -ge 128 ]; then
-      echo "ci-smoke: the window icon is not the black variant" >&2
+    blue=$(( pixel & 255 ))
+    echo "window $window, top edge pixel $(printf '#%06x' $(( pixel & 0xffffff ))) (red $red, blue $blue)"
+    if [ -z "$pixel" ] || [ "$blue" -le "$red" ]; then
+      echo "ci-smoke: the window icon is not Beehive in slate" >&2
       exit 1
     fi
-    echo "ok: the window icon follows icon = \"black\""
+    echo "ok: the window icon follows icon = \"beehive\" in slate"
   fi
 fi

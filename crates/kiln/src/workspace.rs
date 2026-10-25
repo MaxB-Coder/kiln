@@ -150,7 +150,7 @@ impl Workspace {
             _state_watch: Task::ready(()),
         };
         this._config_watch = this.watch_config(window, cx);
-        crate::app_icon::apply(config.icon, window, true);
+        crate::app_icon::apply(&config.app_icon(), window, true);
         // The "system" theme follows the OS appearance, as it changes.
         follow_appearance(window);
         cx.observe_window_appearance(window, |_, window, _| follow_appearance(window))
@@ -894,8 +894,8 @@ impl Workspace {
         if config.window.sidebar != old.window.sidebar {
             self.sidebar_open = config.window.sidebar;
         }
-        if config.icon != old.icon {
-            crate::app_icon::apply(config.icon, window, false);
+        if config.app_icon() != old.app_icon() {
+            crate::app_icon::apply(&config.app_icon(), window, false);
         }
         // Open sessions switch at their next prompt (the scripts read this file).
         if config.shell.prompt != old.shell.prompt

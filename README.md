@@ -70,8 +70,8 @@ header shows the project, the branch with its change count, and the runtimes the
 
 ## Settings
 
-**⌘,** (Ctrl+Shift+, on Windows and Linux) opens Settings: the app icon (Terracotta, Black or
-White), the theme (Kiln Dark, Kiln Light, Follow system, Catppuccin Mocha, Everforest, Nord,
+**⌘,** (Ctrl+Shift+, on Windows and Linux) opens Settings: the app icon (Kiln, Flame, Beehive or
+Line, each in seven colours, or an image of your own), the theme (Kiln Dark, Kiln Light, Follow system, Catppuccin Mocha, Everforest, Nord,
 Kanagawa or Custom, with every colour editable), font size, blinking cursor, sidebar, prompt, reopening sessions, notifications, remote
 tints, Option as Alt (macOS) and update checks. A change applies at once and is written into
 `~/.config/kiln/kiln.toml` (`%APPDATA%\Kiln\kiln.toml` on Windows), changing only that line:
@@ -81,12 +81,15 @@ config file" in Settings (or the palette) opens it with every option and its def
 changes apply as you save. A few:
 
 ```toml
-icon = "terracotta"             # the app icon: "terracotta", "black" or "white"
+icon = "beehive"                # the app icon: "kiln", "flame", "beehive", "line" or "custom"
 font_size = 13.0
 notify_after_secs = 10          # notify when a long command finishes out of sight (0: off)
 
 [shell]
 prompt = "kiln"                 # a small flame in the input box; "shell" keeps your own prompt
+
+[icon_colours]                  # each design keeps its own colour (terracotta when not set)
+beehive = "slate"               # terracotta, black, white, ember, slate, sage or sand
 
 [window]
 restore = true                  # reopen the last sessions at launch

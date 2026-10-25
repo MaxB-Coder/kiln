@@ -1,6 +1,6 @@
 # My Kiln settings
 font_size = 13    # comfortable on this screen
-icon = "black"
+icon = "flame"
 
 [shell]
 program = "/bin/zsh" # not in Settings: stays as it is

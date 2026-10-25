@@ -288,8 +288,8 @@ Newest at the bottom.
   write changes nothing (no flicker, no loop). The prompt style applies live, see below.
   Keyboard: Tab or ↑↓ move, ←→ change, Space or Enter toggle, Esc closes. The footer shows
   this platform's key only.
-- **App icon variants** (Terracotta, the default, Black, White; `assets/icon/variants`, made
-  by `scripts/make-icons.sh`). Switched while Kiln runs, from PNGs built into the binary:
+- **App icon variants** (first Terracotta, Black and White; now the designs below,
+  `assets/icon/variants`, made by `scripts/make-icons.sh`). Switched while Kiln runs, from PNGs built into the binary:
   macOS sets the Dock icon (`NSApplication.applicationIconImage`; the default resets it to the
   bundle's). Finder, Launchpad and the app switcher's file icon keep the bundle icon: changing
   the bundle would break its signature. Windows sets each window's title-bar and taskbar icon
@@ -297,6 +297,36 @@ Newest at the bottom.
   sets `_NET_WM_ICON` on X11 windows (x11rb, already in the tree); on Wayland an app cannot
   set its window icon (no stable protocol; `xdg-toplevel-icon` is not widely available), so
   the compositor shows the desktop file's terracotta icon.
+- **App icon designs**: Kiln (the default), Flame, Beehive and Line, each in seven colours
+  (terracotta, black, white, ember, slate, sage, sand), and Custom. `icon` names the design;
+  `[icon_colours]` holds each design's own colour (terracotta when missing), so switching
+  design brings back that design's colour. Beehive's kiln is always brick; only its tile takes
+  the colour. The 28 masters are written by `scripts/make-icon-masters.py` (standard library)
+  from the approved mockup's tables (`notes/concept/kiln-icons.html`); its Kiln output is the
+  hand-made masters byte for byte (halves rounded up, as they were), and Kiln terracotta stays
+  `assets/icon/kiln.svg`, so the bundle, exe and installer icons are unchanged. CI runs it
+  with `--check`. `icon = "black"` and the other old values still load as the Kiln design in
+  that colour; the first write from Settings turns them into `icon = "kiln"` plus
+  `[icon_colours] kiln = "black"`. Unknown designs or colours warn and fall back to Kiln and
+  terracotta. Each platform embeds only the PNGs it uses: the 128 px Settings tiles everywhere
+  (255 KB for all 28), then the Dock at 256 px on macOS (128 pt at 2x is its largest; 789 KB
+  in all), window icons at 16 to 128 px on Windows (876 KB) and 16, 32, 48, 64 and 128 px on
+  Linux (841 KB). The three variants before took about 150 to 200 KB, so the binary grows by
+  about 0.6 to 0.7 MB. Rendering the SVGs at run time (resvg is in the tree through GPUI)
+  would be smaller, but PNGs keep start-up and the icon switch free of rasterising.
+- **Custom app icon**: the "+" tile opens the system file picker (GPUI's
+  `prompt_for_paths`). Only PNG and JPEG are read, told apart by their first bytes, never the
+  file name, through the `image` crate already in the tree (its `jpeg` feature uses
+  zune-jpeg, also already there). Over 10 MB, over 4096 px a side (checked from the header,
+  before decoding), or anything else is refused with a message under the row. The picture is
+  cropped square from the middle, scaled to at most 512 px, given the tiles' rounded corners
+  and saved as a PNG copy in `icons/` next to kiln.toml, named after the original with a hash
+  of its bytes in front (a new image is a new path, so every window updates); `icon_path`
+  points at the copy, so moving the original changes nothing. "Remove" goes back to Kiln in
+  its colour and deletes the copy (only a PNG in that folder). The copy is checked again each
+  time it is read; if it is gone or broken, the default icon shows, with a warning. The Dock
+  gets it on the macOS grid (824 of 1024), windows get it filling the tile, like the drawn
+  icons.
 - **Themes** (`[theme] name`): Kiln Dark (the default palette, unchanged), Kiln Light, System
   (Kiln Dark or Light with the OS appearance, followed live through GPUI's window appearance
   on all three systems; dark where it is not known), Catppuccin Mocha, Everforest, Nord and Kanagawa

@@ -791,9 +791,9 @@ fn settings(s: &mut Shots) {
     s.keystroke("tab");
     s.shot("s02-keyboard");
     s.keystroke("right");
-    s.shot("s03-icon-black");
+    s.shot("s03-icon-flame");
     let written = std::fs::read_to_string(&path).unwrap();
-    assert!(written.contains("icon = \"black\""), "{written}");
+    assert!(written.contains("icon = \"flame\""), "{written}");
     // Font size up, the cursor's blink off, the prompt switched, notifications later.
     s.keystroke("tab right");
     s.keystroke("tab space");
@@ -878,6 +878,109 @@ fn settings(s: &mut Shots) {
     assert_eq!(on_file().palette_for(true).accent, 0xff3d8b);
     assert_eq!(kiln::theme::palette().accent, 0xff3d8b);
     s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("kiln-dark", cx)));
+    s.keystroke("escape");
+
+    // The app icon row: four designs and Custom; each design keeps its own colour.
+    std::fs::write(&path, user).unwrap();
+    s.keystroke("cmd-,");
+    assert!(open(s));
+    let view = s.workspace(|w| w.settings_view()).unwrap();
+    use kiln::config::{AppIcon, IconColour, IconDesign};
+    let on_file = |path: &std::path::Path| {
+        kiln::config::parse(&std::fs::read_to_string(path).unwrap()).unwrap()
+    };
+    s.shot("i1-icon-row");
+    // Clicking the chosen design shows its colours.
+    s.cx.update(|cx| view.update(cx, |v, cx| v.click_icon(IconDesign::Kiln, cx)));
+    s.pump(Duration::from_millis(300));
+    s.shot("i2-colour-popup");
+    for (i, (design, colour)) in [
+        (IconDesign::Kiln, IconColour::Sage),
+        (IconDesign::Beehive, IconColour::Slate),
+        (IconDesign::Line, IconColour::Ember),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if on_file(&path).icon.design != design {
+            s.cx.update(|cx| view.update(cx, |v, cx| v.click_icon(design, cx)));
+        }
+        s.cx.update(|cx| {
+            view.update(cx, |v, cx| {
+                v.set(kiln::settings::Change::IconColour(design, colour), cx)
+            })
+        });
+        s.pump(Duration::from_millis(400));
+        s.shot(&format!("i{}-{}-{}", i + 3, design.key(), colour.key()));
+        assert_eq!(on_file(&path).app_icon(), AppIcon::Drawn(design, colour));
+    }
+    // Back to Kiln: its own colour again. Esc closes the pop-up, not Settings.
+    s.cx.update(|cx| view.update(cx, |v, cx| v.click_icon(IconDesign::Kiln, cx)));
+    assert_eq!(
+        on_file(&path).app_icon(),
+        AppIcon::Drawn(IconDesign::Kiln, IconColour::Sage)
+    );
+    s.keystroke("escape");
+    assert!(open(s), "Esc closes the colour pop-up first");
+    std::fs::copy(&path, s.out.join("i5-kiln.toml")).unwrap();
+    // Custom: a wide picture, cropped from the middle and copied into Kiln's folder.
+    let pictures =
+        std::env::temp_dir().join(format!("kiln-snapshot-{}-pictures", std::process::id()));
+    std::fs::create_dir_all(&pictures).unwrap();
+    let picture = pictures.join("sunset.png");
+    image::RgbaImage::from_fn(900, 600, |x, y| {
+        let (dx, dy) = (x as f32 - 450., y as f32 - 330.);
+        if dx * dx + dy * dy < 150. * 150. {
+            image::Rgba([255, 214, 120, 255])
+        } else if y > 420 {
+            image::Rgba([40, 60, 110, 255])
+        } else {
+            let t = y as f32 / 420.;
+            image::Rgba([
+                (240. - 80. * t) as u8,
+                (110. - 40. * t) as u8,
+                (90. + 60. * t) as u8,
+                255,
+            ])
+        }
+    })
+    .save(&picture)
+    .unwrap();
+    s.cx.update(|cx| view.update(cx, |v, cx| v.use_image(picture.clone(), cx)));
+    s.pump(Duration::from_millis(1500));
+    s.shot("i6-custom");
+    let config = on_file(&path);
+    let Some(copy) = config.icon_path.clone() else {
+        panic!("no icon_path: {config:?}")
+    };
+    assert_eq!(config.app_icon(), AppIcon::Custom(copy.clone()));
+    assert!(
+        copy.starts_with(path.parent().unwrap()) && copy.exists(),
+        "{copy:?}"
+    );
+    std::fs::copy(&path, s.out.join("i6-kiln.toml")).unwrap();
+    // Not an image: refused, and nothing changes.
+    let fake = pictures.join("notes.png");
+    std::fs::write(&fake, "#!/bin/sh\necho hi\n").unwrap();
+    s.cx.update(|cx| view.update(cx, |v, cx| v.use_image(fake.clone(), cx)));
+    s.pump(Duration::from_millis(800));
+    s.shot("i7-custom-refused");
+    assert_eq!(on_file(&path).icon_path, Some(copy.clone()));
+    // Remove: Kiln, in its colour; Kiln's copy goes.
+    s.cx.update(|cx| view.update(cx, |v, cx| v.click_icon(IconDesign::Kiln, cx)));
+    s.cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set(kiln::settings::Change::Icon(IconDesign::Custom), cx)
+        })
+    });
+    s.cx.update(|cx| view.update(cx, |v, cx| v.remove_image(cx)));
+    s.pump(Duration::from_millis(300));
+    assert_eq!(
+        on_file(&path).app_icon(),
+        AppIcon::Drawn(IconDesign::Kiln, IconColour::Sage)
+    );
+    assert!(!copy.exists());
+    let _ = std::fs::remove_dir_all(&pictures);
     s.keystroke("escape");
 
     // The Windows preview: no Option row, the Windows keys.

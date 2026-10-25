@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiln icons</title>
+<!-- Approved mockup (2026-10-25) for the App icon row in Settings.
+     Four designs (Kiln, Flame, Beehive, Line) x seven colours, then Custom upload.
+     Geometry is on a 100 grid with the tile at 10..90 (rx 18); the Kiln design matches
+     assets/icon/variants/*.svg, which use the same grid scaled to 1024 (X = 100 + (v-10) * 10.3).
+     COL and ICONS below are the source of truth for colours and shapes. -->
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;padding:24px;background:#141414;font-family:'JetBrains Mono',ui-monospace,monospace}
+.w{background:#282828;border-radius:14px;padding:22px;display:flex;justify-content:center;max-width:900px}
+.panel{width:500px;background:#1d2021;border-radius:12px;box-shadow:0 0 0 1px #3c3836;padding:14px 0 16px;font-size:12px;color:#ebdbb2;min-height:300px}
+.ph{display:flex;justify-content:space-between;padding:0 18px 6px}.ph b{font-size:12.5px}.ph span{color:#665c54;font-size:10.5px}
+.sec{color:#665c54;font-size:10.5px;padding:11px 18px 6px}
+.icons{display:flex;justify-content:space-between;padding:4px 18px;position:relative}
+.ic{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;color:#7c6f64;font-size:10.5px;width:76px;position:relative}
+.ic .t{width:60px;height:60px;border-radius:14px;outline:2px solid transparent;outline-offset:3px;position:relative}
+.ic.on .t,.ic.on .up{outline:2px solid #e07b39;outline-offset:3px}.ic.on{color:#ebdbb2}
+.badge{position:absolute;right:-5px;bottom:-5px;width:18px;height:18px;border-radius:50%;background:#1d2021;display:flex;align-items:center;justify-content:center}
+.badge i{width:12px;height:12px;border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.up{width:60px;height:60px;border-radius:14px;border:1.5px dashed #504945;display:flex;align-items:center;justify-content:center;color:#7c6f64;font-size:22px;box-sizing:border-box}
+.pop{position:absolute;top:96px;background:#32302f;border-radius:10px;box-shadow:0 0 0 1px #3c3836,0 10px 30px rgba(0,0,0,.45);padding:10px 12px;z-index:2;width:max-content}
+.pop .h{color:#928374;font-size:10px;margin-bottom:8px}
+/* Equal columns, so the swatches sit evenly however long each name is. */
+.sws{display:grid;grid-template-columns:repeat(7,58px)}
+.sw{display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;font-size:9.5px;color:#a89984}
+.sw i{width:24px;height:24px;border-radius:50%;outline:2px solid transparent;outline-offset:2px}
+.sw.on i{outline-color:#e07b39}.sw.on{color:#ebdbb2}
+.note{padding:118px 18px 0;color:#665c54;font-size:10.5px}
+.note.closed{padding-top:12px}
+.grid{margin-top:24px;display:grid;grid-template-columns:90px repeat(7,72px);gap:8px;align-items:center;color:#a89984;font-size:10.5px;max-width:900px}
+</style>
+</head>
+<body>
+<div class="w"><div class="panel">
+  <div class="ph"><b>Settings</b><span>esc</span></div>
+  <div class="sec">App icon</div>
+  <div class="icons" id="row"></div>
+  <div class="note" id="note"></div>
+</div></div>
+<div class="grid" id="grid"></div>
+<script>
+const FO="M6 1 C8 4 10.5 6 10.5 9.5 C10.5 12.8 8.4 15 6 15 C3.6 15 1.5 12.8 1.5 9.5 C1.5 7 3.2 5.6 4 4 C4.3 5.5 5 6.3 5.6 6.5 C5.6 4.5 5.4 2.8 6 1 Z";
+const FI="M6 8 C7.2 9.4 8 10.4 8 11.8 C8 13.2 7.1 14 6 14 C4.9 14 4 13.2 4 11.8 C4 10.6 4.8 9.6 5.3 9.2 C5.4 9.9 5.7 10.2 6 10.3 C6 9.4 5.8 8.7 6 8 Z";
+const DR="M22 90 V53 A28 28 0 0 1 78 53 V90 Z";
+// b: tile body gradient, d: door/dome gradient, r/ro: rim stroke and opacity, s: top sheen opacity,
+// fd: flame in the Kiln door (outer, inner), ink: line art on the tile, fb: flame drawn on the tile.
+const COL={
+ terracotta:{n:'Terracotta',b:['#ee8a48','#c25b22'],d:['#2b1a12','#140c08'],r:'#f6a467',ro:.5,s:.22,fd:['#ffa457','#ffe3b5'],ink:'#fff3e6',fb:['#fff1dc','#ffd2a0']},
+ black:{n:'Black',b:['#3d3834','#161413'],d:['#0d0b0a','#070605'],r:'#e07b39',ro:.45,s:.14,fd:['#e07b39','#f6c08a'],ink:'#e07b39',fb:['#e07b39','#f6c08a']},
+ white:{n:'White',b:['#f8f3ec','#e1d5c4'],d:['#2b2724','#161311'],r:'#c8b49b',ro:.7,s:.35,fd:['#e07b39','#f6c08a'],ink:'#c25b22',fb:['#e07b39','#f6c08a']},
+ ember:{n:'Ember',b:['#b0473a','#6e2219'],d:['#241210','#120807'],r:'#e08a74',ro:.5,s:.2,fd:['#ffa457','#ffe3b5'],ink:'#ffe3cf',fb:['#ffb070','#ffe3b5']},
+ slate:{n:'Slate',b:['#5d6b78','#323b45'],d:['#161b21','#0b0e12'],r:'#a9b8c6',ro:.45,s:.2,fd:['#e07b39','#f6c08a'],ink:'#ee8a48',fb:['#ee8a48','#f6c08a']},
+ sage:{n:'Sage',b:['#8a9a78','#55654a'],d:['#1d2219','#0e110c'],r:'#c5d1b2',ro:.5,s:.22,fd:['#e07b39','#f6c08a'],ink:'#fbf3e4',fb:['#f2a35e','#ffe3b5']},
+ sand:{n:'Sand',b:['#e3c89a','#bf9a62'],d:['#2b2016','#150f0a'],r:'#f3dfba',ro:.6,s:.3,fd:['#e07b39','#f6c08a'],ink:'#8a3f17',fb:['#c25b22','#f6c08a']},
+};
+let u=0;
+const g=(a,b,id)=>`<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`;
+const tile=(c,i,inner,extraDefs='',size=60)=>`<svg width="${size}" height="${size}" viewBox="10 10 80 80"><defs>${g(c.b[0],c.b[1],'b'+i)}${g(c.d[0],c.d[1],'d'+i)}<radialGradient id="s${i}" cx="50%" cy="0%" r="75%"><stop offset="0" stop-color="#fff" stop-opacity="${c.s}"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient><radialGradient id="h${i}" cx="50%" cy="88%" r="65%"><stop offset="0" stop-color="#ff9a4a" stop-opacity=".8"/><stop offset=".55" stop-color="#ff7a2e" stop-opacity=".2"/><stop offset="1" stop-color="#ff7a2e" stop-opacity="0"/></radialGradient><clipPath id="q${i}"><rect x="10" y="10" width="80" height="80" rx="18"/></clipPath>${extraDefs}</defs><rect x="10" y="10" width="80" height="80" rx="18" fill="url(#b${i})"/>${inner}</svg>`;
+const fl=(f,tx,ty,sc,inner=true)=>`<g transform="translate(${tx} ${ty}) scale(${sc})"><path d="${FO}" fill="${f[0]}"/>${inner?`<path d="${FI}" fill="${f[1]}"/>`:''}</g>`;
+const SH=i=>`<rect x="10" y="10" width="80" height="80" rx="18" fill="url(#s${i})"/>`;
+const ICONS={
+ kiln:{n:'Kiln',f:(c,s)=>{const i='k'+u++;return tile(c,i,`<g clip-path="url(#q${i})"><path d="${DR}" fill="url(#d${i})"/><g clip-path="url(#c${i})"><rect x="12" y="20" width="76" height="75" fill="url(#h${i})"/></g><path d="M20.5 90 V53 A29.5 29.5 0 0 1 79.5 53 V90" fill="none" stroke="${c.r}" stroke-opacity="${c.ro}" stroke-width="1.3"/></g>${SH(i)}${fl(c.fd,36.2,50,2.3)}`,`<clipPath id="c${i}"><path d="${DR}"/></clipPath>`,s);}},
+ flame:{n:'Flame',f:(c,s)=>{const i='f'+u++;return tile(c,i,`<rect x="10" y="10" width="80" height="80" rx="18" fill="url(#g${i})"/>${SH(i)}${fl(c.fb,30.5,22,3.25)}`,`<radialGradient id="g${i}" cx="50%" cy="62%" r="45%"><stop offset="0" stop-color="#ff8a3a" stop-opacity=".45"/><stop offset="1" stop-color="#ff7a2e" stop-opacity="0"/></radialGradient>`,s);}},
+ // The kiln itself is always brick (as in the original concept); only the tile takes the colour.
+ // A soft shadow under the dome keeps it apart from the warm tiles (terracotta, ember, sand).
+ beehive:{n:'Beehive',f:(c,s)=>{const i='h'+u++;return tile(c,i,`${SH(i)}<path d="M21 77 C21 50 32.5 31 50 31 C67.5 31 79 50 79 77 Z" fill="#2a120a" opacity=".35"/><rect x="46" y="20" width="8" height="14" rx="1.5" fill="url(#k${i})"/><path d="M22 76 C22 50 33 32 50 32 C67 32 78 50 78 76 Z" fill="url(#k${i})"/><path d="M27 52 H73 M24 64 H76 M33 41 H67" stroke="#7a3318" stroke-opacity=".45" stroke-width="1.2"/><path d="M41 76 V66 A9 9 0 0 1 59 66 V76 Z" fill="url(#m${i})"/><path d="M18 76 H82" stroke="#7a3318" stroke-width="2" stroke-linecap="round"/>`,`${g('#d9774a','#9a4426','k'+i)}<radialGradient id="m${i}" cx="50%" cy="80%" r="60%"><stop offset="0" stop-color="#ffd08a"/><stop offset=".6" stop-color="#ff8a3a"/><stop offset="1" stop-color="#b8451c"/></radialGradient>`,s);}},
+ line:{n:'Line',f:(c,s)=>{const i='l'+u++;return tile(c,i,`${SH(i)}<path d="M28 76 V52 A22 22 0 0 1 72 52 V76" fill="none" stroke="${c.ink}" stroke-width="4.2" stroke-linecap="round"/><path d="M22 76 H78" stroke="${c.ink}" stroke-width="4.2" stroke-linecap="round"/>${fl(c.fb,41.6,50,1.4,false)}`,'',s);}},
+};
+const ORDER=['kiln','flame','beehive','line'];
+// Each design keeps its own colour; the tiles show theirs.
+const colours={kiln:'terracotta',flame:'black',beehive:'slate',line:'white'};
+let sel='kiln',pop=true;
+function render(){
+ let html=ORDER.map(id=>{const c=COL[colours[id]];return `<div class="ic ${sel===id?'on':''}" data-id="${id}"><div class="t">${ICONS[id].f(c)}${sel===id?`<span class="badge"><i style="background:linear-gradient(${c.b[0]},${c.b[1]})"></i></span>`:''}</div>${ICONS[id].n}${sel===id?' ▾':''}</div>`;}).join('');
+ const colour=colours[sel];
+ html+=`<div class="ic ${sel==='custom'?'on':''}" data-id="custom"><div class="up">+</div>Custom</div>`;
+ const idx=ORDER.indexOf(sel);
+ if(pop&&idx>=0){const left=Math.min(18+idx*95-20,140);html+=`<div class="pop" style="left:${Math.max(4,left)}px"><div class="h">Colour</div><div class="sws">${Object.entries(COL).map(([k,v])=>`<div class="sw ${k===colour?'on':''}" data-c="${k}"><i style="background:linear-gradient(${v.b[0]},${v.b[1]})"></i>${v.n}</div>`).join('')}</div></div>`;}
+ document.getElementById('row').innerHTML=html;
+ document.querySelectorAll('.ic').forEach(el=>el.onclick=()=>{const id=el.dataset.id;pop=(id!=='custom')&&(sel===id?!pop:true);sel=id;render();});
+ document.querySelectorAll('.sw').forEach(el=>el.onclick=e=>{e.stopPropagation();colours[sel]=el.dataset.c;render();});
+ const n=document.getElementById('note');n.className='note'+(pop?'':' closed');
+ n.textContent=sel==='custom'?'Choose an image… (PNG or JPEG, square, 512 px or larger)':pop?`Colour for ${ICONS[sel].n}. Each icon keeps its own colour.`:'Click the selected icon for its colours.';
+}
+render();
+// Every design in every colour, for checking the masters against.
+document.getElementById('grid').innerHTML='<span></span>'+Object.values(COL).map(c=>`<span>${c.n}</span>`).join('')+
+  ORDER.map(id=>`<span>${ICONS[id].n}</span>`+Object.values(COL).map(c=>ICONS[id].f(c,64)).join('')).join('');
+</script>
+</body>
+</html>

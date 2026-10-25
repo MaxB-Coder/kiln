@@ -23,6 +23,8 @@ gpui.workspace = true
 jiff = "0.2"
 kiln_term.workspace = true
 log.workspace = true
+# The custom app icon: PNG and JPEG only (already in the tree through gpui).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # font-kit: text rendering (off by default in gpui_macos).
@@ -47,7 +49,6 @@ x11rb = "0.13"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # The app icon inside kiln.exe (build.rs).
