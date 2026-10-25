@@ -62,6 +62,7 @@ jobs:
 
       - name: The exe carries the app icon (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         shell: pwsh
         run: scripts/check-icons.ps1 -Exe target/release/kiln.exe
 

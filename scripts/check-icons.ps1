@@ -10,10 +10,14 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# All in C#: PowerShell is slow with large byte arrays and picks the wrong BitConverter overloads.
 Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 public static class ExeIcons {
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern IntPtr LoadLibraryEx(string path, IntPtr file, uint flags);
@@ -26,45 +30,55 @@ public static class ExeIcons {
     [DllImport("kernel32.dll")] static extern IntPtr LockResource(IntPtr data);
     [DllImport("kernel32.dll")] static extern uint SizeofResource(IntPtr module, IntPtr resource);
 
+    static string Hash(byte[] bytes) {
+        using (var sha = SHA256.Create()) return Convert.ToHexString(sha.ComputeHash(bytes));
+    }
+
     // The data of every RT_ICON (3) resource in the file.
-    public static List<byte[]> Images(string path) {
+    static List<string> ExeImages(string path) {
         // LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE: read, never run.
         IntPtr module = LoadLibraryEx(path, IntPtr.Zero, 0x22);
         if (module == IntPtr.Zero) throw new Exception("cannot open " + path);
-        var images = new List<byte[]>();
+        var images = new List<string>();
         EnumResourceNames(module, (IntPtr)3, (m, type, name, p) => {
             IntPtr resource = FindResource(m, name, type);
             int size = (int)SizeofResource(m, resource);
             var bytes = new byte[size];
             Marshal.Copy(LockResource(LoadResource(m, resource)), bytes, 0, size);
-            images.Add(bytes);
+            images.Add(Hash(bytes));
             return true;
         }, IntPtr.Zero);
         FreeLibrary(module);
         return images;
     }
+
+    // The images in an .ico: a directory of 16-byte entries (size at +8, offset at +12).
+    static List<string> IcoImages(string path) {
+        byte[] ico = File.ReadAllBytes(path);
+        int count = BitConverter.ToUInt16(ico, 4);
+        var images = new List<string>();
+        for (int i = 0; i < count; i++) {
+            int entry = 6 + 16 * i;
+            int size = (int)BitConverter.ToUInt32(ico, entry + 8);
+            int offset = (int)BitConverter.ToUInt32(ico, entry + 12);
+            images.Add(Hash(ico.Skip(offset).Take(size).ToArray()));
+        }
+        return images;
+    }
+
+    public static string Check(string exe, string ico, bool installer) {
+        var wanted = IcoImages(ico);
+        var found = ExeImages(exe);
+        if (found.Count == 0) throw new Exception(exe + " has no icon");
+        int foreign = found.Count(h => !wanted.Contains(h));
+        if (foreign > 0)
+            throw new Exception(exe + " has " + foreign + " icon image(s) not from kiln.ico");
+        int missing = wanted.Count(h => !found.Contains(h));
+        if (!installer && missing > 0)
+            throw new Exception(exe + " lacks " + missing + " of kiln.ico's " + wanted.Count + " images");
+        return "ok: " + exe + " carries kiln.ico (" + found.Count + " of its " + wanted.Count + " images)";
+    }
 }
 "@
 
-# The images in the .ico: a directory of 16-byte entries (size at +8, offset at +12).
-$ico = [System.IO.File]::ReadAllBytes((Resolve-Path $Ico))
-$count = [BitConverter]::ToUInt16($ico, 4)
-$expected = @()
-for ($i = 0; $i -lt $count; $i++) {
-    $entry = 6 + 16 * $i
-    $size = [BitConverter]::ToUInt32($ico, $entry + 8)
-    $offset = [BitConverter]::ToUInt32($ico, $entry + 12)
-    $expected += , ([byte[]]$ico[$offset..($offset + $size - 1)])
-}
-$hex = { param($bytes) [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)) }
-$wanted = $expected | ForEach-Object { & $hex $_ }
-
-$found = [ExeIcons]::Images((Resolve-Path $Exe).Path) | ForEach-Object { & $hex $_ }
-if (-not $found) { throw "check-icons: $Exe has no icon" }
-$foreign = @($found | Where-Object { $wanted -notcontains $_ })
-if ($foreign.Count -gt 0) { throw "check-icons: $Exe has $($foreign.Count) icon image(s) not from kiln.ico" }
-if (-not $Installer) {
-    $missing = @($wanted | Where-Object { $found -notcontains $_ })
-    if ($missing.Count -gt 0) { throw "check-icons: $Exe lacks $($missing.Count) of kiln.ico's $count images" }
-}
-"ok: $Exe carries kiln.ico ($(@($found).Count) of its $count images)"
+[ExeIcons]::Check((Resolve-Path $Exe).Path, (Resolve-Path $Ico).Path, $Installer.IsPresent)
