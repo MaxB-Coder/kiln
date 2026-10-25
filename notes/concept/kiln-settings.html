@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiln settings</title>
+<!-- Approved mockup (2026-10-25) for the settings pop-up and app icon picker.
+     Every row maps to an existing config key; "icon" is the one new key. -->
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;padding:24px;background:#141414;font-family:'JetBrains Mono',ui-monospace,monospace}
+.app{position:relative;background:#282828;border-radius:14px;height:650px;max-width:900px;overflow:hidden;color:#ebdbb2}
+.ghost{position:absolute;inset:0;padding:16px 26px;color:#504945;font-size:11.5px;line-height:1.7;white-space:pre}
+.veil{position:absolute;inset:0;background:rgba(14,14,14,.62);display:flex;align-items:flex-start;justify-content:center;padding-top:22px}
+.panel{width:470px;background:#1d2021;border-radius:12px;box-shadow:0 0 0 1px #3c3836;padding:14px 0 10px;font-size:12px}
+.ph{display:flex;justify-content:space-between;align-items:center;padding:0 18px 6px}
+.ph .t{color:#ebdbb2;font-weight:700;font-size:12.5px}
+.ph .m{color:#665c54;font-size:10.5px}
+.sec{color:#665c54;font-size:10.5px;padding:11px 18px 4px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:5px 18px;color:#bdae93}
+.row .sub{color:#665c54;font-size:10.5px;margin-top:2px}
+.icons{display:flex;gap:14px;padding:4px 18px 4px}
+.ic{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;color:#7c6f64;font-size:10.5px}
+.ic svg{border-radius:14px;outline:2px solid transparent;outline-offset:3px;transition:outline-color .15s}
+.ic.on svg{outline-color:#e07b39}.ic.on{color:#ebdbb2}
+.sw{width:30px;height:17px;border-radius:999px;background:#3c3836;position:relative;cursor:pointer;flex:none;transition:background .15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#a89984;transition:left .15s,background .15s}
+.sw.on{background:#e07b39}.sw.on::after{left:15px;background:#1d2021}
+.seg{display:flex;background:#282828;border-radius:7px;padding:2px;gap:2px}
+.seg span{padding:2px 9px;border-radius:5px;color:#7c6f64;cursor:pointer;font-size:11px}
+.seg span.on{background:#3c3836;color:#ebdbb2}
+.step{display:flex;align-items:center;gap:8px;color:#ebdbb2}
+.step b{width:20px;height:20px;border-radius:6px;background:#282828;color:#a89984;display:flex;align-items:center;justify-content:center;font-weight:400;cursor:pointer;user-select:none}
+.step i{font-style:normal;min-width:40px;text-align:center}
+.foot{display:flex;justify-content:space-between;padding:10px 18px 2px;margin-top:4px;color:#665c54;font-size:10.5px}
+.foot a{color:#a89984;cursor:pointer}
+.foot a:hover{color:#e07b39}
+.dockp{display:flex;align-items:center;gap:12px;margin-top:12px;font-size:13px;color:#a89984}
+.dockbar{display:flex;gap:10px;align-items:center;background:#2a2a2a;border-radius:14px;padding:8px 12px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <path id="fo" d="M6 1 C8 4 10.5 6 10.5 9.5 C10.5 12.8 8.4 15 6 15 C3.6 15 1.5 12.8 1.5 9.5 C1.5 7 3.2 5.6 4 4 C4.3 5.5 5 6.3 5.6 6.5 C5.6 4.5 5.4 2.8 6 1 Z"/>
+  <path id="fi" d="M6 8 C7.2 9.4 8 10.4 8 11.8 C8 13.2 7.1 14 6 14 C4.9 14 4 13.2 4 11.8 C4 10.6 4.8 9.6 5.3 9.2 C5.4 9.9 5.7 10.2 6 10.3 C6 9.4 5.8 8.7 6 8 Z"/>
+  <path id="dr" d="M22 90 V53 A28 28 0 0 1 78 53 V90 Z"/>
+  <clipPath id="sq"><rect x="10" y="10" width="80" height="80" rx="18"/></clipPath>
+  <clipPath id="dc"><use href="#dr"/></clipPath>
+  <radialGradient id="hearth" cx="50%" cy="88%" r="65%"><stop offset="0" stop-color="#ff9a4a" stop-opacity=".8"/><stop offset=".55" stop-color="#ff7a2e" stop-opacity=".2"/><stop offset="1" stop-color="#ff7a2e" stop-opacity="0"/></radialGradient>
+  <radialGradient id="sh" cx="50%" cy="0%" r="75%"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+  <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ee8a48"/><stop offset="1" stop-color="#c25b22"/></linearGradient>
+  <linearGradient id="bb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d3834"/><stop offset="1" stop-color="#161413"/></linearGradient>
+  <linearGradient id="bw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8f3ec"/><stop offset="1" stop-color="#e1d5c4"/></linearGradient>
+  <linearGradient id="dt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b1a12"/><stop offset="1" stop-color="#140c08"/></linearGradient>
+  <linearGradient id="db" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d0b0a"/><stop offset="1" stop-color="#070605"/></linearGradient>
+  <linearGradient id="dw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b2724"/><stop offset="1" stop-color="#161311"/></linearGradient>
+  <symbol id="iT" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" rx="18" fill="url(#bt)"/><g clip-path="url(#sq)"><use href="#dr" fill="url(#dt)"/><g clip-path="url(#dc)"><rect x="12" y="20" width="76" height="75" fill="url(#hearth)"/></g><path d="M20.5 90 V53 A29.5 29.5 0 0 1 79.5 53 V90" fill="none" stroke="#f6a467" stroke-opacity=".5" stroke-width="1.3"/></g><rect x="10" y="10" width="80" height="80" rx="18" fill="url(#sh)"/><g transform="translate(36.2 50) scale(2.3)"><use href="#fo" fill="#ffa457"/><use href="#fi" fill="#ffe3b5"/></g></symbol>
+  <symbol id="iB" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" rx="18" fill="url(#bb)"/><g clip-path="url(#sq)"><use href="#dr" fill="url(#db)"/><g clip-path="url(#dc)"><rect x="12" y="20" width="76" height="75" fill="url(#hearth)"/></g><path d="M20.5 90 V53 A29.5 29.5 0 0 1 79.5 53 V90" fill="none" stroke="#e07b39" stroke-opacity=".45" stroke-width="1.3"/></g><rect x="10" y="10" width="80" height="80" rx="18" fill="url(#sh)" opacity=".65"/><g transform="translate(36.2 50) scale(2.3)"><use href="#fo" fill="#e07b39"/><use href="#fi" fill="#f6c08a"/></g></symbol>
+  <symbol id="iW" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" rx="18" fill="url(#bw)"/><g clip-path="url(#sq)"><use href="#dr" fill="url(#dw)"/><g clip-path="url(#dc)"><rect x="12" y="20" width="76" height="75" fill="url(#hearth)"/></g><path d="M20.5 90 V53 A29.5 29.5 0 0 1 79.5 53 V90" fill="none" stroke="#c8b49b" stroke-opacity=".7" stroke-width="1.3"/></g><rect x="10" y="10" width="80" height="80" rx="18" fill="url(#sh)"/><g transform="translate(36.2 50) scale(2.3)"><use href="#fo" fill="#e07b39"/><use href="#fi" fill="#f6c08a"/></g></symbol>
+</defs></svg>
+
+<div class="app">
+  <div class="ghost">git --no-pager log --oneline
+0bb7d19 (HEAD -> main) Serve the home page
+
+ls src
+auth.js  routes.js  server.js</div>
+  <div class="veil">
+    <div class="panel">
+      <div class="ph"><span class="t">Settings</span><span class="m">esc</span></div>
+
+      <div class="sec">App icon</div>
+      <div class="icons">
+        <div class="ic on" data-i="iT"><svg width="60" height="60"><use href="#iT"/></svg>Terracotta</div>
+        <div class="ic" data-i="iB"><svg width="60" height="60"><use href="#iB"/></svg>Black</div>
+        <div class="ic" data-i="iW"><svg width="60" height="60"><use href="#iW"/></svg>White</div>
+      </div>
+
+      <div class="sec">Appearance</div>
+      <div class="row"><span>Font size</span><span class="step" data-v="13" data-min="9" data-max="24" data-u=" pt" data-d="1"><b>−</b><i>13 pt</i><b>+</b></span></div>
+      <div class="row"><span>Blinking cursor</span><span class="sw on"></span></div>
+      <div class="row"><span>Sidebar</span><span class="sw on"></span></div>
+      <div class="row"><span>Prompt</span><span class="seg"><span class="on">Kiln flame</span><span>Shell's own</span></span></div>
+
+      <div class="sec">Behaviour</div>
+      <div class="row"><span>Reopen sessions at launch</span><span class="sw on"></span></div>
+      <div class="row"><div><div>Notify when a command finishes</div><div class="sub">If it ran this long, out of sight</div></div><span class="step" data-v="10" data-min="0" data-max="120" data-u=" s" data-d="5"><b>−</b><i>10 s</i><b>+</b></span></div>
+      <div class="row"><div><div>Tint remote sessions</div><div class="sub">Production hosts tint red</div></div><span class="sw on"></span></div>
+      <div class="row"><div><div>Option key as Alt</div><div class="sub">macOS only</div></div><span class="sw"></span></div>
+
+      <div class="sec">Updates</div>
+      <div class="row"><div><div>Check for updates daily</div><div class="sub">Kiln's only network use</div></div><span class="sw on"></span></div>
+
+      <div class="foot"><a>Open config file</a><span>⌘,  ·  Ctrl+Shift+, on Windows/Linux</span></div>
+    </div>
+  </div>
+</div>
+<div class="dockp">Dock, after choosing: <span class="dockbar"><svg width="44" height="44" id="dockicon"><use href="#iT"/></svg></span></div>
+
+<script>
+document.querySelectorAll('.ic').forEach(el => el.addEventListener('click', () => {
+  document.querySelectorAll('.ic').forEach(x => x.classList.toggle('on', x === el));
+  document.querySelector('#dockicon use').setAttribute('href', '#' + el.dataset.i);
+}));
+document.querySelectorAll('.sw').forEach(el => el.addEventListener('click', () => el.classList.toggle('on')));
+document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('span').forEach(s => s.addEventListener('click', () => {
+  seg.querySelectorAll('span').forEach(x => x.classList.toggle('on', x === s));
+})));
+document.querySelectorAll('.step').forEach(st => {
+  const [minus, plus] = st.querySelectorAll('b'), out = st.querySelector('i');
+  const set = d => {
+    const v = Math.min(+st.dataset.max, Math.max(+st.dataset.min, +st.dataset.v + d));
+    st.dataset.v = v;
+    out.textContent = (st.dataset.u === ' s' && v === 0) ? 'off' : v + st.dataset.u;
+  };
+  minus.onclick = () => set(-st.dataset.d);
+  plus.onclick = () => set(+st.dataset.d);
+});
+</script>
+</body>
+</html>

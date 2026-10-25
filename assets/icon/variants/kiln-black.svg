@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Kiln app icon, "black": graphite body. Wide door (56% of the tile) with the prompt's
+       flame (assets/flame/flame-1.svg) on the hearth. macOS icon grid: 824 px body on 1024.
+       Source for scripts/make-icons.sh; all three variants share this geometry. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d3834"/><stop offset="1" stop-color="#161413"/></linearGradient>
+    <linearGradient id="door" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d0b0a"/><stop offset="1" stop-color="#070605"/></linearGradient>
+    <radialGradient id="hearth" cx="50%" cy="88%" r="65%"><stop offset="0" stop-color="#ff9a4a" stop-opacity="0.8"/><stop offset="0.55" stop-color="#ff7a2e" stop-opacity="0.2"/><stop offset="1" stop-color="#ff7a2e" stop-opacity="0"/></radialGradient>
+    <radialGradient id="sheen" cx="50%" cy="0%" r="75%"><stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <clipPath id="opening"><path d="M223.6 924.0 V542.9 A288.4 288.4 0 0 1 800.4 542.9 V924.0 Z"/></clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+  <g clip-path="url(#tile)">
+    <path d="M223.6 924.0 V542.9 A288.4 288.4 0 0 1 800.4 542.9 V924.0 Z" fill="url(#door)"/>
+    <g clip-path="url(#opening)"><rect x="120.6" y="203.0" width="782.8" height="772.5" fill="url(#hearth)"/></g>
+    <path d="M208.2 924.0 V542.9 A303.9 303.9 0 0 1 815.9 542.9 V924.0" fill="none" stroke="#e07b39" stroke-opacity="0.45" stroke-width="13.4"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <g transform="translate(369.9 512.0) scale(23.69)">
+    <path fill="#e07b39" d="M6 1 C8 4 10.5 6 10.5 9.5 C10.5 12.8 8.4 15 6 15 C3.6 15 1.5 12.8 1.5 9.5 C1.5 7 3.2 5.6 4 4 C4.3 5.5 5 6.3 5.6 6.5 C5.6 4.5 5.4 2.8 6 1 Z"/>
+    <path fill="#f6c08a" d="M6 8 C7.2 9.4 8 10.4 8 11.8 C8 13.2 7.1 14 6 14 C4.9 14 4 13.2 4 11.8 C4 10.6 4.8 9.6 5.3 9.2 C5.4 9.9 5.7 10.2 6 10.3 C6 9.4 5.8 8.7 6 8 Z"/>
+  </g>
+</svg>
