@@ -272,3 +272,7 @@ Newest at the bottom.
   command runs or a full-screen program is open there is no flame and no timer. Red follows
   the last exit code (130, Ctrl-C, does not count). `--bench-flame` keeps it moving without
   focus, to measure what it costs.
+
+- **Name pill outside projects (2026-10-25, the user's call).** Home and plain folders keep a
+  single name pill ("Home", the folder name) in the header, with no branch or runtime pill.
+  Projects show project, branch and runtime pills as before.
