@@ -1021,11 +1021,11 @@ fn prompt_switch(s: &mut Shots) {
         s.wait_for(Duration::from_secs(10), |p| !p.shows_kiln_prompt()),
         "the open session switches"
     );
-    s.pump(Duration::from_millis(800));
+    s.pump(Duration::from_millis(2500));
     s.shot("ps2-open-session-shell");
     s.action(Box::new(kiln::NewSession));
     s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
-    s.pump(Duration::from_millis(1500));
+    s.pump(Duration::from_millis(2500));
     assert!(
         s.wait_for(Duration::from_secs(5), |p| !p.shows_kiln_prompt()),
         "a new session"
@@ -1033,20 +1033,20 @@ fn prompt_switch(s: &mut Shots) {
     s.shot("ps3-new-session-shell");
     set(s, PromptStyle::Kiln);
     assert!(s.wait_for(Duration::from_secs(10), |p| p.shows_kiln_prompt()));
-    s.pump(Duration::from_millis(800));
+    s.pump(Duration::from_millis(2500));
     s.shot("ps4-new-session-kiln");
     s.action(Box::new(kiln::SelectSession1));
     assert!(
         s.wait_for(Duration::from_secs(10), |p| p.shows_kiln_prompt()),
         "the other open session"
     );
-    s.pump(Duration::from_millis(800));
+    s.pump(Duration::from_millis(2500));
     s.shot("ps5-open-session-kiln");
     // Something typed: left alone, and the next prompt follows the setting.
     s.keystroke("e c h o space k e p t");
     s.pump(Duration::from_millis(500));
     set(s, PromptStyle::Shell);
-    s.pump(Duration::from_millis(1500));
+    s.pump(Duration::from_millis(2500));
     assert!(
         s.wait_for(Duration::from_secs(1), |p| p.shows_kiln_prompt()),
         "typing is not interrupted"
@@ -1054,7 +1054,7 @@ fn prompt_switch(s: &mut Shots) {
     s.shot("ps6-typed-waits");
     s.keystroke("enter");
     assert!(s.wait_for(Duration::from_secs(10), |p| !p.shows_kiln_prompt()));
-    s.pump(Duration::from_millis(800));
+    s.pump(Duration::from_millis(2500));
     s.shot("ps7-after-enter-shell");
     set(s, PromptStyle::Kiln);
 }

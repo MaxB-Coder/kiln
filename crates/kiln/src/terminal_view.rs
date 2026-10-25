@@ -2134,10 +2134,14 @@ impl Render for TerminalView {
                     && live.kiln_prompt.unwrap_or(self.session.minimal_prompt());
                 let prompt = (live.phase == Phase::Prompt).then(|| {
                     let mut top = live.prompt_top.unwrap_or(cursor_abs).min(cursor_abs);
-                    // Kiln's own prompt is blank cells by design; the shell's may open with
-                    // an empty line.
+                    // Kiln's own prompt is blank cells by design. Of the shell's, only the
+                    // line typing starts on shows: lines above it (a two-line prompt's folder
+                    // and git status, an empty first line) repeat what the header shows.
                     if !kiln_prompt {
-                        top = Self::first_used_row(&term, top, cursor_abs);
+                        top = match live.input_start {
+                            Some((row, _)) if (top..=cursor_abs).contains(&row) => row,
+                            _ => Self::first_used_row(&term, top, cursor_abs),
+                        };
                     }
                     let last = Self::last_used_row(&term, top, cursor_abs);
                     (top, last - top + 1)
