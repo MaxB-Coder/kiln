@@ -171,10 +171,10 @@ mod tests {
     fn theme_keys_round_trip() {
         let text =
             "[theme]\nname = \"nord\" # cool\nfg = \"#010203\"\n\n[window]\nsidebar = true\n";
-        // A preset: only the name changes; the override stays.
+        // Only the name changes; the rest of the table stays as it was.
         let new = with_setting(text, &["theme", "name"], "tokyo-night".into()).unwrap();
         assert_eq!(new, text.replace("\"nord\"", "\"tokyo-night\""));
-        // Clearing the overrides removes exactly those keys.
+        // Removing keys removes exactly those.
         let cleared =
             with_edits(&new, &[(&["theme", "fg"], None), (&["theme", "bg"], None)]).unwrap();
         assert_eq!(cleared, new.replace("fg = \"#010203\"\n", ""));
@@ -182,7 +182,7 @@ mod tests {
         let ansi: toml_edit::Array = (0..16).map(|i| format!("#0000{i:02x}")).collect();
         let with_ansi = with_setting(text, &["theme", "ansi"], ansi.into()).unwrap();
         let config = config::parse(&with_ansi).unwrap();
-        assert_eq!(config.theme.ansi.unwrap()[15], "#00000f");
+        assert_eq!(config.theme.colours.ansi.unwrap()[15], "#00000f");
         assert!(with_ansi.ends_with("[window]\nsidebar = true\n"));
     }
 

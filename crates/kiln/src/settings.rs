@@ -48,15 +48,16 @@ pub enum Change {
     TintRemote(bool),
     OptionAsAlt(bool),
     UpdatesCheck(bool),
-    /// A theme by name (presets and "system"); the colour overrides stay.
+    /// A theme by name (presets and "system"), exactly as it is.
     Theme(&'static str),
-    /// Custom, starting from a preset: name, base and every colour, so the file says it all.
+    /// Back to the custom theme kept in `[theme.custom]`.
+    SelectCustom,
+    /// Custom, starting from a preset: `[theme.custom]` gets its base and every colour, so the
+    /// file says it all.
     CustomFrom(&'static str),
     /// An interface colour (index into `COLOURS`) or a terminal colour of the custom theme.
     Colour(usize, u32),
     Ansi(usize, u32),
-    /// Removes the colour overrides.
-    ClearOverrides,
 }
 
 /// A change as key paths and values (`None` removes the key).
@@ -67,39 +68,78 @@ fn ansi_value(ansi: &[u32; 16]) -> Value {
     array.into()
 }
 
+/// Colours right in `[theme]` (from before `[theme.custom]`) move into `[theme.custom]` when it
+/// does not exist yet, and leave `[theme]`, so whichever theme is chosen is exactly itself.
+fn tidy_theme(config: &Config) -> Edits {
+    let t = &config.theme;
+    let mut edits: Edits = Vec::new();
+    if t.custom.is_none() && t.colours.any() {
+        edits.push((
+            vec!["theme", "custom", "base"],
+            Some(t.custom_base().to_string().into()),
+        ));
+        let mut colours = t.colours.clone();
+        for (i, (key, _)) in COLOURS.iter().enumerate() {
+            if let Some(value) = themes::override_slot(&mut colours, i).clone() {
+                edits.push((vec!["theme", "custom", key], Some(value.into())));
+            }
+        }
+        if let Some(ansi) = &t.colours.ansi {
+            let array: toml_edit::Array = ansi.iter().cloned().collect();
+            edits.push((vec!["theme", "custom", "ansi"], Some(array.into())));
+        }
+    }
+    for (key, _) in COLOURS {
+        edits.push((vec!["theme", key], None));
+    }
+    edits.push((vec!["theme", "ansi"], None));
+    edits.push((vec!["theme", "base"], None));
+    edits
+}
+
 impl Change {
     /// What the change writes, given the config it changes.
     pub fn edits(self, config: &Config) -> Edits {
         match self {
-            Change::Theme(name) => vec![(vec!["theme", "name"], Some(name.into()))],
+            Change::Theme(name) => {
+                let mut edits = tidy_theme(config);
+                edits.push((vec!["theme", "name"], Some(name.into())));
+                edits
+            }
+            Change::SelectCustom => {
+                let mut edits = tidy_theme(config);
+                edits.push((vec!["theme", "name"], Some(theme::CUSTOM.into())));
+                edits
+            }
             Change::CustomFrom(base) => {
                 let p = theme::preset_by_id(base).map_or(theme::DEFAULT_PALETTE, |p| p.palette);
-                let mut edits: Edits = vec![
-                    (vec!["theme", "name"], Some(theme::CUSTOM.into())),
-                    (vec!["theme", "base"], Some(base.into())),
-                ];
+                let mut edits: Edits = COLOURS
+                    .iter()
+                    .map(|(key, _)| (vec!["theme", *key], None))
+                    .chain([(vec!["theme", "ansi"], None), (vec!["theme", "base"], None)])
+                    .collect();
+                edits.push((vec!["theme", "name"], Some(theme::CUSTOM.into())));
+                edits.push((vec!["theme", "custom", "base"], Some(base.into())));
                 for (i, (key, _)) in COLOURS.iter().enumerate() {
                     edits.push((
-                        vec!["theme", key],
+                        vec!["theme", "custom", key],
                         Some(themes::hex(themes::slot(&p, i)).into()),
                     ));
                 }
-                edits.push((vec!["theme", "ansi"], Some(ansi_value(&p.ansi))));
+                edits.push((vec!["theme", "custom", "ansi"], Some(ansi_value(&p.ansi))));
                 edits
             }
             Change::Colour(i, color) => {
-                vec![(vec!["theme", COLOURS[i].0], Some(themes::hex(color).into()))]
+                vec![(
+                    vec!["theme", "custom", COLOURS[i].0],
+                    Some(themes::hex(color).into()),
+                )]
             }
             Change::Ansi(i, color) => {
-                let mut ansi = config.palette().ansi;
+                let mut ansi = config.theme.custom_palette().ansi;
                 ansi[i] = color;
-                vec![(vec!["theme", "ansi"], Some(ansi_value(&ansi)))]
+                vec![(vec!["theme", "custom", "ansi"], Some(ansi_value(&ansi)))]
             }
-            Change::ClearOverrides => COLOURS
-                .iter()
-                .map(|(key, _)| (vec!["theme", *key], None))
-                .chain([(vec!["theme", "ansi"], None)])
-                .collect(),
             simple => {
                 let (key, value) = simple.entry();
                 vec![(key.to_vec(), Some(value))]
@@ -294,20 +334,25 @@ impl SettingsView {
         }
     }
 
-    /// The theme name in the config ("kiln-dark" when none is set).
+    /// The theme in effect.
     fn theme_name(&self) -> &str {
-        self.config.theme.name.as_deref().unwrap_or("kiln-dark")
+        self.config.theme.effective_name()
     }
 
-    /// The preset Custom starts from when chosen now: the theme on screen.
-    fn custom_base(&self) -> &'static str {
-        match theme::resolve_name(
-            self.theme_name(),
-            self.config.theme.base.as_deref(),
-            theme::system_dark(),
-        ) {
+    /// The preset a new custom theme starts from: the theme on screen.
+    fn start_from(&self) -> &'static str {
+        match theme::resolve_name(self.theme_name(), None, theme::system_dark()) {
             Some(preset) => preset.id,
             None => "kiln-dark",
+        }
+    }
+
+    /// Choosing Custom: the one kept in the file, or a new one from the theme on screen.
+    fn custom_change(&self) -> Change {
+        if self.config.theme.has_custom() {
+            Change::SelectCustom
+        } else {
+            Change::CustomFrom(self.start_from())
         }
     }
 
@@ -360,12 +405,14 @@ impl SettingsView {
         let mut config = self.config.clone();
         match target {
             Target::Colour(i) => {
-                *themes::override_slot(&mut config.theme, i) = Some(themes::hex(color))
+                let custom = config.theme.custom.get_or_insert_with(Default::default);
+                *themes::override_slot(&mut custom.colours, i) = Some(themes::hex(color))
             }
             Target::Ansi(i) => {
-                let mut ansi = config.palette().ansi;
+                let mut ansi = config.theme.custom_palette().ansi;
                 ansi[i] = color;
-                config.theme.ansi = Some(ansi.iter().map(|c| themes::hex(*c)).collect());
+                let custom = config.theme.custom.get_or_insert_with(Default::default);
+                custom.colours.ansi = Some(ansi.iter().map(|c| themes::hex(*c)).collect());
             }
         }
         self.config = config.clone();
@@ -397,7 +444,7 @@ impl SettingsView {
         }
         self.picker = None;
         if name == theme::CUSTOM {
-            self.set(Change::CustomFrom(self.custom_base()), cx);
+            self.set(self.custom_change(), cx);
         } else {
             self.set(Change::Theme(name), cx);
         }
@@ -477,11 +524,11 @@ impl SettingsView {
                 Change::Icon(AppIcon::ALL[next])
             }
             Control::Theme => {
-                let name = c.theme.name.as_deref().unwrap_or("kiln-dark");
+                let name = c.theme.effective_name();
                 let at = CARDS.iter().position(|(id, _)| *id == name).unwrap_or(1) as i32;
                 let next = CARDS[(at + if flip { 1 } else { step }).rem_euclid(7) as usize].0;
                 if next == theme::CUSTOM {
-                    Change::CustomFrom(self.custom_base())
+                    self.custom_change()
                 } else {
                     Change::Theme(next)
                 }
@@ -764,11 +811,11 @@ impl SettingsView {
     fn theme_cards(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette();
         let current = self.theme_name().to_string();
-        // Custom's card: the custom colours, or the theme it would start from.
-        let custom = if current == theme::CUSTOM {
-            self.config.palette()
+        // Custom's card: the custom colours, or the theme a new one would start from.
+        let custom = if self.config.theme.has_custom() {
+            self.config.theme.custom_palette()
         } else {
-            theme::preset_by_id(self.custom_base()).map_or(theme::DEFAULT_PALETTE, |p| p.palette)
+            theme::preset_by_id(self.start_from()).map_or(theme::DEFAULT_PALETTE, |p| p.palette)
         };
         let lit = self.lit(Control::Theme);
         let card = |i: usize, id: &'static str, title: &'static str, cx: &mut Context<Self>| {
@@ -842,37 +889,6 @@ impl SettingsView {
         rows
     }
 
-    /// "N colours overridden in kiln.toml · clear", when a preset is chosen.
-    fn overrides_note(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
-        let p = palette();
-        let n = themes::overrides(&self.config.theme);
-        (n > 0 && self.theme_name() != theme::CUSTOM).then(|| {
-            div()
-                .flex()
-                .flex_row()
-                .gap(px(6.))
-                .px(px(18.))
-                .pb(px(4.))
-                .text_size(px(10.5))
-                .text_color(theme::hsla(p.bg3))
-                .child(SharedString::from(format!(
-                    "{n} colour{} overridden in kiln.toml ·",
-                    if n == 1 { "" } else { "s" }
-                )))
-                .child(
-                    div()
-                        .id("clear-overrides")
-                        .cursor_pointer()
-                        .text_color(theme::hsla(p.fg_dim))
-                        .hover(|s| s.text_color(theme::hsla(p.accent)))
-                        .on_click(
-                            cx.listener(|this, _, _, cx| this.set(Change::ClearOverrides, cx)),
-                        )
-                        .child("clear"),
-                )
-        })
-    }
-
     fn swatch(
         &self,
         id: (&'static str, usize),
@@ -896,12 +912,7 @@ impl SettingsView {
     fn custom_editor(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette();
         let c = self.config.palette();
-        let base = self
-            .config
-            .theme
-            .base
-            .clone()
-            .unwrap_or_else(|| "kiln-dark".into());
+        let base = self.config.theme.custom_base().to_string();
         let base_title = theme::preset_by_id(&base).map_or("Kiln Dark", |p| p.title);
         let field = |i: usize, this: &Self, cx: &mut Context<Self>| {
             div()
@@ -1245,7 +1256,6 @@ impl Render for SettingsView {
             .child(self.icon_tiles(cx))
             .child(section("Theme"))
             .child(self.theme_cards(cx))
-            .children(self.overrides_note(cx))
             .when(self.theme_name() == theme::CUSTOM, |d| {
                 d.child(self.custom_editor(cx))
             })
@@ -1556,5 +1566,57 @@ mod tests {
                 .count();
             assert_eq!(changed, 1, "{change:?}");
         }
+    }
+
+    /// Applies `change` to `text` as Settings would.
+    fn apply(text: &str, change: Change) -> String {
+        let edits = change.edits(&config::parse(text).unwrap());
+        let edits: Vec<config_write::Edit> = edits
+            .iter()
+            .map(|(key, value)| (key.as_slice(), value.clone()))
+            .collect();
+        config_write::with_edits(text, &edits).unwrap()
+    }
+
+    #[test]
+    fn presets_are_exact_and_custom_comes_back() {
+        let nord = theme::preset_by_id("nord").unwrap().palette;
+        // A custom theme from Tokyo Night, then one colour changed.
+        let text = apply(config::TEMPLATE, Change::CustomFrom("tokyo-night"));
+        let text = apply(&text, Change::Colour(0, 0x123456));
+        let custom = config::parse(&text).unwrap();
+        assert_eq!(custom.theme.effective_name(), theme::CUSTOM);
+        assert_eq!(custom.palette_for(true).bg, 0x123456);
+        // A preset is exactly the preset; the custom colours wait in `[theme.custom]`.
+        let text = apply(&text, Change::Theme("nord"));
+        assert_eq!(config::parse(&text).unwrap().palette_for(true), nord);
+        // Custom again: the same colours.
+        let text = apply(&text, Change::SelectCustom);
+        assert_eq!(
+            config::parse(&text).unwrap().palette_for(true),
+            custom.palette_for(true)
+        );
+    }
+
+    #[test]
+    fn colours_from_before_the_custom_table_move_into_it() {
+        let old = "[theme]\nbase = \"kiln-light\"\nbg = \"#ffffff\"\nansi = [\"#000001\"]\n";
+        let before = config::parse(old).unwrap();
+        assert_eq!(before.theme.effective_name(), theme::CUSTOM);
+        let text = apply(old, Change::Theme("nord"));
+        let after = config::parse(&text).unwrap();
+        assert_eq!(
+            after.palette_for(true),
+            theme::preset_by_id("nord").unwrap().palette
+        );
+        assert!(
+            !after.theme.colours.any() && after.theme.base.is_none(),
+            "{text}"
+        );
+        let text = apply(&text, Change::SelectCustom);
+        assert_eq!(
+            config::parse(&text).unwrap().palette_for(true),
+            before.palette_for(true)
+        );
     }
 }

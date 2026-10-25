@@ -9,6 +9,8 @@ sidebar = true
 
 [theme]
 name = "custom"
+
+[theme.custom]
 base = "tokyo-night"
 bg = "#1a1b26"
 bar = "#16161e"

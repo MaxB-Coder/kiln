@@ -267,6 +267,13 @@ fn main() {
     // 1. The prompt in the input bar, the sidebar with one session.
     let ready = s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     println!("shell ready: {ready}");
+    if scenario == "prompt-switch" {
+        prompt_switch(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        let _ = std::fs::remove_dir_all(&config_home);
+        println!("done");
+        return;
+    }
     if scenario == "settings" {
         settings(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -846,10 +853,30 @@ fn settings(s: &mut Shots) {
     s.scroll(590., 500., -420.);
     s.shot("t7-custom-picker");
     s.scroll(590., 500., 2000.);
-    // A preset over custom colours: the note offers to clear them.
+    // A pink accent, then Nord: exactly Nord, nothing left over.
+    s.cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set(kiln::settings::Change::Colour(9, 0xff3d8b), cx)
+        })
+    });
     s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("nord", cx)));
     s.pump(Duration::from_millis(600));
-    s.shot("t8-overrides-note");
+    s.shot("t8-preset-after-custom");
+    let nord = kiln::theme::preset_by_id("nord").unwrap().palette;
+    let on_file = || kiln::config::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        on_file().palette_for(true),
+        nord,
+        "a preset is exactly itself"
+    );
+    assert_eq!(kiln::theme::palette(), nord, "and on screen");
+    std::fs::copy(&path, s.out.join("t8-kiln-nord.toml")).unwrap();
+    // Custom again: the pink accent comes back.
+    s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme(kiln::theme::CUSTOM, cx)));
+    s.pump(Duration::from_millis(600));
+    s.shot("t9-custom-again");
+    assert_eq!(on_file().palette_for(true).accent, 0xff3d8b);
+    assert_eq!(kiln::theme::palette().accent, 0xff3d8b);
     s.cx.update(|cx| view.update(cx, |v, cx| v.choose_theme("kiln-dark", cx)));
     s.keystroke("escape");
 
@@ -869,6 +896,36 @@ fn settings(s: &mut Shots) {
         cx.clear_key_bindings();
         cx.bind_keys(keymap::bindings(keymap::KeyStyle::current()));
     });
+}
+
+/// The prompt setting switched from Settings: the open session takes it at its next prompt,
+/// a new one starts with it, and back again. Uses the user's own shell setup (Starship, if
+/// they have it), as a person would see it.
+fn prompt_switch(s: &mut Shots) {
+    use kiln::config::PromptStyle;
+    use kiln::settings::Change;
+    let set = |s: &mut Shots, style: PromptStyle| {
+        s.keystroke("cmd-,");
+        let view = s.workspace(|w| w.settings_view()).unwrap();
+        s.cx.update(|cx| view.update(cx, |v, cx| v.set(Change::Prompt(style), cx)));
+        s.keystroke("escape");
+    };
+    s.run("echo first session", Duration::from_secs(5));
+    s.shot("ps1-kiln");
+    set(s, PromptStyle::Shell);
+    // The open session: its next prompt is the shell's own.
+    s.run("echo after switching", Duration::from_secs(5));
+    s.shot("ps2-open-session-shell");
+    s.action(Box::new(kiln::NewSession));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.pump(Duration::from_millis(1500));
+    s.shot("ps3-new-session-shell");
+    set(s, PromptStyle::Kiln);
+    s.run("echo back to kiln", Duration::from_secs(5));
+    s.shot("ps4-new-session-kiln");
+    s.action(Box::new(kiln::SelectSession1));
+    s.run("echo back to kiln", Duration::from_secs(5));
+    s.shot("ps5-open-session-kiln");
 }
 
 /// What one flame frame costs: the workspace rendered, laid out and painted again (the panes

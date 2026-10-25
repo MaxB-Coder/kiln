@@ -137,16 +137,37 @@ pub struct WindowConfig {
     pub restore: bool,
 }
 
-/// The theme: a built-in one by name, and colour overrides on top of it, as "#rrggbb" strings
-/// (keys match the palette's names).
+/// The theme: a built-in one by name, or "custom" from `[theme.custom]`. Colour keys right in
+/// `[theme]` still apply on top of whichever theme (as they did before themes had names); a
+/// `[theme]` with colours and no name is Custom.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ThemeConfig {
     /// "kiln-dark" (the default), "kiln-light", "system", "catppuccin-mocha", "tokyo-night",
     /// "nord" or "custom".
     pub name: Option<String>,
-    /// The theme "custom" starts from (default "kiln-dark").
+    /// Where an older Custom theme started (now `[theme.custom] base`).
     pub base: Option<String>,
+    #[serde(flatten)]
+    pub colours: ThemeColours,
+    /// The custom theme, kept while another one is chosen.
+    pub custom: Option<CustomTheme>,
+}
+
+/// `[theme.custom]`: a preset to start from and the colours that differ.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CustomTheme {
+    /// The theme it starts from (default "kiln-dark").
+    pub base: Option<String>,
+    #[serde(flatten)]
+    pub colours: ThemeColours,
+}
+
+/// Palette colours as "#rrggbb" strings; keys match the palette's names.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ThemeColours {
     pub bg: Option<String>,
     pub bar: Option<String>,
     pub raised: Option<String>,
@@ -162,6 +183,81 @@ pub struct ThemeConfig {
     pub modified: Option<String>,
     /// The 16 terminal colours.
     pub ansi: Option<Vec<String>>,
+}
+
+impl ThemeColours {
+    /// Whether any colour is set.
+    pub fn any(&self) -> bool {
+        self != &ThemeColours::default()
+    }
+
+    /// Sets the palette's colours from these; bad ones are logged and skipped.
+    fn apply(&self, p: &mut Palette, table: &str) {
+        let set = |slot: &mut u32, value: &Option<String>, name: &str| {
+            if let Some(value) = value {
+                match parse_hex(value) {
+                    Some(hex) => *slot = hex,
+                    None => {
+                        log::warn!("config: {table}.{name} = {value:?} is not a #rrggbb colour")
+                    }
+                }
+            }
+        };
+        set(&mut p.bg, &self.bg, "bg");
+        set(&mut p.bar, &self.bar, "bar");
+        set(&mut p.raised, &self.raised, "raised");
+        set(&mut p.bg1, &self.bg1, "bg1");
+        set(&mut p.bg2, &self.bg2, "bg2");
+        set(&mut p.bg3, &self.bg3, "bg3");
+        set(&mut p.muted, &self.muted, "muted");
+        set(&mut p.fg, &self.fg, "fg");
+        set(&mut p.fg_dim, &self.fg_dim, "fg_dim");
+        set(&mut p.accent, &self.accent, "accent");
+        set(&mut p.failed, &self.failed, "failed");
+        set(&mut p.ok, &self.ok, "ok");
+        set(&mut p.modified, &self.modified, "modified");
+        if let Some(ansi) = &self.ansi {
+            for (i, value) in ansi.iter().take(16).enumerate() {
+                set(&mut p.ansi[i], &Some(value.clone()), "ansi");
+            }
+        }
+    }
+}
+
+impl ThemeConfig {
+    /// The theme in effect: its name, or "custom" for colours without one (an older config).
+    pub fn effective_name(&self) -> &str {
+        match self.name.as_deref() {
+            Some(name) => name,
+            None if self.colours.any() => crate::theme::CUSTOM,
+            None => "kiln-dark",
+        }
+    }
+
+    /// The preset the custom theme starts from.
+    pub fn custom_base(&self) -> &str {
+        self.custom
+            .as_ref()
+            .and_then(|c| c.base.as_deref())
+            .or(self.base.as_deref())
+            .unwrap_or("kiln-dark")
+    }
+
+    /// Whether there is a custom theme to go back to (`[theme.custom]`, or older colours).
+    pub fn has_custom(&self) -> bool {
+        self.custom.is_some() || self.colours.any()
+    }
+
+    /// The custom theme's palette, whether or not it is the one in effect.
+    pub fn custom_palette(&self) -> Palette {
+        let mut p = crate::theme::preset_by_id(self.custom_base())
+            .map_or(DEFAULT_PALETTE, |preset| preset.palette);
+        if let Some(custom) = &self.custom {
+            custom.colours.apply(&mut p, "theme.custom");
+        }
+        self.colours.apply(&mut p, "theme");
+        p
+    }
 }
 
 impl Default for Config {
@@ -204,43 +300,18 @@ impl Config {
 
     pub fn palette_for(&self, system_dark: bool) -> Palette {
         let t = &self.theme;
-        let name = t.name.as_deref().unwrap_or("kiln-dark");
-        let mut p = match crate::theme::resolve_name(name, t.base.as_deref(), system_dark) {
+        let name = t.effective_name();
+        if name == crate::theme::CUSTOM {
+            return t.custom_palette();
+        }
+        let mut p = match crate::theme::resolve_name(name, None, system_dark) {
             Some(preset) => preset.palette,
             None => {
-                log::warn!(
-                    "config: theme {name:?} (base {:?}) is not a theme Kiln has",
-                    t.base
-                );
+                log::warn!("config: theme {name:?} is not a theme Kiln has");
                 DEFAULT_PALETTE
             }
         };
-        let set = |slot: &mut u32, value: &Option<String>, name: &str| {
-            if let Some(value) = value {
-                match parse_hex(value) {
-                    Some(hex) => *slot = hex,
-                    None => log::warn!("config: theme.{name} = {value:?} is not a #rrggbb colour"),
-                }
-            }
-        };
-        set(&mut p.bg, &t.bg, "bg");
-        set(&mut p.bar, &t.bar, "bar");
-        set(&mut p.raised, &t.raised, "raised");
-        set(&mut p.bg1, &t.bg1, "bg1");
-        set(&mut p.bg2, &t.bg2, "bg2");
-        set(&mut p.bg3, &t.bg3, "bg3");
-        set(&mut p.muted, &t.muted, "muted");
-        set(&mut p.fg, &t.fg, "fg");
-        set(&mut p.fg_dim, &t.fg_dim, "fg_dim");
-        set(&mut p.accent, &t.accent, "accent");
-        set(&mut p.failed, &t.failed, "failed");
-        set(&mut p.ok, &t.ok, "ok");
-        set(&mut p.modified, &t.modified, "modified");
-        if let Some(ansi) = &t.ansi {
-            for (i, value) in ansi.iter().take(16).enumerate() {
-                set(&mut p.ansi[i], &Some(value.clone()), "ansi");
-            }
-        }
+        t.colours.apply(&mut p, "theme");
         p
     }
 }
@@ -375,10 +446,11 @@ check = true
 
 [theme]
 # "kiln-dark", "kiln-light", "system" (dark or light with your OS), "catppuccin-mocha",
-# "tokyo-night", "nord", or "custom" (start from `base`, then set colours below).
+# "tokyo-night", "nord", or "custom" (the colours in [theme.custom] below).
 name = "kiln-dark"
-# base = "kiln-dark"
-# Any palette colour, as "#rrggbb", on top of the theme:
+# Any palette colour, as "#rrggbb", on top of the theme. For a theme of your own, put them in
+# [theme.custom] with the preset it starts from (`base = "kiln-dark"`) and set name = "custom":
+# Settings keeps it there while you try other themes.
 # bg = "#282828"
 # bar = "#1d2021"
 # fg = "#ebdbb2"
@@ -441,6 +513,21 @@ mod tests {
             palette("[theme]\nname = \"system\"\n", true),
             DEFAULT_PALETTE
         );
+        // Custom: its own table, on top of its base.
+        let custom = "[theme.custom]\nbase = \"kiln-light\"\nbg = \"#ffffff\"\n";
+        assert_eq!(
+            palette(&format!("[theme]\nname = \"custom\"\n{custom}"), true),
+            Palette {
+                bg: 0xffffff,
+                ..light
+            }
+        );
+        // A preset ignores the custom table.
+        assert_eq!(
+            palette(&format!("[theme]\nname = \"nord\"\n{custom}"), true),
+            nord
+        );
+        // Custom written before `[theme.custom]`: base and colours right in `[theme]`.
         assert_eq!(
             palette(
                 "[theme]\nname = \"custom\"\nbase = \"kiln-light\"\nbg = \"#ffffff\"\n",

@@ -3,7 +3,7 @@
 
 use gpui::{Bounds, PathBuilder, Pixels, Window, point, px};
 
-use crate::config::ThemeConfig;
+use crate::config::ThemeColours;
 use crate::theme::{self, Palette};
 
 /// The interface colours, as kiln.toml names them, with their labels in Settings.
@@ -42,8 +42,8 @@ pub fn slot(p: &Palette, i: usize) -> u32 {
     ][i]
 }
 
-/// The override for colour `i` in the config.
-pub fn override_slot(t: &mut ThemeConfig, i: usize) -> &mut Option<String> {
+/// Colour `i` in a table of theme colours.
+pub fn override_slot(t: &mut ThemeColours, i: usize) -> &mut Option<String> {
     match i {
         0 => &mut t.bg,
         1 => &mut t.bar,
@@ -59,15 +59,6 @@ pub fn override_slot(t: &mut ThemeConfig, i: usize) -> &mut Option<String> {
         11 => &mut t.ok,
         _ => &mut t.modified,
     }
-}
-
-/// How many colours the config sets on top of its theme.
-pub fn overrides(t: &ThemeConfig) -> usize {
-    let mut t = t.clone();
-    (0..COLOURS.len())
-        .filter(|&i| override_slot(&mut t, i).is_some())
-        .count()
-        + t.ansi.as_ref().map_or(0, |a| a.len().min(16))
 }
 
 pub fn hex(color: u32) -> String {
@@ -256,18 +247,6 @@ mod tests {
             }
         }
         assert_eq!(from_hsv(120., 1., 1.), 0x00ff00);
-    }
-
-    #[test]
-    fn overrides_are_counted() {
-        let mut t = ThemeConfig::default();
-        assert_eq!(overrides(&t), 0);
-        t.fg = Some("#ffffff".into());
-        t.ansi = Some(vec!["#000000".into(); 16]);
-        assert_eq!(overrides(&t), 17);
-        let mut t2 = t.clone();
-        *override_slot(&mut t2, 7) = None;
-        assert_eq!(overrides(&t2), 16);
     }
 
     #[test]

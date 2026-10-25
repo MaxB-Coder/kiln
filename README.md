@@ -102,7 +102,10 @@ color = "#83a598"
 
 [theme]
 name = "nord"                   # or kiln-dark, kiln-light, system, catppuccin-mocha, tokyo-night, custom
-fg = "#eceff4"                  # any colour on top of the theme
+
+[theme.custom]                  # used when name = "custom"; kept while you use a preset
+base = "tokyo-night"            # the preset it starts from
+accent = "#ff3d8b"              # any palette colour, as "#rrggbb"
 ```
 
 ## Privacy and security

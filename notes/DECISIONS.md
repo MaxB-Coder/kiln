@@ -285,7 +285,7 @@ Newest at the bottom.
   renamed over it; through a symlink, onto its target, keeping its permissions). A file that
   does not parse, or holds a value Kiln cannot use, is shown in the pop-up and never written.
   Each window remembers the config it applied, so the file watcher's reload after Kiln's own
-  write changes nothing (no flicker, no loop). The prompt style applies to new sessions.
+  write changes nothing (no flicker, no loop). The prompt style applies live, see below.
   Keyboard: Tab or ↑↓ move, ←→ change, Space or Enter toggle, Esc closes. The footer shows
   this platform's key only.
 - **App icon variants** (Terracotta, the default, Black, White; `assets/icon/variants`, made
@@ -301,15 +301,27 @@ Newest at the bottom.
   (Kiln Dark or Light with the OS appearance, followed live through GPUI's window appearance
   on all three systems; dark where it is not known), Catppuccin Mocha, Tokyo Night and Nord
   (MIT palettes, credited in `assets/themes/THEME-LICENSES.md`, which every package ships),
-  and Custom (`base` plus the colours in the file). They are a table in `theme.rs`, not files.
-  The colour keys stay overrides on top of whichever theme applies, so a config with overrides
-  and no name looks as it did; an unknown name logs a warning and gives Kiln Dark. Choosing a
-  theme in Settings writes only `name` and leaves overrides alone (a note offers to clear
-  them); Custom from a base writes `name`, `base` and every colour, so the file describes the
-  theme on its own. The picker (a saturation/value square and a hue strip, drawn with GPUI
+  and Custom. They are a table in `theme.rs`, not files. Custom lives in its own table,
+  `[theme.custom]` (`base` plus colours), used only when `name = "custom"`: Custom is one more
+  card, a preset is exactly that preset, and choosing Custom again brings its colours back.
+  Choosing any theme in Settings also removes colour keys right in `[theme]`; a file from
+  before `[theme.custom]` (colours and `base` in `[theme]`) still loads, as Custom when it has
+  no name, and the first theme choice in Settings moves them into `[theme.custom]`. Colours
+  written by hand in `[theme]` next to a preset name still apply on top of it. An unknown
+  name logs a warning and gives Kiln Dark. Custom from a base writes `name`, and the base and
+  every colour in `[theme.custom]`, so the file describes the theme on its own. The picker (a saturation/value square and a hue strip, drawn with GPUI
   gradients) shows a colour while it is dragged and writes it on release; hex fields write on
   each valid `#rrggbb`. Everything takes its colours from the palette: the flame's inner colour
   is `blend(accent, fg, 0.45)` (from `failed` after a failure), project dots use palette
   colours, and the veil and pop-up shadows are warm and light on light themes, near black on
   dark ones (by background luminance). The Windows close button keeps the system red. The app
   icon is its own setting, not tied to the theme.
+- **Prompt style switches live.** `KILN_PROMPT` in the environment only reached new sessions,
+  so each Kiln process keeps the style in a small file (`<temp>/kiln-prompt-<pid>`, "kiln" or
+  "shell"; its path in `KILN_PROMPT_FILE`, through WSLENV as a path) that the zsh, bash and
+  PowerShell scripts read before every prompt. Changing the setting rewrites the file, so every
+  open session follows at its next prompt. The scripts keep the user's own prompt and
+  `STARSHIP_CONFIG` from when they loaded and put them back for "shell". Each prompt reports
+  its style (`OSC 1337;KilnPrompt=kiln|shell`), and Kiln draws the flame only where the shell
+  printed Kiln's two blank cells; the blank first line Starship adds is not kept above a shell
+  prompt in the input box.
