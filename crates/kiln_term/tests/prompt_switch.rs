@@ -3,7 +3,7 @@
 //! Kiln's prompt throughout.)
 
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use kiln_term::integration::{self, MinimalPrompt};
@@ -19,6 +19,9 @@ const SIZE: GridSize = GridSize {
 /// Starts with Kiln's prompt, switches to the shell's own and back, pressing Enter between;
 /// returns each prompt's line start and the mode the shell reported for it.
 fn switch(program: &str, args: &[&str]) -> Option<Vec<(String, Option<bool>)>> {
+    // One shell at a time: they all switch the one mode file of this process.
+    static SHELLS: Mutex<()> = Mutex::new(());
+    let _one = SHELLS.lock().unwrap_or_else(|e| e.into_inner());
     use kiln_term::engine::grid::Dimensions as _;
     use kiln_term::engine::index::{Column, Line};
 
