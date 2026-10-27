@@ -357,7 +357,10 @@ Newest at the bottom.
   prompt the input box shows only the line typing starts on (from the OSC 133 input mark):
   lines above it, such as a two-line Starship prompt's folder and git pills, repeat what the
   header shows, so "Shell's own" reads as the prompt character (e.g. `❯`) where Kiln's reads
-  as the flame. The scripts keep the user's own prompt and
+  as the flame. Two things keep the pills from flashing up on a switch: a reported style
+  applies from the next prompt's start mark (the shell reports in its hook, before Starship has
+  drawn anything, and the prompt on screen keeps its own style until then), and while a shell
+  prompt is being drawn, before its input mark, the box is one blank line. The scripts keep the user's own prompt and
   `STARSHIP_CONFIG` from when they loaded and put them back for "shell". Each prompt reports
   its style (`OSC 1337;KilnPrompt=kiln|shell`), and Kiln draws the flame only where the shell
   printed Kiln's two blank cells; the blank first line Starship adds is not kept above a shell

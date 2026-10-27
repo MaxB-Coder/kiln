@@ -1007,11 +1007,35 @@ fn settings(s: &mut Shots) {
 fn prompt_switch(s: &mut Shots) {
     use kiln::config::PromptStyle;
     use kiln::settings::Change;
+    // Every few milliseconds while prompts redraw: the input box never shows the lines above
+    // the one typed on (the Starship pills: folder, branch).
+    let watch = |s: &mut Shots, what: &str| {
+        let end = Instant::now() + Duration::from_millis(2500);
+        let mut samples = 0;
+        while Instant::now() < end {
+            s.pump(Duration::from_millis(5));
+            let text = s.cx.update(|cx| {
+                s.window
+                    .read(cx)
+                    .ok()
+                    .and_then(|w| w.focused_view())
+                    .map(|pane| pane.read(cx).input_box_text())
+            });
+            let text = text.unwrap_or_default();
+            assert!(
+                !text.contains("main") && !text.contains('\u{e0b6}'),
+                "{what}: the pills showed: {text:?}"
+            );
+            samples += 1;
+        }
+        println!("{what}: {samples} samples, no pills");
+    };
     let set = |s: &mut Shots, style: PromptStyle| {
         s.keystroke("cmd-,");
         let view = s.workspace(|w| w.settings_view()).unwrap();
         s.cx.update(|cx| view.update(cx, |v, cx| v.set(Change::Prompt(style), cx)));
         s.keystroke("escape");
+        watch(s, &format!("switching to {style:?}"));
     };
     s.run("echo first session", Duration::from_secs(5));
     s.shot("ps1-kiln");
@@ -1024,6 +1048,7 @@ fn prompt_switch(s: &mut Shots) {
     s.pump(Duration::from_millis(2500));
     s.shot("ps2-open-session-shell");
     s.action(Box::new(kiln::NewSession));
+    watch(s, "a new session starting");
     s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     s.pump(Duration::from_millis(2500));
     assert!(
@@ -1053,6 +1078,7 @@ fn prompt_switch(s: &mut Shots) {
     );
     s.shot("ps6-typed-waits");
     s.keystroke("enter");
+    watch(s, "the command's next prompt");
     assert!(s.wait_for(Duration::from_secs(10), |p| !p.shows_kiln_prompt()));
     s.pump(Duration::from_millis(2500));
     s.shot("ps7-after-enter-shell");

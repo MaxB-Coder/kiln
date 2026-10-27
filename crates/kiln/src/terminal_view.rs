@@ -1538,28 +1538,63 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// The last row (absolute) at or after `from` that holds anything, or the cursor's row.
-    /// The first row from `from` that holds anything, at most the cursor's: prompts that start
-    /// with an empty line (Starship's `add_newline`) do not open the input box with a gap.
-    fn first_used_row(term: &EngineTerm, from: usize, cursor_abs: usize) -> usize {
-        let grid = term.grid();
-        let history = grid.history_size();
-        let columns = grid.columns();
-        let mut abs = from;
-        while abs < cursor_abs {
-            let row = &grid[Line(abs as i32 - history as i32)];
-            let used = (0..columns).any(|c| {
-                let cell = &row[Column(c)];
-                cell.c != ' ' || cell.bg != Color::Named(NamedColor::Background)
-            });
-            if used {
-                break;
-            }
-            abs += 1;
+    /// The input box's rows: first row (absolute), count, and whether it is drawn blank.
+    /// `None` when no prompt waits.
+    fn prompt_rows(
+        &self,
+        term: &EngineTerm,
+        live: &kiln_term::LiveState,
+        kiln_prompt: bool,
+        cursor_abs: usize,
+    ) -> Option<(usize, usize, bool)> {
+        if live.phase != Phase::Prompt {
+            return None;
         }
-        abs
+        let mut top = live.prompt_top.unwrap_or(cursor_abs).min(cursor_abs);
+        // Kiln's own prompt is blank cells by design. Of the shell's, only the line typing
+        // starts on shows: lines above it (a two-line prompt's folder and git status, an
+        // empty first line) repeat what the header shows.
+        if !kiln_prompt {
+            match live.input_start {
+                Some((row, _)) if (top..=cursor_abs).contains(&row) => top = row,
+                // Still drawing (the input mark ends the prompt): one blank line, so the
+                // lines above never flash up.
+                _ => return Some((cursor_abs, 1, true)),
+            }
+        }
+        let last = Self::last_used_row(term, top, cursor_abs);
+        Some((top, last - top + 1, false))
     }
 
+    /// The text the input box shows now (the snapshots check it while prompts redraw).
+    pub fn input_box_text(&self) -> String {
+        let term = self.session.term().lock();
+        let live = self.session.live();
+        let grid = term.grid();
+        let history = grid.history_size();
+        let cursor_abs = history + grid.cursor.point.line.0.max(0) as usize;
+        let kiln_prompt = self.shows_kiln_prompt();
+        let Some((top, rows, blank)) = self.prompt_rows(&term, &live, kiln_prompt, cursor_abs)
+        else {
+            return String::new();
+        };
+        if blank {
+            return String::new();
+        }
+        (top..top + rows)
+            .map(|abs| {
+                let row = &grid[Line(abs as i32 - history as i32)];
+                (0..grid.columns())
+                    .map(|c| row[Column(c)].c)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The last row (absolute) at or after `from` that holds anything, or the cursor's row.
     fn last_used_row(term: &EngineTerm, from: usize, cursor_abs: usize) -> usize {
         let grid = term.grid();
         let history = grid.history_size();
@@ -2106,7 +2141,8 @@ impl Render for TerminalView {
                 rows: usize,
             },
             Blocks {
-                prompt: Option<(usize, usize)>,
+                /// First row, row count, and whether to draw it blank.
+                prompt: Option<(usize, usize, bool)>,
                 /// Where the prompt starts within it (row, column), and whether the last
                 /// command failed: the flame goes there.
                 flame: Option<(usize, usize, bool)>,
@@ -2132,23 +2168,10 @@ impl Render for TerminalView {
                 // has, the setting it started with.
                 let kiln_prompt = self.session.integration_loaded()
                     && live.kiln_prompt.unwrap_or(self.session.minimal_prompt());
-                let prompt = (live.phase == Phase::Prompt).then(|| {
-                    let mut top = live.prompt_top.unwrap_or(cursor_abs).min(cursor_abs);
-                    // Kiln's own prompt is blank cells by design. Of the shell's, only the
-                    // line typing starts on shows: lines above it (a two-line prompt's folder
-                    // and git status, an empty first line) repeat what the header shows.
-                    if !kiln_prompt {
-                        top = match live.input_start {
-                            Some((row, _)) if (top..=cursor_abs).contains(&row) => row,
-                            _ => Self::first_used_row(&term, top, cursor_abs),
-                        };
-                    }
-                    let last = Self::last_used_row(&term, top, cursor_abs);
-                    (top, last - top + 1)
-                });
+                let prompt = self.prompt_rows(&term, &live, kiln_prompt, cursor_abs);
                 // Ctrl-C (130) is not a failure; the startup files never report one.
                 let failed = live.last_exit.is_some_and(|code| code != 0 && code != 130);
-                let flame = prompt.filter(|_| kiln_prompt).map(|(top, _)| {
+                let flame = prompt.filter(|_| kiln_prompt).map(|(top, _, _)| {
                     let row = live.prompt_top.map_or(0, |p| p.saturating_sub(top));
                     (row, live.prompt_column, failed)
                 });
@@ -2219,7 +2242,7 @@ impl Render for TerminalView {
                             d.child(render_copy_note(&note))
                         }),
                 )
-                .when_some(prompt, |d, (top, rows)| {
+                .when_some(prompt, |d, (top, rows, blank)| {
                     // The input: a raised, rounded box inset from the pane's edges, with the
                     // shell's line (growing upward with completion menus and second lines).
                     // Kiln draws the flame over the blank cells the minimal prompt leaves.
@@ -2261,13 +2284,16 @@ impl Render for TerminalView {
                                     .px(px(inner_x))
                                     .pt(px(8.))
                                     .pb(px(9.))
-                                    .child(LiveElement::new(
-                                        entity,
-                                        self.focus.clone(),
-                                        LiveRole::Prompt,
-                                        top,
-                                        rows,
-                                    ))
+                                    .child(
+                                        LiveElement::new(
+                                            entity,
+                                            self.focus.clone(),
+                                            LiveRole::Prompt,
+                                            top,
+                                            rows,
+                                        )
+                                        .blank(blank),
+                                    )
                                     .children(flame),
                             ),
                     )

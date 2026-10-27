@@ -31,6 +31,8 @@ pub struct LiveElement {
     show_cursor: bool,
     /// This element receives typed text from the input method.
     input: bool,
+    /// Draws nothing (a prompt still being drawn; see `TerminalView`).
+    blank: bool,
 }
 
 impl LiveElement {
@@ -50,7 +52,13 @@ impl LiveElement {
             fill: false,
             show_cursor: true,
             input: true,
+            blank: false,
         }
+    }
+
+    pub fn blank(mut self, blank: bool) -> Self {
+        self.blank = blank;
+        self
     }
 
     pub fn fill(mut self) -> Self {
@@ -140,14 +148,16 @@ impl Element for LiveElement {
         } else {
             self.rows
         };
-        let cursor_in_view = self.show_cursor && cursor_row >= 0 && (cursor_row as usize) < rows;
+        let cursor_in_view =
+            !self.blank && self.show_cursor && cursor_row >= 0 && (cursor_row as usize) < rows;
         let block_cursor_at =
             (focused && blink_on && cursor_in_view && cursor.shape == CursorShape::Block)
                 .then_some((cursor_row as usize, cursor.point.column.0));
 
         let mut painter = GridPainter::new(bounds.origin, metrics, &colors, Tone::Normal)
             .with_scale(window.scale_factor());
-        for row in crate::grid_paint::visible_rows(bounds, metrics.line_height, rows, window) {
+        let painted = if self.blank { 0 } else { rows };
+        for row in crate::grid_paint::visible_rows(bounds, metrics.line_height, painted, window) {
             let line = self.top as i32 + row as i32 - history;
             if line < -history || line >= screen_lines {
                 continue;

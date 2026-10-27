@@ -39,9 +39,13 @@ pub struct LiveState {
     pub prompt_top: Option<usize>,
     /// The column the prompt starts at (its OSC 133 start mark), on `prompt_top`.
     pub prompt_column: usize,
-    /// Whether the shell draws Kiln's minimal prompt (blank cells for the flame), as it last
-    /// reported; `None` before its first report.
+    /// Whether the prompt on screen is Kiln's minimal one (blank cells for the flame);
+    /// `None` before the shell's first report.
     pub kiln_prompt: Option<bool>,
+    /// The style the shell reported for the prompt it is about to draw. It applies from that
+    /// prompt's start mark: the shell reports before it draws (Starship can take a while), and
+    /// meanwhile the prompt on screen keeps its own style.
+    pub next_kiln_prompt: Option<bool>,
     /// First row of the running command's output.
     pub output_top: Option<usize>,
     /// The running command.
@@ -148,6 +152,9 @@ impl BlockRecorder {
         let (abs, column) = cursor_abs(term);
         match mark {
             Mark::PromptStart => {
+                if let Some(kiln) = live.next_kiln_prompt.take() {
+                    live.kiln_prompt = Some(kiln);
+                }
                 live.input_start = None;
                 live.integrated = true;
                 live.phase = Phase::Prompt;
@@ -208,7 +215,7 @@ impl BlockRecorder {
                 None
             }
             Mark::PromptMode { kiln } => {
-                live.kiln_prompt = Some(*kiln);
+                live.next_kiln_prompt = Some(*kiln);
                 None
             }
         }
@@ -487,6 +494,35 @@ mod tests {
             Point::new(line, Column(0)),
             Point::new(line, Column(term.columns() - 1)),
         )
+    }
+
+    #[test]
+    fn a_reported_prompt_style_applies_from_the_next_prompt() {
+        let size = GridSize {
+            columns: 20,
+            lines: 10,
+            cell_width: 8,
+            cell_height: 16,
+        };
+        let mut term = Term::new(Config::default(), &size, EventProxy::for_test());
+        let mut recorder = BlockRecorder::new(1000);
+        let mut live = LiveState::default();
+        let mut mark = |mark: Mark, live: &mut LiveState| {
+            recorder.on_mark(&mark, &mut term, live);
+        };
+        mark(Mark::PromptMode { kiln: true }, &mut live);
+        assert_eq!(live.kiln_prompt, None, "nothing drawn yet");
+        mark(Mark::PromptStart, &mut live);
+        assert_eq!(live.kiln_prompt, Some(true));
+        // Switched: the shell reports before drawing its next prompt; the one on screen
+        // keeps its style until then.
+        mark(Mark::PromptMode { kiln: false }, &mut live);
+        assert_eq!(live.kiln_prompt, Some(true));
+        mark(Mark::PromptStart, &mut live);
+        assert_eq!(live.kiln_prompt, Some(false));
+        // A redraw of the same prompt (no new report) keeps it.
+        mark(Mark::PromptStart, &mut live);
+        assert_eq!(live.kiln_prompt, Some(false));
     }
 
     #[test]
