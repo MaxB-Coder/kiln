@@ -1465,30 +1465,32 @@ fn sidebar(s: &mut Shots, state_file: &std::path::Path) {
     s.keystroke("enter");
     s.action(Box::new(kiln::SelectSession2));
     s.action(Box::new(kiln::ProjectColour));
-    // ↓ ↓ ↓ from Blue is the custom field; typing goes there, with a preview.
+    // ↓ from Blue's row is the custom field; typing goes there, with a preview. Magenta's own
+    // hex points at the Magenta swatch (thin ring, its name below) and is saved by name.
     s.keystroke("down ctrl-u");
     s.keystroke("# c 4 5 a a 8");
     s.pump(Duration::from_millis(300));
-    s.shot("sc1-dark-custom-hex");
+    s.shot("sc1-dark-typed-hex");
     s.keystroke("enter");
-    let config = on_file(&path);
-    assert_eq!(
+    let colour = || {
+        let config = on_file(&path);
         kiln::state::project_config(&demo_root, &config)
             .unwrap()
             .1
             .color
-            .as_deref(),
-        Some("#c45aa8")
-    );
-    s.pump(Duration::from_millis(800));
-    s.shot("sc2-dark-cards");
-    // The pop-up, from the custom field ↑ to the colours: the chosen one's name shows below
-    // the grid (as the one under the mouse does).
+            .clone()
+    };
+    assert_eq!(colour().as_deref(), Some("magenta"));
+    // Opened again: the accent ring on the current colour and its name below; Custom empty.
     s.action(Box::new(kiln::ProjectColour));
-    s.keystroke("up");
     s.pump(Duration::from_millis(300));
     s.shot("sc3-dark-popup");
-    s.keystroke("escape");
+    // A colour outside the sixteen stays a "#rrggbb".
+    s.keystroke("down ctrl-u");
+    s.keystroke("# 2 f 8 f 6 e enter");
+    assert_eq!(colour().as_deref(), Some("#2f8f6e"));
+    s.pump(Duration::from_millis(800));
+    s.shot("sc2-dark-cards");
     // Kiln Light.
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, format!("{text}\n[theme]\nname = \"kiln-light\"\n")).unwrap();

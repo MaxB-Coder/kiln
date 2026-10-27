@@ -401,9 +401,12 @@ Newest at the bottom.
   is no card, the plain look; the header pill takes the full colour (Auto keeps the accent).
   The colour pop-up sits under the project: "Colour · <project>" and esc, an Auto row with a
   dashed ring, the sixteen in two rows of eight equal columns with the hovered or chosen
-  one's name below, and a Custom "#rrggbb" field with a live preview dot. It and the
-  right-click menu take the keys: the arrows move (↓ from the grid goes to the custom field,
-  ↑ from it back), Enter picks, Esc closes.
+  one's name below, and a Custom "#rrggbb" field with a live preview dot. The current colour has
+  the accent ring and the keyboard's place a thin dim one, so the two never look alike; the
+  name below is the hovered, focused or current colour's. A "#rrggbb" equal to one of the
+  sixteen, stored or typed, is that swatch (and is saved by its name), with Custom left empty.
+  It and the right-click menu take the keys: the arrows move (↓ from the grid goes to the
+  custom field, ↑ from it back), Enter picks, Esc closes.
 - **Header and sidebar hint.** The name at the top left of the panes is gone (the header pill
   shows the project); the header keeps its height and the empty space stays a drag area. The
   sidebar's bottom line shows the shortcuts key from the keymap ("⌘/ Shortcuts",

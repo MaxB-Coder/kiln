@@ -105,7 +105,11 @@ struct SidebarMenu {
 /// The project colour pop-up: Auto (0), `state::PROJECT_COLOURS` (1–16), the custom field.
 struct ColourMenu {
     root: String,
+    /// The project's colour as it is (accent ring).
+    current: usize,
+    /// Where the keyboard is (a thin ring, once it has moved).
     selected: usize,
+    moved: bool,
     /// The swatch under the mouse, whose name shows below the grid.
     hovered: Option<usize>,
     focus: gpui::FocusHandle,
@@ -156,6 +160,11 @@ fn record_row(workspace: Entity<Workspace>, at: RowAt) -> impl IntoElement {
     .top_0()
     .left_0()
     .size_full()
+}
+
+/// Which of the sixteen project colours `value` is, if any.
+fn named_index(value: u32) -> Option<usize> {
+    state::PROJECT_COLOURS.iter().position(|(_, c)| *c == value)
 }
 
 /// A project's card: its colour at about 14% over the sidebar (a little more on light themes,
@@ -1326,10 +1335,12 @@ impl Workspace {
         let chosen = state::project_config(&root, &config::current())
             .and_then(|(_, project)| project.color.clone())
             .map(|c| c.trim().to_string());
+        // By name, or a "#rrggbb" that is one of the sixteen: that swatch, not Custom.
         let named = chosen.as_deref().and_then(|c| {
             state::PROJECT_COLOURS
                 .iter()
                 .position(|(name, _)| name.eq_ignore_ascii_case(c))
+                .or_else(|| named_index(config::parse_hex(c)?))
         });
         let hex = chosen
             .as_deref()
@@ -1354,6 +1365,7 @@ impl Workspace {
             TextInputEvent::Up => {
                 if let Some(menu) = this.colour_menu.as_mut() {
                     menu.selected = COLOUR_COLUMNS + 1;
+                    menu.moved = true;
                     window.focus(&menu.focus, cx);
                 }
                 cx.notify();
@@ -1368,7 +1380,9 @@ impl Workspace {
         }
         self.colour_menu = Some(ColourMenu {
             root,
+            current: selected,
             selected,
+            moved: false,
             hovered: None,
             focus,
             custom,
@@ -1396,7 +1410,11 @@ impl Workspace {
                 let Some(hex) = config::parse_hex(&text) else {
                     return;
                 };
-                Some(format!("#{hex:06x}"))
+                // One of the sixteen is written by its name.
+                Some(match named_index(hex) {
+                    Some(i) => state::PROJECT_COLOURS[i].0.to_string(),
+                    None => format!("#{hex:06x}"),
+                })
             }
             i => state::PROJECT_COLOURS
                 .get(i - 1)
@@ -1450,6 +1468,7 @@ impl Workspace {
             _ => return,
         };
         menu.selected = next;
+        menu.moved = true;
         menu.hovered = None;
         if next == COLOUR_CUSTOM {
             window.focus(&menu.custom.focus_handle(cx), cx);
@@ -1463,17 +1482,26 @@ impl Workspace {
     /// "#rrggbb" with a preview.
     fn render_colour_menu(&self, menu: &ColourMenu, cx: &mut Context<Self>) -> AnyElement {
         let p = palette();
-        let ring = |on: bool, swatch: gpui::Div| {
-            div()
-                .p(px(2.))
-                .rounded_full()
-                .border_2()
-                .border_color(if on {
-                    theme::hsla(p.accent)
-                } else {
-                    gpui::transparent_black()
-                })
-                .child(swatch)
+        let typed = config::parse_hex(menu.custom.read(cx).text().trim());
+        // A typed "#rrggbb" that is one of the sixteen points at that swatch.
+        let typed_named = typed.and_then(named_index).map(|i| i + 1);
+        let focused = |i: usize| (menu.moved && i == menu.selected) || typed_named == Some(i);
+        // The current colour has the accent ring; where the keyboard is, a thin dim one.
+        let ring = |i: usize, swatch: gpui::Div| {
+            let ring = div().rounded_full().child(swatch);
+            if i == menu.current {
+                ring.p(px(2.))
+                    .border_2()
+                    .border_color(theme::hsla(p.accent))
+            } else if focused(i) {
+                ring.p(px(3.))
+                    .border_1()
+                    .border_color(theme::hsla(p.fg_dim))
+            } else {
+                ring.p(px(2.))
+                    .border_2()
+                    .border_color(gpui::transparent_black())
+            }
         };
         let project = naming::project_name(Some(&menu.root));
         let header = div()
@@ -1502,14 +1530,10 @@ impl Workspace {
             .mb(px(4.))
             .cursor_pointer()
             .text_size(px(10.5))
-            .text_color(theme::hsla(if menu.selected == 0 {
-                p.fg
-            } else {
-                p.fg_dim
-            }))
+            .text_color(theme::hsla(if menu.current == 0 { p.fg } else { p.fg_dim }))
             .on_click(cx.listener(|this, _, window, cx| this.pick_colour(0, window, cx)))
             .child(ring(
-                menu.selected == 0,
+                0,
                 div()
                     .size(px(14.))
                     .rounded_full()
@@ -1545,21 +1569,26 @@ impl Workspace {
                             cx.listener(move |this, _, window, cx| this.pick_colour(i, window, cx)),
                         )
                         .child(ring(
-                            i == menu.selected,
+                            i,
                             div().size(px(14.)).rounded_full().bg(theme::hsla(color)),
                         )),
                 );
             }
             grid = grid.child(line);
         }
-        let shown = menu.hovered.unwrap_or(menu.selected);
+        // The name of the swatch under the mouse, else where the keyboard is, else the current.
+        let shown = menu.hovered.or(typed_named).unwrap_or(if menu.moved {
+            menu.selected
+        } else {
+            menu.current
+        });
         let caption = match shown {
             0 => "Auto".to_string(),
             COLOUR_CUSTOM => "Custom".to_string(),
             i => capitalised(state::PROJECT_COLOURS[i - 1].0),
         };
-        let typed = config::parse_hex(menu.custom.read(cx).text().trim());
-        let on_custom = menu.selected == COLOUR_CUSTOM;
+        let on_custom = menu.current == COLOUR_CUSTOM;
+        let at_custom = menu.selected == COLOUR_CUSTOM;
         let custom = div()
             .flex()
             .flex_row()
@@ -1582,7 +1611,13 @@ impl Workspace {
                     .rounded(px(5.))
                     .bg(theme::hsla(p.bg))
                     .border_1()
-                    .border_color(theme::hsla(if on_custom { p.accent } else { p.bg1 }))
+                    .border_color(theme::hsla(if at_custom {
+                        p.fg_dim
+                    } else if on_custom {
+                        p.accent
+                    } else {
+                        p.bg1
+                    }))
                     .child(menu.custom.clone()),
             )
             .child(match typed {

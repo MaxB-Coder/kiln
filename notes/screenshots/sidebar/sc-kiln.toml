@@ -1,7 +1,7 @@
 cursor_blink = false
 
 [projects."/var/folders/zk/_pbt5krn5lvcrh8q2q948dp40000gn/T/kiln-demo/acme-web"]
-color = "#c45aa8"
+color = "#2f8f6e"
 name = "Acme Web"
 
 [projects."~/developer/kiln"]
