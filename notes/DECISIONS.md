@@ -405,4 +405,6 @@ Newest at the bottom.
   scrolls to it; see `notes/screenshots/shortcuts/s7-narrow-scrolled.png`). A test now builds
   the pop-up view from each platform's live keymap and checks that every described action
   with a binding is shown (`shortcuts::tests::the_popup_shows_every_bound_action`).
+- **One key for the palette.** ⌘K (Ctrl+Shift+K) only; the second binding, ⌘P
+  (Ctrl+Shift+P), is gone and left unbound (a test checks nothing takes it).
 

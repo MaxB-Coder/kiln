@@ -51,7 +51,6 @@ pub fn bindings(style: KeyStyle) -> Vec<KeyBinding> {
         KeyBinding::new(&k("."), ToggleFocusMode, None),
         KeyBinding::new(&k("f"), Find, None),
         KeyBinding::new(&k("k"), CommandPaletteToggle, None),
-        KeyBinding::new(&k("p"), CommandPaletteToggle, None),
         KeyBinding::new(&k("/"), ToggleShortcuts, None),
         KeyBinding::new(&k("r"), RenameSession, None),
         // F2 too, except when a full-screen program runs (htop, mc and others use it).
@@ -355,7 +354,7 @@ pub fn format_chord<'a>(
 pub struct ShortcutRow {
     pub label: String,
     pub group: Group,
-    /// One entry per binding, as written on the platform ("⌘K", "⌘P").
+    /// One entry per binding, as written on the platform ("⌘V", "Shift+Ins").
     pub keys: Vec<String>,
     /// The actions behind the row ("kiln::SplitRight").
     pub actions: Vec<String>,
@@ -549,7 +548,18 @@ mod tests {
         assert_eq!(keys(&pc, "Paste").unwrap(), ["Ctrl+Shift+V", "Shift+Ins"]);
         assert_eq!(keys(&mac, "Copy last output").unwrap(), ["⇧⌘C"]);
         assert_eq!(keys(&pc, "Copy last output"), None);
-        assert_eq!(keys(&mac, "Command palette").unwrap(), ["⌘K", "⌘P"]);
+        assert_eq!(keys(&mac, "Command palette").unwrap(), ["⌘K"]);
+        assert_eq!(keys(&pc, "Command palette").unwrap(), ["Ctrl+Shift+K"]);
+        // ⌘P (Ctrl+Shift+P) is left unbound.
+        for style in [KeyStyle::Mac, KeyStyle::Pc] {
+            let p = bindings(style).into_iter().any(|b| {
+                b.keystrokes().iter().any(|k| {
+                    let k = k.inner();
+                    k.key == "p" && (k.modifiers.platform || k.modifiers.control)
+                })
+            });
+            assert!(!p, "{style:?}: something is bound to P");
+        }
         assert_eq!(keys(&pc, "Next session").unwrap(), ["Ctrl+Tab"]);
         assert_eq!(keys(&pc, "Keyboard shortcuts").unwrap(), ["Ctrl+Shift+/"]);
     }
