@@ -31,15 +31,21 @@ if [[ "$(uname)" == "Linux" ]]; then
     config_home="$(mktemp -d)"
     mkdir -p "$config_home/kiln"
     printf 'icon = "beehive"\n[icon_colours]\nbeehive = "slate"\n' > "$config_home/kiln/kiln.toml"
-    XDG_CONFIG_HOME="$config_home" KILN_STATE_FILE="$config_home/state.json" \
-      "$kiln" --fresh --cols 80 --rows 20 -- /bin/sh -c 'sleep 30' &
+    XDG_CONFIG_HOME="$config_home" KILN_STATE_FILE="$config_home/state.json" RUST_LOG=info \
+      "$kiln" --fresh --cols 80 --rows 20 -- /bin/sh -c 'sleep 30' 2>"$config_home/kiln.log" &
     pid=$!
     # Wait for the window and its icon (start-up under lavapipe can take several seconds).
     window="" icon=""
     # Kiln's window is the top-level one with an icon (Xvfb runs no window manager, so nothing
     # else sets one); its title is the session's name, so it is not looked up by name.
-    for _ in $(seq 30); do
+    for second in $(seq 30); do
       sleep 1
+      # Partway, what X11 shows and whether Kiln still runs (printed if the check fails).
+      if [ "$second" = 10 ]; then
+        { echo "--- after 10 s:"; xwininfo -root -tree | head -30;
+          ps -o pid,stat,etime,cmd -p "$pid" || echo "kiln ($pid) is not running"; } \
+          > "$config_home/at-10s.txt" 2>&1 || true
+      fi
       for candidate in $(xwininfo -root -children | awk '$1 ~ /^0x/ { print $1 }'); do
         # The raw numbers (xprop otherwise draws the icon as text): width, height, pixels.
         icon="$(xprop -id "$candidate" -notype -f _NET_WM_ICON 32c ' = $0+' _NET_WM_ICON \
@@ -52,8 +58,9 @@ if [[ "$(uname)" == "Linux" ]]; then
       [0-9]*) ;;
       *)
         echo "ci-smoke: no _NET_WM_ICON on Kiln's window ($window) after 30 s" >&2
-        # What X11 has, to see why: the windows and their names.
-        xwininfo -root -tree | head -40 >&2 || true
+        cat "$config_home/at-10s.txt" >&2 || true
+        echo "--- Kiln's log:" >&2
+        tail -40 "$config_home/kiln.log" >&2 || true
         exit 1
         ;;
     esac
