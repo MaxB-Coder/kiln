@@ -195,25 +195,36 @@ fn write(path: &Path, state: &State) -> io::Result<()> {
     fs::rename(&tmp, path)
 }
 
-/// The colours a project can be given, by name. They come from the theme (mostly its ANSI
-/// colours), so they suit whichever theme is on.
-pub const PROJECT_COLOURS: [&str; 8] = [
-    "red", "orange", "yellow", "green", "cyan", "blue", "magenta", "grey",
+/// The colours a project can be given, by name: fixed, the same in every theme, so "blue" is
+/// always blue (a theme's ANSI blue can read as teal). The names the first set used (red,
+/// orange, yellow, green, cyan, blue, magenta, grey) are among them.
+pub const PROJECT_COLOURS: [(&str, u32); 16] = [
+    ("red", 0xd4524a),
+    ("vermilion", 0xe0683a),
+    ("orange", 0xe0893a),
+    ("amber", 0xd9a53a),
+    ("yellow", 0xc9b840),
+    ("lime", 0x9cb53e),
+    ("green", 0x6fa35a),
+    ("teal", 0x4a9e8a),
+    ("cyan", 0x4aa3b5),
+    ("sky", 0x5a95d6),
+    ("blue", 0x5f78d9),
+    ("indigo", 0x7a6ad6),
+    ("violet", 0x9a64c9),
+    ("magenta", 0xc45aa8),
+    ("pink", 0xd6668a),
+    ("grey", 0x9a8f84),
 ];
 
-/// A project colour's value in palette `p`: a name from `PROJECT_COLOURS`, or "#rrggbb".
-pub fn colour_value(colour: &str, p: &crate::theme::Palette) -> Option<u32> {
-    Some(match colour.trim() {
-        "red" => p.ansi[1],
-        "orange" => p.accent,
-        "yellow" => p.ansi[3],
-        "green" => p.ansi[2],
-        "cyan" => p.ansi[6],
-        "blue" => p.ansi[4],
-        "magenta" => p.ansi[5],
-        "grey" => p.muted,
-        hex => return crate::config::parse_hex(hex),
-    })
+/// A project colour's value: a name from `PROJECT_COLOURS` (any case), or "#rrggbb".
+pub fn colour_value(colour: &str) -> Option<u32> {
+    let colour = colour.trim();
+    PROJECT_COLOURS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(colour))
+        .map(|(_, value)| *value)
+        .or_else(|| crate::config::parse_hex(colour))
 }
 
 /// The config's `[projects."…"]` table for the project at `root`, with its key.
@@ -261,8 +272,7 @@ pub fn custom_project_name(root: &str, config: &crate::config::Config) -> Option
 
 /// The colour the user chose for the project (`None`: Auto).
 pub fn chosen_project_color(root: &str, config: &crate::config::Config) -> Option<u32> {
-    let colour = project_config(root, config)?.1.color.as_deref()?;
-    colour_value(colour, &crate::theme::palette())
+    colour_value(project_config(root, config)?.1.color.as_deref()?)
 }
 
 /// A project's colour: the one chosen, else picked from its path so it stays the same.
@@ -388,20 +398,46 @@ mod tests {
             },
         );
         assert_eq!(project_color("/code/a", &config), 0x123456);
-        // A colour by name follows the theme.
-        let p = crate::theme::palette();
-        for (name, value) in [("blue", p.ansi[4]), ("orange", p.accent), ("grey", p.muted)] {
+        // A colour by name: the same value in every theme.
+        for (name, value) in [("blue", 0x5f78d9), ("teal", 0x4a9e8a), ("grey", 0x9a8f84)] {
             config.projects.get_mut("/code/a/").unwrap().color = Some(name.into());
             assert_eq!(project_color("/code/a", &config), value, "{name}");
             assert_eq!(chosen_project_color("/code/a", &config), Some(value));
         }
-        for name in PROJECT_COLOURS {
-            assert!(colour_value(name, &p).is_some(), "{name}");
-        }
         // Anything else is Auto.
-        config.projects.get_mut("/code/a/").unwrap().color = Some("pink".into());
+        config.projects.get_mut("/code/a/").unwrap().color = Some("chartreuse".into());
         assert_eq!(project_color("/code/a", &config), a);
         assert_eq!(chosen_project_color("/code/a", &config), None);
+    }
+
+    #[test]
+    fn project_colour_names_map_onto_the_fixed_set() {
+        // Every name, in any case, and "#rrggbb".
+        for (name, value) in PROJECT_COLOURS {
+            assert_eq!(colour_value(name), Some(value), "{name}");
+            assert_eq!(colour_value(&name.to_uppercase()), Some(value), "{name}");
+        }
+        assert_eq!(colour_value("#123456"), Some(0x123456));
+        assert_eq!(colour_value(" blue "), Some(0x5f78d9));
+        // The names of the first set (theme colours then) are all still known.
+        for (old, value) in [
+            ("red", 0xd4524a),
+            ("orange", 0xe0893a),
+            ("yellow", 0xc9b840),
+            ("green", 0x6fa35a),
+            ("cyan", 0x4aa3b5),
+            ("blue", 0x5f78d9),
+            ("magenta", 0xc45aa8),
+            ("grey", 0x9a8f84),
+        ] {
+            assert_eq!(colour_value(old), Some(value), "{old}");
+        }
+        assert_eq!(colour_value("pink-ish"), None);
+        // Sixteen distinct colours.
+        let mut values: Vec<u32> = PROJECT_COLOURS.iter().map(|(_, v)| *v).collect();
+        values.sort_unstable();
+        values.dedup();
+        assert_eq!(values.len(), 16);
     }
 
     #[test]

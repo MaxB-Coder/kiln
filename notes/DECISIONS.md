@@ -388,14 +388,22 @@ Newest at the bottom.
   `toml_edit` writer (`name`, `color`); a project keeps the key it has, matched as written or
   with its links resolved (Kiln's roots are resolved: `/private/var` on macOS), and a new one
   is written with `~` for home. The name shows wherever the project's does (sidebar, header
-  pill, palette, session labels), since `naming::project_name` reads it. Colours are names
-  resolved through the theme, so they suit each one: red, yellow, green, cyan, blue and
-  magenta are the theme's ANSI colours, orange its accent, grey its muted text; "#rrggbb" from
-  older configs still works, and anything else is Auto (the colour picked from the path, as
-  before). A chosen colour fills the project's dot and its header pill (Auto keeps the pill in
-  the accent). The colour pop-up sits under the project in the sidebar, in the icon pop-up's
-  style: equal 58 px columns, three to a row, a round swatch with its name, the current one
-  ringed. It and the right-click menu take the keys: the arrows move, Enter picks, Esc closes.
+  pill, palette, session labels), since `naming::project_name` reads it. Colours are sixteen fixed
+  names (`state::PROJECT_COLOURS`: red, vermilion, orange, amber, yellow, lime, green, teal,
+  cyan, sky, blue, indigo, violet, magenta, pink, grey), the same in every theme. They were
+  the theme's ANSI colours at first, but in Kiln Dark (Gruvbox) the blue and cyan read as
+  teal and green, so "Blue" did not look blue; the first set's names (red, orange, yellow,
+  green, cyan, blue, magenta, grey) are among the sixteen, so those configs still work, as
+  does "#rrggbb"; anything else is Auto. A chosen colour puts the project and its sessions on
+  a card (radius 9, 3 px inside) tinted with it at 14% over the sidebar (22% on light themes,
+  where a light wash is harder to see); the project's name is bold, in the colour mixed 60/40
+  with the text; the active session's row is the card a little darker. The dot is gone. Auto
+  is no card, the plain look; the header pill takes the full colour (Auto keeps the accent).
+  The colour pop-up sits under the project: "Colour · <project>" and esc, an Auto row with a
+  dashed ring, the sixteen in two rows of eight equal columns with the hovered or chosen
+  one's name below, and a Custom "#rrggbb" field with a live preview dot. It and the
+  right-click menu take the keys: the arrows move (↓ from the grid goes to the custom field,
+  ↑ from it back), Enter picks, Esc closes.
 - **Header and sidebar hint.** The name at the top left of the panes is gone (the header pill
   shows the project); the header keeps its height and the empty space stays a drag area. The
   sidebar's bottom line shows the shortcuts key from the keymap ("⌘/ Shortcuts",
@@ -407,4 +415,9 @@ Newest at the bottom.
   with a binding is shown (`shortcuts::tests::the_popup_shows_every_bound_action`).
 - **One key for the palette.** ⌘K (Ctrl+Shift+K) only; the second binding, ⌘P
   (Ctrl+Shift+P), is gone and left unbound (a test checks nothing takes it).
+- **The context rail starts at the top.** It sat below an empty title-bar strip plus its own
+  16 px. Now its first section's title is in the header row, level with the pills. The strip
+  stays only where the window controls are (Windows and Linux, at the rail's top right); on
+  macOS they are on the left, so a 24 px strip lies over the first title to move the window
+  by, and nothing else.
 

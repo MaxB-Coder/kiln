@@ -1,0 +1,11 @@
+cursor_blink = false
+
+[projects."/var/folders/zk/_pbt5krn5lvcrh8q2q948dp40000gn/T/kiln-demo/acme-web"]
+color = "#c45aa8"
+name = "Acme Web"
+
+[projects."~/developer/kiln"]
+color = "orange"
+
+[theme]
+name = "kiln-light"

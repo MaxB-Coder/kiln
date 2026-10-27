@@ -102,16 +102,21 @@ struct SidebarMenu {
     focus: gpui::FocusHandle,
 }
 
-/// The project colour pop-up: Auto (0), then `state::PROJECT_COLOURS`.
+/// The project colour pop-up: Auto (0), `state::PROJECT_COLOURS` (1–16), the custom field.
 struct ColourMenu {
     root: String,
     selected: usize,
+    /// The swatch under the mouse, whose name shows below the grid.
+    hovered: Option<usize>,
     focus: gpui::FocusHandle,
+    custom: Entity<TextInput>,
+    _custom_events: Subscription,
 }
 
-/// The colour pop-up's columns, equal widths.
-const COLOUR_COLUMNS: usize = 3;
-const COLOUR_COLUMN_W: f32 = 58.;
+/// The colour pop-up's grid: two rows of this many equal columns.
+const COLOUR_COLUMNS: usize = 8;
+/// The custom field's place after Auto and the sixteen colours.
+const COLOUR_CUSTOM: usize = 17;
 
 /// Where a sidebar row is drawn, recorded as it paints (see `Workspace::sidebar_rows`).
 #[derive(Clone, Copy)]
@@ -151,6 +156,19 @@ fn record_row(workspace: Entity<Workspace>, at: RowAt) -> impl IntoElement {
     .top_0()
     .left_0()
     .size_full()
+}
+
+/// A project's card: its colour at about 14% over the sidebar (a little more on light themes,
+/// where a light wash is harder to see).
+fn card_tint(p: &theme::Palette, color: u32) -> u32 {
+    let amount = if p.is_light() { 0.22 } else { 0.14 };
+    theme::blend(p.bar, color, amount)
+}
+
+/// The card a little darker: the active session's row on it (`strength` 1), hover (less).
+fn card_shade(p: &theme::Palette, card: u32, strength: f32) -> u32 {
+    let amount = if p.is_light() { 0.07 } else { 0.18 };
+    theme::blend(card, 0x000000, amount * strength)
 }
 
 /// "blue" → "Blue".
@@ -1306,35 +1324,93 @@ impl Workspace {
         self.renaming = None;
         self.show_sidebar();
         let chosen = state::project_config(&root, &config::current())
-            .and_then(|(_, project)| project.color.clone());
-        let selected = chosen
-            .and_then(|c| state::PROJECT_COLOURS.iter().position(|n| *n == c.trim()))
-            .map_or(0, |i| i + 1);
+            .and_then(|(_, project)| project.color.clone())
+            .map(|c| c.trim().to_string());
+        let named = chosen.as_deref().and_then(|c| {
+            state::PROJECT_COLOURS
+                .iter()
+                .position(|(name, _)| name.eq_ignore_ascii_case(c))
+        });
+        let hex = chosen
+            .as_deref()
+            .filter(|_| named.is_none())
+            .and_then(config::parse_hex);
+        let selected = match (named, hex) {
+            (Some(i), _) => i + 1,
+            (None, Some(_)) => COLOUR_CUSTOM,
+            _ => 0,
+        };
+        let custom = cx.new(|cx| {
+            let mut input = TextInput::new("#rrggbb", cx).with_size(px(11.));
+            if let Some(hex) = hex {
+                input.set_text(&format!("#{hex:06x}"), cx);
+            }
+            input
+        });
+        let events = cx.subscribe_in(&custom, window, |this, _, event, window, cx| match event {
+            TextInputEvent::Changed => cx.notify(),
+            TextInputEvent::Submit { .. } => this.pick_colour(COLOUR_CUSTOM, window, cx),
+            TextInputEvent::Cancel => this.close_colour_menu(window, cx),
+            TextInputEvent::Up => {
+                if let Some(menu) = this.colour_menu.as_mut() {
+                    menu.selected = COLOUR_COLUMNS + 1;
+                    window.focus(&menu.focus, cx);
+                }
+                cx.notify();
+            }
+            TextInputEvent::Down => {}
+        });
         let focus = cx.focus_handle();
-        window.focus(&focus, cx);
+        if selected == COLOUR_CUSTOM {
+            window.focus(&custom.focus_handle(cx), cx);
+        } else {
+            window.focus(&focus, cx);
+        }
         self.colour_menu = Some(ColourMenu {
             root,
             selected,
+            hovered: None,
             focus,
+            custom,
+            _custom_events: events,
         });
         cx.notify();
     }
 
-    /// Picks entry `index` of the colour pop-up (0 is Auto) and closes it.
-    fn pick_colour(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(menu) = self.colour_menu.take() else {
-            return;
-        };
-        let value = index
-            .checked_sub(1)
-            .and_then(|i| state::PROJECT_COLOURS.get(i))
-            .map(|name| name.to_string());
-        self.write_project(&menu.root, "color", value, window, cx);
+    fn close_colour_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.colour_menu = None;
         self.focus_active(window, cx);
         cx.notify();
     }
 
-    /// The colour pop-up's keys: the arrows move (three to a row), Enter picks, Esc closes.
+    /// Picks entry `index` of the colour pop-up (0 Auto, then the colours, then the custom
+    /// field, which must hold a "#rrggbb") and closes it.
+    fn pick_colour(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.colour_menu.as_ref() else {
+            return;
+        };
+        let value = match index {
+            0 => None,
+            COLOUR_CUSTOM => {
+                let text = menu.custom.read(cx).text().trim().to_string();
+                let Some(hex) = config::parse_hex(&text) else {
+                    return;
+                };
+                Some(format!("#{hex:06x}"))
+            }
+            i => state::PROJECT_COLOURS
+                .get(i - 1)
+                .map(|(name, _)| name.to_string()),
+        };
+        let root = menu.root.clone();
+        self.colour_menu = None;
+        self.write_project(&root, "color", value, window, cx);
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    /// The colour pop-up's keys: the arrows move (Auto, two rows of eight, the custom field),
+    /// Enter picks, Esc closes.
     fn colour_menu_key(
         &mut self,
         event: &gpui::KeyDownEvent,
@@ -1344,89 +1420,185 @@ impl Workspace {
         let Some(menu) = self.colour_menu.as_mut() else {
             return;
         };
-        let count = state::PROJECT_COLOURS.len() + 1;
-        let at = menu.selected as i32;
+        let at = menu.selected;
+        // The grid's entries are 1..=16, row by row.
+        let column = (at.max(1) - 1) % COLOUR_COLUMNS;
         let next = match event.keystroke.key.as_str() {
-            "left" => at - 1,
-            "right" | "tab" => at + 1,
-            "up" => at - COLOUR_COLUMNS as i32,
-            "down" => at + COLOUR_COLUMNS as i32,
+            "left" if (2..=COLOUR_CUSTOM - 1).contains(&at) && column > 0 => at - 1,
+            "right" if (1..COLOUR_CUSTOM - 1).contains(&at) && column + 1 < COLOUR_COLUMNS => {
+                at + 1
+            }
+            "right" if at == 0 => 1,
+            "up" if at == 0 => 0,
+            "up" if at <= COLOUR_COLUMNS => 0,
+            "up" => at - COLOUR_COLUMNS,
+            "down" if at == 0 => 1,
+            "down" if at <= COLOUR_COLUMNS => at + COLOUR_COLUMNS,
+            "down" => COLOUR_CUSTOM,
+            "tab" => (at + 1) % (COLOUR_CUSTOM + 1),
+            "left" | "right" => at,
             "enter" | "space" => {
-                let selected = menu.selected;
-                self.pick_colour(selected, window, cx);
+                self.pick_colour(at, window, cx);
                 cx.stop_propagation();
                 return;
             }
             "escape" => {
-                self.colour_menu = None;
-                self.focus_active(window, cx);
-                cx.notify();
+                self.close_colour_menu(window, cx);
                 cx.stop_propagation();
                 return;
             }
             _ => return,
         };
-        menu.selected = next.rem_euclid(count as i32) as usize;
+        menu.selected = next;
+        menu.hovered = None;
+        if next == COLOUR_CUSTOM {
+            window.focus(&menu.custom.focus_handle(cx), cx);
+        }
         cx.stop_propagation();
         cx.notify();
     }
 
-    /// The pop-up under a project: Auto and the theme's colours, three to a row in equal
-    /// columns, each a round swatch with its name below, the current one ringed.
+    /// The pop-up under a project: its name and "esc", Auto, the sixteen colours in two rows of
+    /// eight equal columns (the hovered or chosen one's name below them), and a custom
+    /// "#rrggbb" with a preview.
     fn render_colour_menu(&self, menu: &ColourMenu, cx: &mut Context<Self>) -> AnyElement {
         let p = palette();
-        let auto = state::project_color(&menu.root, &Config::default());
-        let mut grid = div().flex().flex_row().flex_wrap();
-        for i in 0..=state::PROJECT_COLOURS.len() {
-            let (name, color) = match i {
-                0 => ("Auto", auto),
-                i => {
-                    let name = state::PROJECT_COLOURS[i - 1];
-                    (name, state::colour_value(name, &p).unwrap_or(auto))
-                }
-            };
-            let on = i == menu.selected;
-            let swatch = div().size(px(18.)).rounded_full().bg(theme::hsla(color));
-            // Auto: the colour the project would get, with a hole, as "picked for you".
-            let swatch = if i == 0 {
-                swatch
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(div().size(px(8.)).rounded_full().bg(theme::hsla(p.raised)))
-            } else {
-                swatch
-            };
-            grid = grid.child(
+        let ring = |on: bool, swatch: gpui::Div| {
+            div()
+                .p(px(2.))
+                .rounded_full()
+                .border_2()
+                .border_color(if on {
+                    theme::hsla(p.accent)
+                } else {
+                    gpui::transparent_black()
+                })
+                .child(swatch)
+        };
+        let project = naming::project_name(Some(&menu.root));
+        let header = div()
+            .flex()
+            .flex_row()
+            .justify_between()
+            .px(px(2.))
+            .mb(px(6.))
+            .text_size(px(10.))
+            .child(
                 div()
-                    .id(("project-colour", i))
-                    .w(px(COLOUR_COLUMN_W))
-                    .py(px(4.))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(4.))
-                    .cursor_pointer()
-                    .text_size(px(9.5))
-                    .text_color(theme::hsla(if on { p.fg } else { p.fg_dim }))
-                    .on_click(
-                        cx.listener(move |this, _, window, cx| this.pick_colour(i, window, cx)),
-                    )
-                    .child(
-                        div()
-                            .p(px(2.))
-                            .rounded_full()
-                            .border_2()
-                            .border_color(if on {
-                                theme::hsla(p.accent)
-                            } else {
-                                gpui::transparent_black()
-                            })
-                            .child(swatch),
-                    )
-                    .child(SharedString::from(capitalised(name))),
-            );
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .text_color(theme::hsla(p.muted))
+                    .child(SharedString::from(format!("Colour · {project}"))),
+            )
+            .child(div().text_color(theme::hsla(p.bg3)).child("esc"));
+        let auto = div()
+            .id("project-colour-auto")
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.))
+            .mb(px(4.))
+            .cursor_pointer()
+            .text_size(px(10.5))
+            .text_color(theme::hsla(if menu.selected == 0 {
+                p.fg
+            } else {
+                p.fg_dim
+            }))
+            .on_click(cx.listener(|this, _, window, cx| this.pick_colour(0, window, cx)))
+            .child(ring(
+                menu.selected == 0,
+                div()
+                    .size(px(14.))
+                    .rounded_full()
+                    .border_1()
+                    .border_dashed()
+                    .border_color(theme::hsla(p.muted)),
+            ))
+            .child("Auto");
+        let mut grid = div().flex().flex_col().gap(px(2.));
+        for row in 0..2 {
+            let mut line = div().flex().flex_row();
+            for column in 0..COLOUR_COLUMNS {
+                let i = 1 + row * COLOUR_COLUMNS + column;
+                let (_, color) = state::PROJECT_COLOURS[i - 1];
+                line = line.child(
+                    div()
+                        .id(("project-colour", i))
+                        .flex_1()
+                        .flex()
+                        .justify_center()
+                        .cursor_pointer()
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if let Some(menu) = this.colour_menu.as_mut() {
+                                if *hovered {
+                                    menu.hovered = Some(i);
+                                } else if menu.hovered == Some(i) {
+                                    menu.hovered = None;
+                                }
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(
+                            cx.listener(move |this, _, window, cx| this.pick_colour(i, window, cx)),
+                        )
+                        .child(ring(
+                            i == menu.selected,
+                            div().size(px(14.)).rounded_full().bg(theme::hsla(color)),
+                        )),
+                );
+            }
+            grid = grid.child(line);
         }
+        let shown = menu.hovered.unwrap_or(menu.selected);
+        let caption = match shown {
+            0 => "Auto".to_string(),
+            COLOUR_CUSTOM => "Custom".to_string(),
+            i => capitalised(state::PROJECT_COLOURS[i - 1].0),
+        };
+        let typed = config::parse_hex(menu.custom.read(cx).text().trim());
+        let on_custom = menu.selected == COLOUR_CUSTOM;
+        let custom = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.))
+            .mt(px(6.))
+            .text_size(px(10.5))
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(theme::hsla(if on_custom { p.fg } else { p.fg_dim }))
+                    .child("Custom"),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .px(px(5.))
+                    .py(px(1.))
+                    .rounded(px(5.))
+                    .bg(theme::hsla(p.bg))
+                    .border_1()
+                    .border_color(theme::hsla(if on_custom { p.accent } else { p.bg1 }))
+                    .child(menu.custom.clone()),
+            )
+            .child(match typed {
+                Some(color) => div()
+                    .flex_none()
+                    .size(px(14.))
+                    .rounded_full()
+                    .bg(theme::hsla(color)),
+                None => div()
+                    .flex_none()
+                    .size(px(14.))
+                    .rounded_full()
+                    .border_1()
+                    .border_dashed()
+                    .border_color(theme::hsla(p.bg2)),
+            });
         div()
             .id("project-colours")
             .track_focus(&menu.focus)
@@ -1435,24 +1607,28 @@ impl Workspace {
                 this.colour_menu = None;
                 cx.notify();
             }))
-            .mx(px(4.))
+            .mx(px(2.))
             .mt(px(2.))
-            .mb(px(6.))
+            .mb(px(4.))
             .px(px(8.))
             .py(px(8.))
             .rounded(px(10.))
             .bg(theme::hsla(p.raised))
             .border_1()
             .border_color(theme::hsla(p.bg1))
+            .child(header)
+            .child(auto)
+            .child(grid)
             .child(
                 div()
-                    .px(px(4.))
-                    .mb(px(4.))
+                    .mt(px(4.))
+                    .flex()
+                    .justify_center()
                     .text_size(px(10.))
-                    .text_color(theme::hsla(p.muted))
-                    .child("Colour"),
+                    .text_color(theme::hsla(p.fg_dim))
+                    .child(SharedString::from(caption)),
             )
-            .child(grid)
+            .child(custom)
             .into_any_element()
     }
 
@@ -1774,12 +1950,12 @@ impl Workspace {
                 .as_ref()
                 .filter(|m| root.as_deref() == Some(m.root.as_str()))
                 .map(|m| self.render_colour_menu(m, cx));
-            let root = root.map(PathBuf::from).unwrap_or_default();
-            // Projects (folders in git) get their colour; Home and loose folders do not.
-            let color = (!root.as_os_str().is_empty()
-                && !naming::is_home(&root.to_string_lossy())
-                && root.join(".git").exists())
-            .then(|| state::project_color(&root.to_string_lossy(), &config::current()));
+            // A chosen colour puts the project and its sessions on a tinted card; Auto keeps
+            // the plain look.
+            let chosen = root
+                .as_deref()
+                .and_then(|root| state::chosen_project_color(root, &config::current()));
+            let card = chosen.map(|color| card_tint(&p, color));
             let header = div()
                 .id(("project", group_index))
                 .when_some(target, |d, target| {
@@ -1799,38 +1975,45 @@ impl Workspace {
                     )
                 });
             let entity = cx.entity();
-            list = list.child(
-                header
-                    .relative()
-                    .child(record_row(entity.clone(), RowAt::Header(group_index)))
-                    .pt(px(12.))
-                    .pb(px(4.))
-                    .px(px(10.))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.))
-                    .text_size(px(11.))
-                    .text_color(theme::hsla(p.muted))
-                    .when_some(color, |d, color| {
-                        d.child(
-                            div()
-                                .flex_none()
-                                .size(px(7.))
-                                .rounded(px(2.))
-                                .bg(theme::hsla(color)),
-                        )
-                    })
-                    .map(|d| match editing {
-                        Some(input) => d.child(input),
-                        None => d.child(SharedString::from(name)),
-                    }),
-            );
-            list = list.children(colour_menu);
+            let header = header
+                .relative()
+                .child(record_row(entity.clone(), RowAt::Header(group_index)))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.))
+                .text_size(px(11.))
+                .map(|d| match chosen {
+                    // On its card: the name bold, in the colour mixed with the text.
+                    Some(color) => d
+                        .pt(px(6.))
+                        .pb(px(3.))
+                        .px(px(7.))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(theme::hsla(theme::blend(color, p.fg, 0.4))),
+                    None => d
+                        .pt(px(12.))
+                        .pb(px(4.))
+                        .px(px(10.))
+                        .text_color(theme::hsla(p.muted)),
+                })
+                .map(|d| match editing {
+                    Some(input) => d.child(input),
+                    None => d.child(SharedString::from(name)),
+                });
+            let mut group = div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .when_some(card, |d, card| {
+                    d.mt(px(8.)).p(px(3.)).rounded(px(9.)).bg(theme::hsla(card))
+                })
+                .child(header)
+                .children(colour_menu);
             for (n, index) in tabs.into_iter().enumerate() {
                 let label = names[index].1.clone();
-                let row = self.render_session_row(index, label, cx);
-                list = list.child(if n == 0 {
+                let row = self.render_session_row(index, label, card, cx);
+                group = group.child(if n == 0 {
                     div()
                         .relative()
                         .child(row)
@@ -1840,6 +2023,7 @@ impl Workspace {
                     row
                 });
             }
+            list = list.child(group);
         }
 
         let menu = self
@@ -1964,10 +2148,12 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// `card`: the project's tinted card the row sits on, if it has one.
     fn render_session_row(
         &self,
         index: usize,
         title: String,
+        card: Option<u32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = palette();
@@ -2009,8 +2195,19 @@ impl Workspace {
             .h(px(28.))
             .px(px(10.))
             .rounded(px(6.))
-            .when(active, |d| d.bg(theme::hsla(p.raised)))
-            .hover(|s| s.bg(theme::hsla(p.raised)))
+            // On a card, the highlight is the card a little darker.
+            .when(active, |d| {
+                d.bg(theme::hsla(match card {
+                    Some(card) => card_shade(&p, card, 1.),
+                    None => p.raised,
+                }))
+            })
+            .hover(move |s| {
+                s.bg(theme::hsla(match card {
+                    Some(card) => card_shade(&p, card, 0.6),
+                    None => p.raised,
+                }))
+            })
             .cursor_pointer()
             .on_click(
                 cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {

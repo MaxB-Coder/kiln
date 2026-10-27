@@ -162,7 +162,15 @@ impl Workspace {
         // Data read for another pane is stale; show nothing until the new read lands.
         let fresh = view.as_ref().map(|v| v.entity_id()) == rail.data.pane;
 
-        let mut body = div().flex().flex_col().px(px(14.)).pb(px(14.));
+        // The first section's title sits in the header row (8 px down centres its 16 px line
+        // in the 32 px row); the rest are 16 px apart.
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            .pt(px(8.))
+            .px(px(14.))
+            .pb(px(14.));
         if fresh && let Some(status) = &rail.data.git {
             body = body.child(self.render_changes(status, cx));
         }
@@ -181,9 +189,40 @@ impl Workspace {
             body = body.child(render_session(&info));
         }
 
+        let mac = chrome() == Chrome::Mac;
+        // A strip to move the window by, along the top. Where the window controls are (Windows
+        // and Linux) it holds them and the content starts below; on macOS they are on the left,
+        // so the content starts at the top and a shorter strip lies over the first title.
+        let strip = div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .justify_end()
+            .map(|d| {
+                if mac {
+                    d.absolute().top_0().left_0().w_full().h(px(24.))
+                } else {
+                    d.h(TITLEBAR_HEIGHT).child(window_controls(window))
+                }
+            })
+            .window_control_area(WindowControlArea::Drag)
+            .on_mouse_down(MouseButton::Left, |event, window, _| {
+                if event.click_count == 2 {
+                    window.titlebar_double_click();
+                } else if !cfg!(windows) {
+                    window.start_window_move();
+                }
+            });
+        let body = div()
+            .id("rail-body")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(body);
         Some(
             div()
                 .id("rail")
+                .relative()
                 .flex_none()
                 .w(RAIL_WIDTH)
                 .h_full()
@@ -192,33 +231,13 @@ impl Workspace {
                 .bg(theme::hsla(p.bar))
                 .font_family(FONT_FAMILY)
                 .text_size(px(12.))
-                .child(
-                    div()
-                        .h(TITLEBAR_HEIGHT)
-                        .flex_none()
-                        .flex()
-                        .flex_row()
-                        .justify_end()
-                        .window_control_area(WindowControlArea::Drag)
-                        .on_mouse_down(MouseButton::Left, |event, window, _| {
-                            if event.click_count == 2 {
-                                window.titlebar_double_click();
-                            } else if !cfg!(windows) {
-                                window.start_window_move();
-                            }
-                        })
-                        .when(chrome() != Chrome::Mac, |d| {
-                            d.child(window_controls(window))
-                        }),
-                )
-                .child(
-                    div()
-                        .id("rail-body")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .child(body),
-                )
+                .map(|d| {
+                    if mac {
+                        d.child(body).child(strip)
+                    } else {
+                        d.child(strip).child(body)
+                    }
+                })
                 .into_any_element(),
         )
     }
@@ -375,7 +394,7 @@ fn render_session(info: &SessionInfo) -> Div {
 
 fn section(title: &str, aside: Option<String>) -> Div {
     let p = palette();
-    div().flex().flex_col().pt(px(16.)).child(
+    div().flex().flex_col().child(
         div()
             .flex()
             .flex_row()

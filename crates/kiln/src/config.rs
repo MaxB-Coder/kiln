@@ -638,8 +638,8 @@ production = ["*prod*"]
 check = true
 
 # Per project, keyed by folder (the sidebar sets these: right-click a project, or ⌘⇧R and
-# "Project colour" in the palette). Colours come from the theme: "red", "orange", "yellow",
-# "green", "cyan", "blue", "magenta" or "grey" ("#rrggbb" works too):
+# "Project colour" in the palette). Colours: red, vermilion, orange, amber, yellow, lime,
+# green, teal, cyan, sky, blue, indigo, violet, magenta, pink or grey, or "#rrggbb":
 # [projects."~/developer/kiln"]
 # name = "Kiln"
 # color = "orange"

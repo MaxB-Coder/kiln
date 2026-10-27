@@ -62,8 +62,9 @@ In the sidebar, double-click a session or a project (or right-click it and choos
 rename it; Enter keeps the name, Esc drops it, and an empty name brings the automatic one
 back. A session's name is saved with the sessions; a project's goes into the config, and shows
 in the sidebar, the header pill and the palette. Right-click a project and choose Colour (or
-"Project colour" in the palette) for its dot and pill: Auto, or one of eight colours from the
-theme. The arrows, Enter and Esc work in the menu and the colour pop-up. The bottom of the
+"Project colour" in the palette): the project and its sessions then sit on a card tinted with
+it, and its header pill takes it. Auto (no card), one of sixteen colours that look the same in
+every theme, or any "#rrggbb". The arrows, Enter and Esc work in the menu and the colour pop-up. The bottom of the
 sidebar shows the shortcuts key; click it for the list.
 
 A pinned command (Pin in a block's hover actions) stays at the top of the timeline, through
@@ -111,7 +112,7 @@ check = true                    # once a day; nothing installs without asking
 
 [projects."~/code/app"]
 name = "App"                    # shown instead of the folder's name
-color = "blue"                  # from the theme: red orange yellow green cyan blue magenta grey
+color = "blue"                  # one of sixteen names (red … grey), or "#rrggbb"
 
 [theme]
 name = "nord"                   # or kiln-dark, kiln-light, system, catppuccin-mocha, everforest, kanagawa, custom

@@ -1391,7 +1391,8 @@ fn sidebar(s: &mut Shots, state_file: &std::path::Path) {
     s.pump(Duration::from_millis(500));
     s.shot("sb4-project-renamed");
 
-    // The colour pop-up from the palette, all by keyboard: down twice is Blue, Enter picks.
+    // The colour pop-up from the palette, all by keyboard. It opens on the custom field (the
+    // project's old "#rrggbb"); ↑ goes to the second row of colours, → → to Blue; Enter picks.
     s.keystroke(if cfg!(target_os = "macos") {
         "cmd-k"
     } else {
@@ -1406,14 +1407,14 @@ fn sidebar(s: &mut Shots, state_file: &std::path::Path) {
         (false, true),
         "the pop-up opens"
     );
-    s.keystroke("down down");
+    s.keystroke("up right right");
     s.shot("sb5-colour-popup");
     s.keystroke("enter");
     assert_eq!(s.workspace(|w| w.editing()), (false, false));
     let config = on_file(&path);
     let project = kiln::state::project_config(&demo_root, &config).unwrap().1;
     assert_eq!(project.color.as_deref(), Some("blue"));
-    let blue = kiln::theme::palette().ansi[4];
+    let blue = 0x5f78d9;
     assert_eq!(kiln::state::project_color(&demo_root, &config), blue);
     s.pump(Duration::from_millis(500));
     s.shot("sb6-project-blue");
@@ -1449,7 +1450,68 @@ fn sidebar(s: &mut Shots, state_file: &std::path::Path) {
     let hint_y = s.workspace(|w| w.sidebar_rows())[0].2;
     s.click_button(40., hint_y, MouseButton::Left, 1);
     s.shot("sb9-shortcuts");
+    s.keystroke("escape");
     std::fs::copy(&path, s.out.join("sb-kiln.toml")).unwrap();
+
+    // Project colours as tinted cards, in Kiln Dark and Kiln Light: kiln in orange, the demo
+    // project in a custom "#rrggbb" typed in the pop-up, and a third, Home, left on Auto.
+    s.action(Box::new(kiln::NewSession));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.run("cd ~", Duration::from_secs(5));
+    s.action(Box::new(kiln::SelectSession1));
+    s.action(Box::new(kiln::ProjectColour));
+    s.keystroke("down right right");
+    assert_eq!(s.workspace(|w| w.editing()), (false, true));
+    s.keystroke("enter");
+    s.action(Box::new(kiln::SelectSession2));
+    s.action(Box::new(kiln::ProjectColour));
+    // ↓ ↓ ↓ from Blue is the custom field; typing goes there, with a preview.
+    s.keystroke("down ctrl-u");
+    s.keystroke("# c 4 5 a a 8");
+    s.pump(Duration::from_millis(300));
+    s.shot("sc1-dark-custom-hex");
+    s.keystroke("enter");
+    let config = on_file(&path);
+    assert_eq!(
+        kiln::state::project_config(&demo_root, &config)
+            .unwrap()
+            .1
+            .color
+            .as_deref(),
+        Some("#c45aa8")
+    );
+    s.pump(Duration::from_millis(800));
+    s.shot("sc2-dark-cards");
+    // The pop-up, from the custom field ↑ to the colours: the chosen one's name shows below
+    // the grid (as the one under the mouse does).
+    s.action(Box::new(kiln::ProjectColour));
+    s.keystroke("up");
+    s.pump(Duration::from_millis(300));
+    s.shot("sc3-dark-popup");
+    s.keystroke("escape");
+    // Kiln Light.
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{text}\n[theme]\nname = \"kiln-light\"\n")).unwrap();
+    s.pump(Duration::from_millis(2000));
+    s.shot("sc4-light-cards");
+    s.action(Box::new(kiln::ProjectColour));
+    s.keystroke("up right right right");
+    s.pump(Duration::from_millis(300));
+    s.shot("sc5-light-popup");
+    s.keystroke("escape");
+    std::fs::copy(&path, s.out.join("sc-kiln.toml")).unwrap();
+
+    // The context rail: its first section in the header row.
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("name = \"kiln-light\"", "name = \"kiln-dark\""),
+    )
+    .unwrap();
+    s.pump(Duration::from_millis(2000));
+    s.action(Box::new(kiln::ToggleRail));
+    s.pump(Duration::from_millis(2500));
+    s.shot("rb2-rail-after");
 }
 
 fn demo_project() -> PathBuf {
