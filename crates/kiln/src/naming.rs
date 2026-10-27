@@ -35,6 +35,10 @@ pub fn project_name(root: Option<&str>) -> String {
     let Some(root) = root.filter(|r| !r.is_empty()) else {
         return "other".into();
     };
+    // The name the user gave it (`[projects."…"] name`).
+    if let Some(name) = crate::state::custom_project_name(root, &crate::config::current()) {
+        return name;
+    }
     if is_home(root) {
         return "Home".into();
     }

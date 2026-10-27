@@ -53,6 +53,17 @@ pub fn bindings(style: KeyStyle) -> Vec<KeyBinding> {
         KeyBinding::new(&k("k"), CommandPaletteToggle, None),
         KeyBinding::new(&k("p"), CommandPaletteToggle, None),
         KeyBinding::new(&k("/"), ToggleShortcuts, None),
+        KeyBinding::new(&k("r"), RenameSession, None),
+        // F2 too, except when a full-screen program runs (htop, mc and others use it).
+        KeyBinding::new("f2", RenameSession, Some("Terminal && !full_screen")),
+        KeyBinding::new(
+            match style {
+                KeyStyle::Mac => "cmd-shift-r",
+                KeyStyle::Pc => "ctrl-alt-shift-r",
+            },
+            RenameProject,
+            None,
+        ),
         KeyBinding::new(&k(","), EditConfig, None),
         KeyBinding::new(&k("q"), Quit, None),
         KeyBinding::new(&k("="), ZoomIn, None),
@@ -158,6 +169,8 @@ const DESCRIPTIONS: &[(&str, &str, Group)] = &[
     ("PrevSession", "Previous session", Group::Sessions),
     ("SelectSession", "Go to session 1–9", Group::Sessions),
     ("NewWindow", "New window", Group::Sessions),
+    ("RenameSession", "Rename session", Group::Sessions),
+    ("RenameProject", "Rename project", Group::Sessions),
     ("EditConfig", "Settings", Group::Sessions),
     ("Quit", "Quit Kiln", Group::Sessions),
     ("SplitRight", "Split right", Group::Panes),
@@ -211,6 +224,20 @@ const DESCRIPTIONS: &[(&str, &str, Group)] = &[
     ("ScrollToTop", "To the top", Group::Scroll),
     ("ScrollToBottom", "To the bottom", Group::Scroll),
 ];
+
+/// The described actions that have a binding in `style`'s keymap: (action, label).
+pub fn bound_descriptions(style: KeyStyle) -> Vec<(&'static str, &'static str)> {
+    let bound: Vec<&str> = bindings(style).iter().map(|b| b.action().name()).collect();
+    DESCRIPTIONS
+        .iter()
+        .filter(|(name, _, _)| {
+            bound
+                .iter()
+                .any(|action| position(action) == position(name))
+        })
+        .map(|(name, label, _)| (*name, *label))
+        .collect()
+}
 
 /// Where an action sits in `DESCRIPTIONS`.
 fn position(action: &str) -> Option<usize> {

@@ -31,12 +31,14 @@ pub struct WindowState {
     pub tabs: Vec<TabState>,
 }
 
-/// A session: its panes' folders, left to right.
+/// A session: its panes' folders, left to right, and the name it was given, if any.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TabState {
     pub panes: Vec<Option<String>>,
     pub focused: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -193,14 +195,80 @@ fn write(path: &Path, state: &State) -> io::Result<()> {
     fs::rename(&tmp, path)
 }
 
-/// A project's colour: from the config, else picked from its path so it stays the same.
-pub fn project_color(root: &str, config: &crate::config::Config) -> u32 {
-    for (key, project) in &config.projects {
-        if let Some(color) = project.color.as_deref().and_then(crate::config::parse_hex)
-            && same_folder(&expand_home(key), root)
-        {
-            return color;
+/// The colours a project can be given, by name. They come from the theme (mostly its ANSI
+/// colours), so they suit whichever theme is on.
+pub const PROJECT_COLOURS: [&str; 8] = [
+    "red", "orange", "yellow", "green", "cyan", "blue", "magenta", "grey",
+];
+
+/// A project colour's value in palette `p`: a name from `PROJECT_COLOURS`, or "#rrggbb".
+pub fn colour_value(colour: &str, p: &crate::theme::Palette) -> Option<u32> {
+    Some(match colour.trim() {
+        "red" => p.ansi[1],
+        "orange" => p.accent,
+        "yellow" => p.ansi[3],
+        "green" => p.ansi[2],
+        "cyan" => p.ansi[6],
+        "blue" => p.ansi[4],
+        "magenta" => p.ansi[5],
+        "grey" => p.muted,
+        hex => return crate::config::parse_hex(hex),
+    })
+}
+
+/// The config's `[projects."…"]` table for the project at `root`, with its key.
+pub fn project_config<'a>(
+    root: &str,
+    config: &'a crate::config::Config,
+) -> Option<(&'a str, &'a crate::config::ProjectConfig)> {
+    // The folder as written, else with its links resolved (Kiln's roots are resolved).
+    let matches = |key: &str| {
+        let path = expand_home(key);
+        same_folder(&path, root)
+            || fs::canonicalize(&path).is_ok_and(|real| same_folder(&real.to_string_lossy(), root))
+    };
+    config
+        .projects
+        .iter()
+        .find(|(key, _)| matches(key))
+        .map(|(key, project)| (key.as_str(), project))
+}
+
+/// The key a project gets in the config: the one it has, else its folder with "~" for home.
+pub fn project_key(root: &str, config: &crate::config::Config) -> String {
+    if let Some((key, _)) = project_config(root, config) {
+        return key.to_string();
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    match root.strip_prefix(&home) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with(['/', '\\'])) => {
+            format!("~{rest}")
         }
+        _ => root.to_string(),
+    }
+}
+
+/// The name the user gave the project, if any.
+pub fn custom_project_name(root: &str, config: &crate::config::Config) -> Option<String> {
+    project_config(root, config)
+        .and_then(|(_, project)| project.name.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
+/// The colour the user chose for the project (`None`: Auto).
+pub fn chosen_project_color(root: &str, config: &crate::config::Config) -> Option<u32> {
+    let colour = project_config(root, config)?.1.color.as_deref()?;
+    colour_value(colour, &crate::theme::palette())
+}
+
+/// A project's colour: the one chosen, else picked from its path so it stays the same.
+pub fn project_color(root: &str, config: &crate::config::Config) -> u32 {
+    if let Some(color) = chosen_project_color(root, config) {
+        return color;
     }
     // Muted colours from the theme; none of them is the accent.
     let p = crate::theme::palette();
@@ -246,6 +314,7 @@ mod tests {
         TabState {
             panes: panes.iter().map(|p| Some(p.to_string())).collect(),
             focused: 0,
+            name: None,
         }
     }
 
@@ -310,12 +379,75 @@ mod tests {
         let mut config = crate::config::Config::default();
         let a = project_color("/code/a", &config);
         assert_eq!(a, project_color("/code/a", &config));
+        // "#rrggbb", as configs had it before the named colours.
         config.projects.insert(
             "/code/a/".into(),
             crate::config::ProjectConfig {
                 color: Some("#123456".into()),
+                ..Default::default()
             },
         );
         assert_eq!(project_color("/code/a", &config), 0x123456);
+        // A colour by name follows the theme.
+        let p = crate::theme::palette();
+        for (name, value) in [("blue", p.ansi[4]), ("orange", p.accent), ("grey", p.muted)] {
+            config.projects.get_mut("/code/a/").unwrap().color = Some(name.into());
+            assert_eq!(project_color("/code/a", &config), value, "{name}");
+            assert_eq!(chosen_project_color("/code/a", &config), Some(value));
+        }
+        for name in PROJECT_COLOURS {
+            assert!(colour_value(name, &p).is_some(), "{name}");
+        }
+        // Anything else is Auto.
+        config.projects.get_mut("/code/a/").unwrap().color = Some("pink".into());
+        assert_eq!(project_color("/code/a", &config), a);
+        assert_eq!(chosen_project_color("/code/a", &config), None);
+    }
+
+    #[test]
+    fn projects_can_be_renamed_in_the_config() {
+        let config = crate::config::parse(
+            "[projects.\"/code/acme-web\"]\nname = \"Acme\"\n[projects.\"/code/blank\"]\nname = \"  \"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            custom_project_name("/code/acme-web/", &config).as_deref(),
+            Some("Acme")
+        );
+        assert_eq!(custom_project_name("/code/blank", &config), None);
+        assert_eq!(custom_project_name("/code/other", &config), None);
+        // A project keeps the key it has; a new one is written with "~" for home.
+        assert_eq!(project_key("/code/acme-web", &config), "/code/acme-web");
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            assert_eq!(
+                project_key(&format!("{home}/src/app"), &config),
+                "~/src/app"
+            );
+        }
+    }
+
+    #[test]
+    fn session_names_are_saved_with_the_sessions() {
+        let mut named = tab(&["/x"]);
+        named.name = Some("deploys".into());
+        let state = State {
+            version: 1,
+            window: Some(WindowState {
+                tabs: vec![named.clone(), tab(&["/y"])],
+                ..Default::default()
+            }),
+            projects: Vec::new(),
+        };
+        let text = serde_json::to_string(&state).unwrap();
+        let back: State = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            back.window.unwrap().tabs[0].name.as_deref(),
+            Some("deploys")
+        );
+        // Unnamed sessions write nothing for it, and older files read as unnamed.
+        assert_eq!(text.matches("\"name\"").count(), 1, "{text}");
+        let old: TabState = serde_json::from_str(r#"{"panes":["/x"],"focused":0}"#).unwrap();
+        assert_eq!(old.name, None);
     }
 }

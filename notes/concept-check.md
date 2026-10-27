@@ -110,3 +110,19 @@ original's, so it reads the same after a restart.
 Not shown in pictures: Follow system switching with the OS (unit-tested in
 `theme::tests::system_follows_the_appearance_and_custom_its_base`; the live switch uses GPUI's
 appearance observer, not run headless).
+
+## Sidebar: renaming and project colours (no mockup)
+
+`snapshot sidebar`: two sessions, `kiln` and a demo project whose config still has an old
+`color = "#83a598"`. Everything below is asserted in the run.
+
+| Item | Kiln | Verdict |
+| --- | --- | --- |
+| No name at the top left of the panes (the pill shows the project); header height and drag area unchanged; "⌘/ Shortcuts" at the bottom of the sidebar | [sb1](screenshots/sidebar/sb1-sidebar.png); the old "#rrggbb" colour on the demo project's dot | Matches |
+| ⌘R / F2: the session's name edited in place; Enter keeps it, Esc drops it, empty restores the automatic name; it stays through `cd` and is saved in `state.json` | [sb2](screenshots/sidebar/sb2-rename-session.png), [sb3](screenshots/sidebar/sb3-session-renamed.png). Tests: `state::tests::session_names_are_saved_with_the_sessions` | Matches |
+| ⌘⇧R: the project's name, written to `[projects."…"] name`, shown in the sidebar, the header pill and the session label | [sb4](screenshots/sidebar/sb4-project-renamed.png) ([toml](screenshots/sidebar/sb-kiln.toml)). Tests: `state::tests::projects_can_be_renamed_in_the_config` | Matches |
+| "Project colour" from the palette: the pop-up in the icon pop-up's style (equal columns, round swatches with names, Auto first), all by keyboard; Blue fills the dot and the pill | [sb5](screenshots/sidebar/sb5-colour-popup.png), [sb6](screenshots/sidebar/sb6-project-blue.png); `color = "blue"`. Tests: `state::tests::project_colours_are_stable_and_configurable` (names, old hex, unknown is Auto) | Matches |
+| Right-click a project: Rename, Colour…; ↓ Enter opens the colours, Esc closes | [sb7](screenshots/sidebar/sb7-context-menu.png) | Matches |
+| Double-click a session: rename in place | [sb8](screenshots/sidebar/sb8-double-click.png) | Matches |
+| The shortcuts hint opens the pop-up, which lists Rename session (⌘R F2) and Rename project (⇧⌘R); every bound action is listed | [sb9](screenshots/sidebar/sb9-shortcuts.png). Test: `shortcuts::tests::the_popup_shows_every_bound_action`. Command palette in one column: [s7](screenshots/shortcuts/s7-narrow-scrolled.png) | Matches |
+

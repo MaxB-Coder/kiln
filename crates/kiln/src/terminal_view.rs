@@ -2320,7 +2320,22 @@ impl Render for TerminalView {
 
         div()
             .id("terminal")
-            .key_context("Terminal")
+            .key_context({
+                // `full_screen` while a program has the whole screen (htop, vim): keys such as F2
+                // go to it rather than to Kiln.
+                let mut context = gpui::KeyContext::new_with_defaults();
+                context.add("Terminal");
+                if self
+                    .session
+                    .term()
+                    .lock()
+                    .mode()
+                    .contains(TermMode::ALT_SCREEN)
+                {
+                    context.add("full_screen");
+                }
+                context
+            })
             .track_focus(&self.focus)
             .size_full()
             .relative()

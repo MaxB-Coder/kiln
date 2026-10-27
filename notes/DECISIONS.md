@@ -374,3 +374,35 @@ Newest at the bottom.
   variant's `dragonBlack6`, so it is wave's `sumiInk6` #54546d (its non-text colour, the same
   as the dividers); ANSI black #090618 is the old terminal extras, so it is #16161d
   (`sumiInk0`, what wave's terminal palette uses now).
+- **Renaming sessions and projects; project colours.** Double-click a sidebar row, or
+  right-click it and choose Rename: the name is edited in place, Enter keeps it, Esc drops it,
+  and an empty name brings the automatic one back. Keys: ⌘R and F2 rename the active session
+  (Ctrl+Shift+R on Windows and Linux, as `k()` maps the others), ⌘⇧R its project
+  (Ctrl+Alt+Shift+R, like the other ⇧ pair); none of them was bound. F2 is bound in the
+  terminal only while no full-screen program runs (the terminal's key context gains
+  `full_screen` then), so htop, mc and others keep it. The palette has "Rename session",
+  "Rename project" and "Project colour". The editors live in the sidebar, so these open it when
+  it is hidden. A session's name goes with the saved sessions (`state.json`, `TabState.name`,
+  read as unnamed from older files), never the config, and it no longer follows the folder or
+  the program. A project's name and colour go into `[projects."~/path"]` through the
+  `toml_edit` writer (`name`, `color`); a project keeps the key it has, matched as written or
+  with its links resolved (Kiln's roots are resolved: `/private/var` on macOS), and a new one
+  is written with `~` for home. The name shows wherever the project's does (sidebar, header
+  pill, palette, session labels), since `naming::project_name` reads it. Colours are names
+  resolved through the theme, so they suit each one: red, yellow, green, cyan, blue and
+  magenta are the theme's ANSI colours, orange its accent, grey its muted text; "#rrggbb" from
+  older configs still works, and anything else is Auto (the colour picked from the path, as
+  before). A chosen colour fills the project's dot and its header pill (Auto keeps the pill in
+  the accent). The colour pop-up sits under the project in the sidebar, in the icon pop-up's
+  style: equal 58 px columns, three to a row, a round swatch with its name, the current one
+  ringed. It and the right-click menu take the keys: the arrows move, Enter picks, Esc closes.
+- **Header and sidebar hint.** The name at the top left of the panes is gone (the header pill
+  shows the project); the header keeps its height and the empty space stays a drag area. The
+  sidebar's bottom line shows the shortcuts key from the keymap ("⌘/ Shortcuts",
+  "Ctrl+Shift+/ Shortcuts") instead of ⌘K, and opens the pop-up.
+- **Shortcuts pop-up coverage.** A reported missing "Command palette" did not reproduce: it is
+  listed in both layouts (in one column, under 900 px wide, below the fold, and the list
+  scrolls to it; see `notes/screenshots/shortcuts/s7-narrow-scrolled.png`). A test now builds
+  the pop-up view from each platform's live keymap and checks that every described action
+  with a binding is shown (`shortcuts::tests::the_popup_shows_every_bound_action`).
+

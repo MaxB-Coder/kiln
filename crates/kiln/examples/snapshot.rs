@@ -177,6 +177,40 @@ impl Shots {
         self.pump(Duration::from_millis(300));
     }
 
+    /// A mouse click (`count` 2: a double-click) at a point in the window.
+    fn click_button(&mut self, x: f32, y: f32, button: gpui::MouseButton, count: usize) {
+        let window: AnyWindowHandle = self.window.into();
+        for n in 1..=count {
+            let position = Point::new(px(x), px(y));
+            let down = PlatformInput::MouseDown(gpui::MouseDownEvent {
+                button,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: n,
+                first_mouse: false,
+            });
+            let up = PlatformInput::MouseUp(gpui::MouseUpEvent {
+                button,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: n,
+            });
+            let _ = self.cx.update_window(window, |_, window, cx| {
+                window.dispatch_event(down, cx);
+                window.dispatch_event(up, cx);
+            });
+            self.pump(Duration::from_millis(60));
+        }
+        self.pump(Duration::from_millis(300));
+    }
+
+    fn titles(&mut self) -> Vec<String> {
+        let window = self.window;
+        self.cx
+            .update(|cx| window.update(cx, |w, _, cx| w.session_titles(cx)))
+            .unwrap()
+    }
+
     fn workspace<R>(&mut self, f: impl FnOnce(&Workspace) -> R) -> R {
         self.cx.update(|cx| f(self.window.read(cx).unwrap()))
     }
@@ -289,6 +323,13 @@ fn main() {
     if scenario == "concept" {
         concept(&mut s);
         let _ = std::fs::remove_file(&state_file);
+        println!("done");
+        return;
+    }
+    if scenario == "sidebar" {
+        sidebar(&mut s, &state_file);
+        let _ = std::fs::remove_file(&state_file);
+        let _ = std::fs::remove_dir_all(&config_home);
         println!("done");
         return;
     }
@@ -549,6 +590,9 @@ fn shortcuts(s: &mut Shots) {
     s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
     s.action(Box::new(kiln::ToggleShortcuts));
     s.shot("s6-narrow");
+    // The rest of the list scrolls into view.
+    s.scroll(320., 500., -2000.);
+    s.shot("s7-narrow-scrolled");
 }
 
 /// The input box: the prompt, after a failure, with a second line, with a completion menu, and
@@ -1277,6 +1321,137 @@ fn clean_project() -> PathBuf {
 }
 
 /// A small git project with a few changes, in a scratch folder.
+/// Renaming sessions and projects, and project colours, by keyboard and by mouse.
+fn sidebar(s: &mut Shots, state_file: &std::path::Path) {
+    use gpui::MouseButton;
+    let path = kiln::config::config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let demo = demo_project();
+    // A colour as configs wrote it before the named colours.
+    let demo_key = demo.to_string_lossy().to_string();
+    // Kiln knows the project by its folder with links resolved (/private/var on macOS).
+    let demo_root = std::fs::canonicalize(&demo)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    std::fs::write(
+        &path,
+        format!("cursor_blink = false\n\n[projects.\"{demo_key}\"]\ncolor = \"#83a598\"\n"),
+    )
+    .unwrap();
+    let on_file = |path: &std::path::Path| {
+        kiln::config::parse(&std::fs::read_to_string(path).unwrap()).unwrap()
+    };
+    s.pump(Duration::from_millis(1500));
+    s.run("echo first session", Duration::from_secs(5));
+    s.action(Box::new(kiln::NewSession));
+    s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+    s.run(&format!("cd {}", demo.display()), Duration::from_secs(5));
+    s.run("git --no-pager log --oneline -2", Duration::from_secs(5));
+    s.pump(Duration::from_millis(1500));
+    // No name at the top left of the panes; "⌘/ Shortcuts" at the bottom of the sidebar; the
+    // demo project's dot and pill in its old "#rrggbb" colour.
+    s.shot("sb1-sidebar");
+
+    // ⌘R: the active session's name, edited in place.
+    s.keystroke(if cfg!(target_os = "macos") {
+        "cmd-r"
+    } else {
+        "ctrl-shift-r"
+    });
+    assert_eq!(s.workspace(|w| w.editing()), (true, false));
+    s.shot("sb2-rename-session");
+    s.keystroke("ctrl-u d e p l o y s enter");
+    assert_eq!(s.titles()[1], "deploys");
+    // It stays when the folder changes, and is saved with the sessions.
+    s.run("cd ..", Duration::from_secs(5));
+    s.pump(Duration::from_millis(2600));
+    assert_eq!(s.titles()[1], "deploys");
+    let saved: kiln::state::State =
+        serde_json::from_str(&std::fs::read_to_string(state_file).unwrap()).unwrap();
+    let tabs = saved.window.unwrap().tabs;
+    assert_eq!(tabs[1].name.as_deref(), Some("deploys"), "{tabs:?}");
+    s.run(&format!("cd {}", demo.display()), Duration::from_secs(5));
+    s.shot("sb3-session-renamed");
+    // Esc keeps the old name; an empty name gives the automatic one back.
+    s.keystroke("f2 x escape");
+    assert_eq!(s.titles()[1], "deploys");
+    s.keystroke("f2 ctrl-u enter");
+    assert_ne!(s.titles()[1], "deploys");
+
+    // ⌘⇧R: the project's name, in the config.
+    s.keystroke(if cfg!(target_os = "macos") {
+        "cmd-shift-r"
+    } else {
+        "ctrl-alt-shift-r"
+    });
+    s.keystroke("ctrl-u A c m e space W e b enter");
+    let name = kiln::state::custom_project_name(&demo_root, &on_file(&path));
+    assert_eq!(name.as_deref(), Some("Acme Web"));
+    s.pump(Duration::from_millis(500));
+    s.shot("sb4-project-renamed");
+
+    // The colour pop-up from the palette, all by keyboard: down twice is Blue, Enter picks.
+    s.keystroke(if cfg!(target_os = "macos") {
+        "cmd-k"
+    } else {
+        "ctrl-shift-k"
+    });
+    s.keystroke("P r o j e c t space c o l o u r");
+    s.pump(Duration::from_millis(300));
+    s.keystroke("enter");
+    s.pump(Duration::from_millis(300));
+    assert_eq!(
+        s.workspace(|w| w.editing()),
+        (false, true),
+        "the pop-up opens"
+    );
+    s.keystroke("down down");
+    s.shot("sb5-colour-popup");
+    s.keystroke("enter");
+    assert_eq!(s.workspace(|w| w.editing()), (false, false));
+    let config = on_file(&path);
+    let project = kiln::state::project_config(&demo_root, &config).unwrap().1;
+    assert_eq!(project.color.as_deref(), Some("blue"));
+    let blue = kiln::theme::palette().ansi[4];
+    assert_eq!(kiln::state::project_color(&demo_root, &config), blue);
+    s.pump(Duration::from_millis(500));
+    s.shot("sb6-project-blue");
+
+    // The mouse: right-click a project for Rename and Colour…, double-click a session.
+    let header_y = s.workspace(|w| w.sidebar_rows())[1].0;
+    s.click_button(60., header_y, MouseButton::Right, 1);
+    s.shot("sb7-context-menu");
+    // The menu takes the keys: ↓ Enter is Colour…, and its pop-up then has them.
+    s.keystroke("down enter");
+    assert_eq!(
+        s.workspace(|w| w.editing()),
+        (false, true),
+        "Colour… opens the pop-up"
+    );
+    s.keystroke("escape");
+    assert_eq!(
+        s.workspace(|w| w.editing()),
+        (false, false),
+        "Esc closes it"
+    );
+    let session_y = s.workspace(|w| w.sidebar_rows())[1].1;
+    s.click_button(80., session_y, MouseButton::Left, 2);
+    assert_eq!(
+        s.workspace(|w| w.editing()),
+        (true, false),
+        "double-click renames"
+    );
+    s.shot("sb8-double-click");
+    s.keystroke("escape");
+
+    // The shortcuts hint opens the pop-up, which lists the new keys.
+    let hint_y = s.workspace(|w| w.sidebar_rows())[0].2;
+    s.click_button(40., hint_y, MouseButton::Left, 1);
+    s.shot("sb9-shortcuts");
+    std::fs::copy(&path, s.out.join("sb-kiln.toml")).unwrap();
+}
+
 fn demo_project() -> PathBuf {
     let root = std::env::temp_dir().join("kiln-demo").join("acme-web");
     let _ = std::fs::remove_dir_all(&root);

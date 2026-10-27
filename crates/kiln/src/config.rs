@@ -271,8 +271,11 @@ impl Default for TintConfig {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ProjectConfig {
-    /// The project's colour in the sidebar, as "#rrggbb".
+    /// The project's colour (its sidebar dot and header pill): a colour of the theme by name
+    /// (`state::PROJECT_COLOURS`), or "#rrggbb".
     pub color: Option<String>,
+    /// The name Kiln shows for the project instead of its folder's.
+    pub name: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -634,9 +637,12 @@ production = ["*prod*"]
 # and install only when you choose to.
 check = true
 
-# Per project, keyed by folder:
+# Per project, keyed by folder (the sidebar sets these: right-click a project, or ⌘⇧R and
+# "Project colour" in the palette). Colours come from the theme: "red", "orange", "yellow",
+# "green", "cyan", "blue", "magenta" or "grey" ("#rrggbb" works too):
 # [projects."~/developer/kiln"]
-# color = "#e07b39"
+# name = "Kiln"
+# color = "orange"
 
 [theme]
 # "kiln-dark", "kiln-light", "system" (dark or light with your OS), "catppuccin-mocha",

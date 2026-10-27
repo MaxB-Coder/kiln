@@ -1,0 +1,5 @@
+cursor_blink = false
+
+[projects."/var/folders/zk/_pbt5krn5lvcrh8q2q948dp40000gn/T/kiln-demo/acme-web"]
+color = "blue"
+name = "Acme Web"

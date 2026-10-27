@@ -23,6 +23,8 @@ pub struct GitSummary {
 pub struct Pills {
     /// "receipts": the repository's (or folder's) name.
     pub project: Option<String>,
+    /// The colour chosen for the project (`None`: the accent).
+    pub project_color: Option<u32>,
     /// "feat/auth" and how many files changed; only inside a repository.
     pub branch: Option<(String, usize)>,
     /// "node 25", "rust 1.98".
@@ -47,11 +49,14 @@ pub fn pills(
     runtimes: &[(String, String)],
     wsl: Option<&str>,
 ) -> Pills {
-    let project = match (git, cwd) {
-        (Some(git), _) => Some(naming::project_name(Some(&git.root))),
-        (None, Some(cwd)) if !cwd.is_empty() => Some(naming::project_name(Some(cwd))),
+    let root = match (git, cwd) {
+        (Some(git), _) => Some(git.root.as_str()),
+        (None, Some(cwd)) if !cwd.is_empty() => Some(cwd),
         _ => None,
     };
+    let project = root.map(|root| naming::project_name(Some(root)));
+    let project_color =
+        root.and_then(|root| crate::state::chosen_project_color(root, &crate::config::current()));
     let branch = git.map(|git| {
         (
             git.branch.clone().unwrap_or_else(|| "detached".into()),
@@ -60,6 +65,7 @@ pub fn pills(
     });
     Pills {
         project,
+        project_color,
         branch,
         runtimes: runtimes
             .iter()
@@ -103,7 +109,8 @@ pub fn render(pills: &Pills) -> AnyElement {
         .text_size(px(10.5))
         .font_weight(gpui::FontWeight::BOLD);
     if let Some(project) = &pills.project {
-        row = row.child(pill(p.accent, p.bar).child(SharedString::from(project.clone())));
+        let bg = pills.project_color.unwrap_or(p.accent);
+        row = row.child(pill(bg, p.bar).child(SharedString::from(project.clone())));
     }
     if let Some((branch, changes)) = &pills.branch {
         let mut branch_pill =

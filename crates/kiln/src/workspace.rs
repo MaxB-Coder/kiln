@@ -33,10 +33,10 @@ use crate::theme::{self, palette};
 use crate::{
     ClosePane, CloseWindow, CommandPaletteToggle, CopyLastOutput, CopyLastOutputRaw, EditConfig,
     Find, FocusNextPane, FocusPrevPane, InstallUpdate, NewSession, NewWindow, NextSession,
-    OpenConfigFile, PrevSession, Quit, SelectSession1, SelectSession2, SelectSession3,
-    SelectSession4, SelectSession5, SelectSession6, SelectSession7, SelectSession8, SelectSession9,
-    SplitRight, ToggleFocusMode, ToggleRail, ToggleShortcuts, ToggleSidebar, ZoomIn, ZoomOut,
-    ZoomReset,
+    OpenConfigFile, PrevSession, ProjectColour, Quit, RenameProject, RenameSession, SelectSession1,
+    SelectSession2, SelectSession3, SelectSession4, SelectSession5, SelectSession6, SelectSession7,
+    SelectSession8, SelectSession9, SplitRight, ToggleFocusMode, ToggleRail, ToggleShortcuts,
+    ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 
 /// Height of the strip at the top that holds the window controls.
@@ -74,6 +74,92 @@ struct Tab {
     focused: usize,
     /// A bell, or a long command that finished out of sight; cleared when the session is shown.
     attention: bool,
+    /// The name the user gave it; it then no longer follows the folder or the program.
+    name: Option<String>,
+}
+
+/// What the sidebar's inline editor renames.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RenameTarget {
+    /// A session, by its id.
+    Session(u64),
+    /// A project, by its folder.
+    Project(String),
+}
+
+struct Renaming {
+    target: RenameTarget,
+    input: Entity<TextInput>,
+    _events: Subscription,
+}
+
+/// The right-click menu on a sidebar row, where it was opened. It takes the keys: ↑↓ move,
+/// Enter picks, Esc closes.
+struct SidebarMenu {
+    target: RenameTarget,
+    position: gpui::Point<Pixels>,
+    selected: usize,
+    focus: gpui::FocusHandle,
+}
+
+/// The project colour pop-up: Auto (0), then `state::PROJECT_COLOURS`.
+struct ColourMenu {
+    root: String,
+    selected: usize,
+    focus: gpui::FocusHandle,
+}
+
+/// The colour pop-up's columns, equal widths.
+const COLOUR_COLUMNS: usize = 3;
+const COLOUR_COLUMN_W: f32 = 58.;
+
+/// Where a sidebar row is drawn, recorded as it paints (see `Workspace::sidebar_rows`).
+#[derive(Clone, Copy)]
+enum RowAt {
+    Header(usize),
+    Session(usize),
+    Hint,
+}
+
+fn record_row(workspace: Entity<Workspace>, at: RowAt) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, _, cx| {
+            let y = f32::from(bounds.center().y);
+            workspace.update(cx, |w, _| {
+                let rows = &mut w.sidebar_ys.0;
+                let grow = |rows: &mut Vec<(f32, f32)>, i: usize| {
+                    if rows.len() <= i {
+                        rows.resize(i + 1, (0., 0.));
+                    }
+                };
+                match at {
+                    RowAt::Header(i) => {
+                        grow(rows, i);
+                        rows[i].0 = y;
+                    }
+                    RowAt::Session(i) => {
+                        grow(rows, i);
+                        rows[i].1 = y;
+                    }
+                    RowAt::Hint => w.sidebar_ys.1 = y,
+                }
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// "blue" → "Blue".
+fn capitalised(name: &str) -> String {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
 }
 
 struct SearchBar {
@@ -100,6 +186,12 @@ pub struct Workspace {
     palette: Option<(Entity<CommandPalette>, Subscription)>,
     shortcuts: Option<(Entity<ShortcutsView>, Subscription)>,
     settings: Option<(Entity<SettingsView>, Subscription)>,
+    renaming: Option<Renaming>,
+    sidebar_menu: Option<SidebarMenu>,
+    colour_menu: Option<ColourMenu>,
+    /// Where the sidebar's rows were drawn (window y of their middles): each project's header
+    /// and first session, and the shortcuts hint. For the snapshots' clicks.
+    sidebar_ys: (Vec<(f32, f32)>, f32),
     /// The config this window last applied (its own writes, then the file watcher's reloads).
     applied: Config,
     metrics: CellMetrics,
@@ -138,6 +230,10 @@ impl Workspace {
             search: None,
             palette: None,
             shortcuts: None,
+            renaming: None,
+            sidebar_menu: None,
+            colour_menu: None,
+            sidebar_ys: (Vec::new(), 0.),
             settings: None,
             applied: config.clone(),
             metrics,
@@ -272,6 +368,7 @@ impl Workspace {
                 panes: vec![pane],
                 focused: 0,
                 attention: false,
+                name: None,
             },
         );
         self.activate(insert_at, window, cx);
@@ -758,6 +855,9 @@ impl Workspace {
         action("Copy last output (fenced)", Box::new(CopyLastOutput));
         action("Copy last output (raw)", Box::new(CopyLastOutputRaw));
         action("Keyboard shortcuts", Box::new(ToggleShortcuts));
+        action("Rename session", Box::new(RenameSession));
+        action("Rename project", Box::new(RenameProject));
+        action("Project colour", Box::new(ProjectColour));
         action("Toggle sidebar", Box::new(ToggleSidebar));
         action("Toggle context rail", Box::new(ToggleRail));
         action("Focus mode", Box::new(ToggleFocusMode));
@@ -1015,7 +1115,14 @@ impl Workspace {
             facts.push(self.pane_facts(index, focused, cx));
         }
         let labels = naming::session_labels(&facts);
-        facts.into_iter().map(|f| f.project).zip(labels).collect()
+        facts
+            .into_iter()
+            .map(|f| f.project)
+            .zip(labels)
+            .zip(&self.tabs)
+            // A session given a name keeps it.
+            .map(|((project, label), tab)| (project, tab.name.clone().unwrap_or(label)))
+            .collect()
     }
 
     /// What a pane's name is made of: its project, folder, program and shell.
@@ -1053,28 +1160,6 @@ impl Workspace {
 
     /// The name in each pane's header for the active session: the sidebar's label for the
     /// focused pane, each other pane's own.
-    fn pane_names(&mut self, cx: &App) -> Vec<String> {
-        let label = self
-            .session_names(cx)
-            .get(self.active)
-            .map(|(_, label)| label.clone())
-            .unwrap_or_default();
-        let Some(tab) = self.tabs.get(self.active) else {
-            return Vec::new();
-        };
-        let (count, focused) = (tab.panes.len(), tab.focused);
-        (0..count)
-            .map(|i| {
-                if i == focused {
-                    label.clone()
-                } else {
-                    let facts = self.pane_facts(self.active, i, cx);
-                    naming::session_labels(&[facts]).remove(0)
-                }
-            })
-            .collect()
-    }
-
     /// "acme-web › api" for the focused session.
     fn focused_breadcrumb(&mut self, cx: &App) -> String {
         let names = self.session_names(cx);
@@ -1082,6 +1167,426 @@ impl Workspace {
             .get(self.active)
             .map(|(project, label)| naming::breadcrumb(project.as_deref(), label))
             .unwrap_or_default()
+    }
+
+    // ----- renaming sessions and projects, project colours ----------------------------------
+
+    /// The sessions' names as the sidebar shows them (the snapshots check them).
+    pub fn session_titles(&mut self, cx: &App) -> Vec<String> {
+        self.session_names(cx)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect()
+    }
+
+    /// Per project in the sidebar: (its header's y, its first session's y, the hint's y).
+    pub fn sidebar_rows(&self) -> Vec<(f32, f32, f32)> {
+        let (rows, hint) = &self.sidebar_ys;
+        rows.iter()
+            .map(|(header, session)| (*header, *session, *hint))
+            .collect()
+    }
+
+    /// Whether an inline name editor or the colour pop-up is open (the snapshots check them).
+    pub fn editing(&self) -> (bool, bool) {
+        (self.renaming.is_some(), self.colour_menu.is_some())
+    }
+
+    /// The sidebar has to show for its inline editors; the keys and the palette open it.
+    fn show_sidebar(&mut self) {
+        self.sidebar_open = true;
+        self.focus_mode = false;
+    }
+
+    /// The active session's project folder, if it has one.
+    fn active_project(&mut self, cx: &App) -> Option<String> {
+        self.session_names(cx)
+            .get(self.active)
+            .and_then(|(project, _)| project.clone())
+            .filter(|root| !root.is_empty())
+    }
+
+    /// Starts the inline name editor on a session or a project, holding its current name.
+    pub fn start_rename(
+        &mut self,
+        target: RenameTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_menu = None;
+        self.colour_menu = None;
+        self.show_sidebar();
+        let current = match &target {
+            RenameTarget::Session(id) => {
+                let names = self.session_names(cx);
+                self.tabs
+                    .iter()
+                    .position(|t| t.id == *id)
+                    .and_then(|i| names.get(i).map(|(_, label)| label.clone()))
+                    .unwrap_or_default()
+            }
+            RenameTarget::Project(root) => naming::project_name(Some(root)),
+        };
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new(
+                match target {
+                    RenameTarget::Session(_) => "Session name",
+                    RenameTarget::Project(_) => "Project name",
+                },
+                cx,
+            )
+            .with_size(px(12.));
+            input.set_text(&current, cx);
+            input
+        });
+        let events = cx.subscribe_in(&input, window, |this, _, event, window, cx| match event {
+            TextInputEvent::Submit { .. } => this.finish_rename(true, window, cx),
+            TextInputEvent::Cancel => this.finish_rename(false, window, cx),
+            _ => {}
+        });
+        window.focus(&input.focus_handle(cx), cx);
+        self.renaming = Some(Renaming {
+            target,
+            input,
+            _events: events,
+        });
+        cx.notify();
+    }
+
+    /// Enter keeps the name (an empty one goes back to the automatic name); Esc drops it.
+    fn finish_rename(&mut self, keep: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(renaming) = self.renaming.take() else {
+            return;
+        };
+        if keep {
+            let text = renaming.input.read(cx).text().trim().to_string();
+            let name = (!text.is_empty()).then_some(text);
+            match renaming.target {
+                RenameTarget::Session(id) => {
+                    if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
+                        tab.name = name;
+                    }
+                }
+                RenameTarget::Project(root) => {
+                    self.write_project(&root, "name", name, window, cx);
+                }
+            }
+        }
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    /// Writes one key of a project's `[projects."…"]` table (`None` removes it), and applies
+    /// the result.
+    fn write_project(
+        &mut self,
+        root: &str,
+        key: &'static str,
+        value: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = config::config_path() else {
+            return;
+        };
+        let project = state::project_key(root, &config::current());
+        let edit: crate::config_write::Edit = (
+            &["projects", project.as_str(), key],
+            value.map(toml_edit::Value::from),
+        );
+        match crate::config_write::write_edits(&path, &[edit]) {
+            Ok(config) => self.apply_config(config, window, cx),
+            Err(err) => log::warn!("could not save the project's {key}: {err:?}"),
+        }
+    }
+
+    /// Opens the colour pop-up under a project in the sidebar, on its current colour.
+    pub fn open_colour_menu(&mut self, root: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_menu = None;
+        self.renaming = None;
+        self.show_sidebar();
+        let chosen = state::project_config(&root, &config::current())
+            .and_then(|(_, project)| project.color.clone());
+        let selected = chosen
+            .and_then(|c| state::PROJECT_COLOURS.iter().position(|n| *n == c.trim()))
+            .map_or(0, |i| i + 1);
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        self.colour_menu = Some(ColourMenu {
+            root,
+            selected,
+            focus,
+        });
+        cx.notify();
+    }
+
+    /// Picks entry `index` of the colour pop-up (0 is Auto) and closes it.
+    fn pick_colour(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.colour_menu.take() else {
+            return;
+        };
+        let value = index
+            .checked_sub(1)
+            .and_then(|i| state::PROJECT_COLOURS.get(i))
+            .map(|name| name.to_string());
+        self.write_project(&menu.root, "color", value, window, cx);
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    /// The colour pop-up's keys: the arrows move (three to a row), Enter picks, Esc closes.
+    fn colour_menu_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = self.colour_menu.as_mut() else {
+            return;
+        };
+        let count = state::PROJECT_COLOURS.len() + 1;
+        let at = menu.selected as i32;
+        let next = match event.keystroke.key.as_str() {
+            "left" => at - 1,
+            "right" | "tab" => at + 1,
+            "up" => at - COLOUR_COLUMNS as i32,
+            "down" => at + COLOUR_COLUMNS as i32,
+            "enter" | "space" => {
+                let selected = menu.selected;
+                self.pick_colour(selected, window, cx);
+                cx.stop_propagation();
+                return;
+            }
+            "escape" => {
+                self.colour_menu = None;
+                self.focus_active(window, cx);
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
+            _ => return,
+        };
+        menu.selected = next.rem_euclid(count as i32) as usize;
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    /// The pop-up under a project: Auto and the theme's colours, three to a row in equal
+    /// columns, each a round swatch with its name below, the current one ringed.
+    fn render_colour_menu(&self, menu: &ColourMenu, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let auto = state::project_color(&menu.root, &Config::default());
+        let mut grid = div().flex().flex_row().flex_wrap();
+        for i in 0..=state::PROJECT_COLOURS.len() {
+            let (name, color) = match i {
+                0 => ("Auto", auto),
+                i => {
+                    let name = state::PROJECT_COLOURS[i - 1];
+                    (name, state::colour_value(name, &p).unwrap_or(auto))
+                }
+            };
+            let on = i == menu.selected;
+            let swatch = div().size(px(18.)).rounded_full().bg(theme::hsla(color));
+            // Auto: the colour the project would get, with a hole, as "picked for you".
+            let swatch = if i == 0 {
+                swatch
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(div().size(px(8.)).rounded_full().bg(theme::hsla(p.raised)))
+            } else {
+                swatch
+            };
+            grid = grid.child(
+                div()
+                    .id(("project-colour", i))
+                    .w(px(COLOUR_COLUMN_W))
+                    .py(px(4.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(4.))
+                    .cursor_pointer()
+                    .text_size(px(9.5))
+                    .text_color(theme::hsla(if on { p.fg } else { p.fg_dim }))
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.pick_colour(i, window, cx)),
+                    )
+                    .child(
+                        div()
+                            .p(px(2.))
+                            .rounded_full()
+                            .border_2()
+                            .border_color(if on {
+                                theme::hsla(p.accent)
+                            } else {
+                                gpui::transparent_black()
+                            })
+                            .child(swatch),
+                    )
+                    .child(SharedString::from(capitalised(name))),
+            );
+        }
+        div()
+            .id("project-colours")
+            .track_focus(&menu.focus)
+            .on_key_down(cx.listener(Self::colour_menu_key))
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.colour_menu = None;
+                cx.notify();
+            }))
+            .mx(px(4.))
+            .mt(px(2.))
+            .mb(px(6.))
+            .px(px(8.))
+            .py(px(8.))
+            .rounded(px(10.))
+            .bg(theme::hsla(p.raised))
+            .border_1()
+            .border_color(theme::hsla(p.bg1))
+            .child(
+                div()
+                    .px(px(4.))
+                    .mb(px(4.))
+                    .text_size(px(10.))
+                    .text_color(theme::hsla(p.muted))
+                    .child("Colour"),
+            )
+            .child(grid)
+            .into_any_element()
+    }
+
+    /// The inline editor, in place of a name in the sidebar.
+    fn render_rename_input(&self, renaming: &Renaming) -> AnyElement {
+        let p = palette();
+        div()
+            .flex_1()
+            .min_w_0()
+            .px(px(6.))
+            .py(px(2.))
+            .rounded(px(5.))
+            .bg(theme::hsla(p.bg))
+            .border_1()
+            .border_color(theme::hsla(p.accent))
+            .text_color(theme::hsla(p.fg))
+            .child(renaming.input.clone())
+            .into_any_element()
+    }
+
+    fn open_sidebar_menu(
+        &mut self,
+        target: RenameTarget,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        self.sidebar_menu = Some(SidebarMenu {
+            target,
+            position,
+            selected: 0,
+            focus,
+        });
+        cx.notify();
+    }
+
+    /// Item `index` of the right-click menu: 0 Rename, 1 Colour (projects only).
+    fn pick_menu_item(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.sidebar_menu.take() else {
+            return;
+        };
+        match (index, menu.target) {
+            (0, target) => self.start_rename(target, window, cx),
+            (_, RenameTarget::Project(root)) => self.open_colour_menu(root, window, cx),
+            (_, RenameTarget::Session(_)) => self.focus_active(window, cx),
+        }
+        cx.notify();
+    }
+
+    fn sidebar_menu_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = self.sidebar_menu.as_mut() else {
+            return;
+        };
+        let count = match menu.target {
+            RenameTarget::Project(_) => 2,
+            RenameTarget::Session(_) => 1,
+        };
+        match event.keystroke.key.as_str() {
+            "up" => menu.selected = (menu.selected + count - 1) % count,
+            "down" | "tab" => menu.selected = (menu.selected + 1) % count,
+            "enter" | "space" => {
+                let selected = menu.selected;
+                self.pick_menu_item(selected, window, cx);
+            }
+            "escape" => {
+                self.sidebar_menu = None;
+                self.focus_active(window, cx);
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    /// The right-click menu on a sidebar row: Rename, and Colour for a project.
+    fn render_sidebar_menu(&self, menu: &SidebarMenu, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let selected = menu.selected;
+        let item = |i: usize, id: &'static str, label: &'static str| {
+            div()
+                .id(id)
+                .px(px(10.))
+                .py(px(5.))
+                .rounded(px(5.))
+                .text_color(theme::hsla(p.fg))
+                .when(i == selected, |d| d.bg(theme::hsla(p.bg1)))
+                .hover(|s| s.bg(theme::hsla(p.bg1)))
+                .cursor_pointer()
+                .child(label)
+        };
+        let rename = item(0, "menu-rename", "Rename")
+            .on_click(cx.listener(|this, _, window, cx| this.pick_menu_item(0, window, cx)));
+        let colour = matches!(menu.target, RenameTarget::Project(_)).then(|| {
+            item(1, "menu-colour", "Colour…")
+                .on_click(cx.listener(|this, _, window, cx| this.pick_menu_item(1, window, cx)))
+        });
+        gpui::deferred(
+            gpui::anchored().position(menu.position).child(
+                div()
+                    .id("sidebar-menu")
+                    .track_focus(&menu.focus)
+                    .on_key_down(cx.listener(Self::sidebar_menu_key))
+                    .min_w(px(140.))
+                    .p(px(4.))
+                    .rounded(px(8.))
+                    .bg(theme::hsla(p.raised))
+                    .border_1()
+                    .border_color(theme::hsla(p.bg1))
+                    .shadow(vec![gpui::BoxShadow {
+                        color: p.shadow(),
+                        offset: gpui::point(px(0.), px(8.)),
+                        blur_radius: px(24.),
+                        spread_radius: px(0.),
+                        inset: false,
+                    }])
+                    .font_family(FONT_FAMILY)
+                    .text_size(px(12.))
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                        this.sidebar_menu = None;
+                        cx.notify();
+                    }))
+                    .child(rename)
+                    .children(colour),
+            ),
+        )
+        .with_priority(1)
+        .into_any_element()
     }
 
     // ----- saved sessions and project spaces ------------------------------------------------
@@ -1115,6 +1620,7 @@ impl Workspace {
         }
         if let Some(current) = self.tabs.get_mut(self.active) {
             current.focused = tab.focused.min(current.panes.len() - 1);
+            current.name = tab.name.clone();
         }
         self.focus_active(window, cx);
     }
@@ -1183,6 +1689,7 @@ impl Workspace {
                     })
                     .collect(),
                 focused,
+                name: tab.name.clone(),
             });
         }
         WindowState {
@@ -1248,18 +1755,54 @@ impl Workspace {
         }
 
         let mut list = div().flex().flex_col().gap(px(2.));
-        for (root, tabs) in groups {
-            // The repository or folder name; "~" for home; "other" when no folder is known yet
-            // (a shell without integration, or one still starting).
+        for (group_index, (root, tabs)) in groups.into_iter().enumerate() {
+            // The repository or folder name (or the one given it); "~" for home; "other" when
+            // no folder is known yet (a shell without integration, or one still starting).
             let name = naming::project_name(root.as_deref());
+            // Projects can be renamed and given a colour; "other" cannot.
+            let target = root
+                .clone()
+                .filter(|r| !r.is_empty())
+                .map(RenameTarget::Project);
+            let editing = self
+                .renaming
+                .as_ref()
+                .filter(|r| target.as_ref() == Some(&r.target))
+                .map(|r| self.render_rename_input(r));
+            let colour_menu = self
+                .colour_menu
+                .as_ref()
+                .filter(|m| root.as_deref() == Some(m.root.as_str()))
+                .map(|m| self.render_colour_menu(m, cx));
             let root = root.map(PathBuf::from).unwrap_or_default();
             // Projects (folders in git) get their colour; Home and loose folders do not.
             let color = (!root.as_os_str().is_empty()
                 && !naming::is_home(&root.to_string_lossy())
                 && root.join(".git").exists())
             .then(|| state::project_color(&root.to_string_lossy(), &config::current()));
+            let header = div()
+                .id(("project", group_index))
+                .when_some(target, |d, target| {
+                    let on_right = target.clone();
+                    d.on_click(
+                        cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                            if event.click_count() == 2 {
+                                this.start_rename(target.clone(), window, cx);
+                            }
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                            this.open_sidebar_menu(on_right.clone(), event.position, window, cx)
+                        }),
+                    )
+                });
+            let entity = cx.entity();
             list = list.child(
-                div()
+                header
+                    .relative()
+                    .child(record_row(entity.clone(), RowAt::Header(group_index)))
                     .pt(px(12.))
                     .pb(px(4.))
                     .px(px(10.))
@@ -1278,17 +1821,35 @@ impl Workspace {
                                 .bg(theme::hsla(color)),
                         )
                     })
-                    .child(SharedString::from(name)),
+                    .map(|d| match editing {
+                        Some(input) => d.child(input),
+                        None => d.child(SharedString::from(name)),
+                    }),
             );
-            for index in tabs {
+            list = list.children(colour_menu);
+            for (n, index) in tabs.into_iter().enumerate() {
                 let label = names[index].1.clone();
-                list = list.child(self.render_session_row(index, label, cx));
+                let row = self.render_session_row(index, label, cx);
+                list = list.child(if n == 0 {
+                    div()
+                        .relative()
+                        .child(row)
+                        .child(record_row(entity.clone(), RowAt::Session(group_index)))
+                        .into_any_element()
+                } else {
+                    row
+                });
             }
         }
 
+        let menu = self
+            .sidebar_menu
+            .as_ref()
+            .map(|menu| self.render_sidebar_menu(menu, cx));
         div()
             .id("sidebar")
             .group("sidebar")
+            .children(menu)
             .flex_none()
             .w(SIDEBAR_WIDTH)
             .h_full()
@@ -1375,22 +1936,29 @@ impl Workspace {
                 )
             })
             .child(
-                // The way into the palette, for anyone who has not learnt the keys yet.
+                // The way to every key, for anyone who has not learnt them yet: the shortcuts
+                // binding as the keymap has it ("⌘/", "Ctrl+Shift+/").
                 div().flex_none().px(px(14.)).pt(px(4.)).pb(px(10.)).child(
                     div()
-                        .id("palette-hint")
+                        .id("shortcuts-hint")
+                        .relative()
+                        .child(record_row(cx.entity(), RowAt::Hint))
+                        .flex()
+                        .flex_row()
+                        .gap(px(6.))
                         .text_size(px(10.5))
                         .text_color(theme::hsla(p.bg3))
                         .hover(|s| s.text_color(theme::hsla(p.fg_dim)))
                         .cursor_pointer()
                         .on_click(|_, window, cx| {
-                            window.dispatch_action(Box::new(CommandPaletteToggle), cx)
+                            window.dispatch_action(Box::new(ToggleShortcuts), cx)
                         })
                         .child(SharedString::from(keymap::keys_for(
-                            &CommandPaletteToggle,
+                            &ToggleShortcuts,
                             cx,
                             key_style(),
-                        ))),
+                        )))
+                        .child("Shortcuts"),
                 ),
             )
             .into_any_element()
@@ -1423,6 +1991,12 @@ impl Workspace {
             PaneStatus::Running => Some(p.ok),
             PaneStatus::Idle => None,
         };
+        let editing = self
+            .renaming
+            .as_ref()
+            .filter(|r| r.target == RenameTarget::Session(tab.id))
+            .map(|r| self.render_rename_input(r));
+        let tab_id = tab.id;
         let group: SharedString = format!("session-{}", tab.id).into();
         let first_view = tab.panes.first().map(|pane| pane.view.clone());
         div()
@@ -1438,7 +2012,21 @@ impl Workspace {
             .when(active, |d| d.bg(theme::hsla(p.raised)))
             .hover(|s| s.bg(theme::hsla(p.raised)))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _, window, cx| this.activate(index, window, cx)))
+            .on_click(
+                cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                    this.activate(index, window, cx);
+                    if event.click_count() == 2 {
+                        this.start_rename(RenameTarget::Session(tab_id), window, cx);
+                    }
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    let target = RenameTarget::Session(tab_id);
+                    this.open_sidebar_menu(target, event.position, window, cx)
+                }),
+            )
             .child(
                 div()
                     .flex_none()
@@ -1446,16 +2034,19 @@ impl Workspace {
                     .rounded_full()
                     .when_some(dot, |d, color| d.bg(theme::hsla(color))),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .text_color(theme::hsla(if active { p.fg } else { p.fg_dim }))
-                    .child(SharedString::from(title)),
-            )
+            .map(|d| match editing {
+                Some(input) => d.child(input),
+                None => d.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .text_color(theme::hsla(if active { p.fg } else { p.fg_dim }))
+                        .child(SharedString::from(title)),
+                ),
+            })
             .when(tab.panes.len() > 1, |d| {
                 d.child(
                     div()
@@ -1494,13 +2085,12 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// A pane's header, one line: its name, dim, on the left; on the right how many things
-    /// run (in focus mode) and the pills. `lead` and `trail` keep it clear of the traffic
-    /// lights, the `>_` mark and the window controls.
+    /// A pane's header, one line: on the right how many things run (in focus mode) and the
+    /// pills, the project's first; the rest is room to drag the window by. `lead` and `trail`
+    /// keep it clear of the traffic lights, the `>_` mark and the window controls.
     fn render_pane_header(
         &self,
         view: &Entity<TerminalView>,
-        name: String,
         lead: f32,
         trail: f32,
         cx: &App,
@@ -1522,16 +2112,7 @@ impl Workspace {
             .on_mouse_down(MouseButton::Left, start_window_drag)
             .font_family(FONT_FAMILY)
             .text_size(px(11.))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .text_color(theme::hsla(theme::blend(p.bg3, p.muted, 0.5)))
-                    .child(SharedString::from(name)),
-            )
+            .child(div().flex_1().min_w_0())
             .when_some(running, |d, running| {
                 d.child(
                     div()
@@ -1627,12 +2208,7 @@ impl Workspace {
         )
     }
 
-    fn render_panes(
-        &self,
-        names: Vec<String>,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_panes(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(tab) = self.tabs.get(self.active) else {
             let p = palette();
             let message = self
@@ -1681,13 +2257,7 @@ impl Workspace {
             } else {
                 0.
             });
-            let header = self.render_pane_header(
-                &pane.view,
-                names.get(i).cloned().unwrap_or_default(),
-                lead,
-                trail,
-                cx,
-            );
+            let header = self.render_pane_header(&pane.view, lead, trail, cx);
             let view = pane.view.clone();
             row = row.child(
                 div()
@@ -1987,8 +2557,7 @@ impl Render for Workspace {
         } else {
             None
         };
-        let names = self.pane_names(cx);
-        let panes = self.render_panes(names, window, cx);
+        let panes = self.render_panes(window, cx);
         // Behind the pane headers, a strip that moves the window where no header is (beside a
         // pane in focus mode), and over them the `>_` mark and the window controls.
         let mac = chrome() == Chrome::Mac;
@@ -2192,6 +2761,21 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &Find, window, cx| this.open_search(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
                 this.toggle_shortcuts(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RenameSession, window, cx| {
+                if let Some(id) = this.tabs.get(this.active).map(|t| t.id) {
+                    this.start_rename(RenameTarget::Session(id), window, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &RenameProject, window, cx| {
+                if let Some(root) = this.active_project(cx) {
+                    this.start_rename(RenameTarget::Project(root), window, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ProjectColour, window, cx| {
+                if let Some(root) = this.active_project(cx) {
+                    this.open_colour_menu(root, window, cx)
+                }
             }))
             .on_action(cx.listener(|this, _: &CommandPaletteToggle, window, cx| {
                 this.toggle_palette(window, cx)

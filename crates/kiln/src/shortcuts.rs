@@ -230,3 +230,41 @@ impl Render for ShortcutsView {
             )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every action with a name and a key appears in the pop-up itself (the live keymap, the
+    /// view's sections), on both platforms.
+    #[gpui::test]
+    fn the_popup_shows_every_bound_action(cx: &mut gpui::TestAppContext) {
+        for style in [KeyStyle::Mac, KeyStyle::Pc] {
+            cx.update(|cx| {
+                cx.clear_key_bindings();
+                cx.bind_keys(keymap::bindings(style));
+            });
+            let rows = cx.update(|cx| keymap::live_rows(cx, style));
+            let window = cx.add_window(|window, cx| ShortcutsView::new(rows, style, window, cx));
+            let shown: Vec<String> = window
+                .update(cx, |view, _, cx| {
+                    view.sections(cx)
+                        .into_iter()
+                        .flat_map(|(_, rows)| rows.into_iter().map(|r| r.label.clone()))
+                        .collect()
+                })
+                .unwrap();
+            let expected = keymap::bound_descriptions(style);
+            assert!(expected.len() > 20, "{style:?}: {expected:?}");
+            for (action, label) in expected {
+                assert!(
+                    shown.iter().any(|s| s == label),
+                    "{style:?}: {label} ({action}) is not in the pop-up: {shown:?}"
+                );
+            }
+            for label in ["Command palette", "Rename session", "Rename project"] {
+                assert!(shown.iter().any(|s| s == label), "{style:?}: {label}");
+            }
+        }
+    }
+}
