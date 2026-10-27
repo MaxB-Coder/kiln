@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 use kiln_term::integration::{self, MinimalPrompt};
 use kiln_term::{GridSize, Mark, Session, SessionEvent, SessionOptions, ShellCommand};
 
+/// How long a shell may take to show its prompt: generous, as a cold PowerShell on a CI
+/// runner can take more than 20 s.
+const SHELL_START: Duration = Duration::from_secs(60);
+
 const SIZE: GridSize = GridSize {
     columns: 80,
     lines: 24,
@@ -60,7 +64,7 @@ fn switch(program: &str, args: &[&str]) -> Option<Vec<(String, Option<bool>)>> {
             .map(|c| grid[Line(row.0)][Column(c)].c)
             .collect::<String>()
     };
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + SHELL_START;
     let mut reported = None;
     let mut prompts = Vec::new();
     loop {
@@ -159,7 +163,7 @@ fn empty_prompt(program: &str, args: &[&str]) {
         let _ = tx.send(e);
     })
     .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + SHELL_START;
     loop {
         let event = rx
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))

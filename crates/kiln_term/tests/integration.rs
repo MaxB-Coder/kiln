@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 
 use kiln_term::{Block, GridSize, Mark, Session, SessionEvent, SessionOptions, ShellCommand};
 
+/// How long a shell may take to show its prompt: generous, as a cold PowerShell on a CI
+/// runner can take more than 20 s.
+const SHELL_START: Duration = Duration::from_secs(60);
+
 const SIZE: GridSize = GridSize {
     columns: 80,
     lines: 24,
@@ -54,7 +58,7 @@ fn run_block(program: &str, args: &[&str], command: &str) -> Option<Block> {
     .unwrap();
     assert!(session.integration_loaded());
 
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + SHELL_START;
     let mut sent = false;
     let mut seen = Vec::new();
     loop {
@@ -200,7 +204,7 @@ fn minimal_prompt(program: &str, args: &[&str]) -> Option<[PromptLine; 2]> {
         (text.chars().take(2).collect(), grid.cursor.point.column.0)
     };
 
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + SHELL_START;
     let mut cells = Vec::new();
     loop {
         let event = rx
