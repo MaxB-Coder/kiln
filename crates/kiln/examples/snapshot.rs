@@ -326,6 +326,13 @@ fn main() {
         println!("done");
         return;
     }
+    if scenario == "quiet" {
+        quiet(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        let _ = std::fs::remove_dir_all(&config_home);
+        println!("done");
+        return;
+    }
     if scenario == "sidebar" {
         sidebar(&mut s, &state_file);
         let _ = std::fs::remove_file(&state_file);
@@ -1514,6 +1521,60 @@ fn sidebar(s: &mut Shots, state_file: &std::path::Path) {
     s.action(Box::new(kiln::ToggleRail));
     s.pump(Duration::from_millis(2500));
     s.shot("rb2-rail-after");
+}
+
+/// The "Quiet" clean-up: the whole window with the rail, idle and then busy (a running dev
+/// server and a failed command), in Kiln Dark and Kiln Light. `KILN_QUIET_STAGE` ("before" or
+/// "after") prefixes the pictures.
+fn quiet(s: &mut Shots) {
+    let stage = std::env::var("KILN_QUIET_STAGE").unwrap_or_else(|_| "after".into());
+    let path = kiln::config::config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let theme = |s: &mut Shots, name: &str| {
+        std::fs::write(
+            &path,
+            format!("cursor_blink = false\n\n[theme]\nname = \"{name}\"\n"),
+        )
+        .unwrap();
+        s.pump(Duration::from_millis(2000));
+    };
+    theme(s, "kiln-dark");
+    let demo = demo_project();
+    let home = std::env::var("HOME").unwrap_or_default();
+    s.run(&format!("cd {}", demo.display()), Duration::from_secs(5));
+    s.run("git --no-pager log --oneline -2", Duration::from_secs(5));
+    s.run("ls src", Duration::from_secs(5));
+    // A path under the home folder, typed in full; and a command that takes over a second.
+    s.run(&format!("ls -d {home}/.config"), Duration::from_secs(5));
+    s.run("sleep 1.2", Duration::from_secs(5));
+    s.action(Box::new(kiln::ToggleRail));
+    s.pump(Duration::from_millis(2500));
+    s.shot(&format!("{stage}-idle-dark"));
+    theme(s, "kiln-light");
+    s.pump(Duration::from_millis(500));
+    s.shot(&format!("{stage}-idle-light"));
+
+    // Busy: a failed command, then the dev server running.
+    theme(s, "kiln-dark");
+    s.run("ls missing-folder", Duration::from_secs(5));
+    let has_node = std::process::Command::new("node")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|st| st.success());
+    let server = if has_node {
+        "node src/server.js"
+    } else {
+        "python3 -m http.server 4173 --bind 127.0.0.1"
+    };
+    s.type_only(&format!("{server}\r"));
+    s.pump(Duration::from_millis(3000));
+    s.shot(&format!("{stage}-busy-dark"));
+    theme(s, "kiln-light");
+    s.pump(Duration::from_millis(1000));
+    s.shot(&format!("{stage}-busy-light"));
+    s.type_only("\x03");
+    s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
 }
 
 fn demo_project() -> PathBuf {

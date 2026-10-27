@@ -17,6 +17,49 @@ pub fn duration_label(d: Duration) -> String {
     }
 }
 
+/// The time a command's block shows: none under a second (most commands), so the slow ones
+/// stand out. Copies and logs keep the exact time.
+pub fn shown_duration(d: Duration) -> Option<String> {
+    (d >= Duration::from_secs(1)).then(|| duration_label(d))
+}
+
+/// A command line as the timeline shows it: paths in the home folder written `~/…`. For the
+/// eye only; copies, logs and Rerun use the command exactly as typed.
+pub fn display_command(command: &str) -> String {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    tilde_paths(command, &home)
+}
+
+/// `command` with each `home` path that stands as a word (or starts one, before "/") written
+/// as "~".
+fn tilde_paths(command: &str, home: &str) -> String {
+    let home = home.trim_end_matches(['/', '\\']);
+    if home.len() < 2 {
+        return command.to_string();
+    }
+    let starts_word = |c: char| c.is_whitespace() || "\"'=:(".contains(c);
+    let ends_word = |c: char| c.is_whitespace() || "/\\\"');:".contains(c);
+    let mut out = String::with_capacity(command.len());
+    let mut rest = command;
+    let mut previous: Option<char> = None;
+    while let Some(at) = rest.find(home) {
+        let before = rest[..at].chars().next_back().or(previous);
+        let after = rest[at + home.len()..].chars().next();
+        out.push_str(&rest[..at]);
+        if before.is_none_or(starts_word) && after.is_none_or(ends_word) {
+            out.push('~');
+        } else {
+            out.push_str(home);
+        }
+        previous = home.chars().next_back();
+        rest = &rest[at + home.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The folder with the home directory shortened to `~`.
 pub fn short_folder(path: &str) -> String {
     let home = std::env::var("HOME")
@@ -129,6 +172,48 @@ mod tests {
             truncated: false,
             startup: false,
         }
+    }
+
+    #[test]
+    fn only_commands_of_a_second_or_more_show_their_time() {
+        assert_eq!(shown_duration(Duration::from_millis(312)), None);
+        assert_eq!(shown_duration(Duration::from_millis(999)), None);
+        assert_eq!(
+            shown_duration(Duration::from_millis(1000)).as_deref(),
+            Some("1.00 s")
+        );
+        assert_eq!(
+            shown_duration(Duration::from_millis(2310)).as_deref(),
+            Some("2.31 s")
+        );
+        // The copy keeps the exact time either way.
+        let mut quick = block("true", &[], 0);
+        quick.duration = Duration::from_millis(312);
+        assert!(fenced(&quick).contains("312 ms"), "{}", fenced(&quick));
+    }
+
+    #[test]
+    fn home_paths_show_as_a_tilde_and_copy_as_typed() {
+        let home = "/Users/max";
+        for (typed, shown) in [
+            ("ls /Users/max/code", "ls ~/code"),
+            ("cd /Users/max", "cd ~"),
+            ("cp /Users/max/a.txt '/Users/max/b c'", "cp ~/a.txt '~/b c'"),
+            (
+                "export P=/Users/max/bin:/usr/bin",
+                "export P=~/bin:/usr/bin",
+            ),
+            // Not the home folder: another user's, or a longer name.
+            ("ls /Users/maxine/x", "ls /Users/maxine/x"),
+            ("ls /tmp/Users/max", "ls /tmp/Users/max"),
+            ("echo plain", "echo plain"),
+        ] {
+            assert_eq!(tilde_paths(typed, home), shown, "{typed}");
+        }
+        // Display only: the copy has the command as typed.
+        let typed = format!("ls {}/code", std::env::var("HOME").unwrap_or_default());
+        let copy = fenced(&block(&typed, &["x"], 0));
+        assert!(copy.contains(&typed), "{copy}");
     }
 
     #[test]

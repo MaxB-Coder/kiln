@@ -129,3 +129,19 @@ appearance observer, not run headless).
 | Double-click a session: rename in place | [sb8](screenshots/sidebar/sb8-double-click.png) | Matches |
 | The shortcuts hint opens the pop-up, which lists Rename session (⌘R F2) and Rename project (⇧⌘R); every bound action is listed | [sb9](screenshots/sidebar/sb9-shortcuts.png). Test: `shortcuts::tests::the_popup_shows_every_bound_action`. Command palette in one column: [s7](screenshots/shortcuts/s7-narrow-scrolled.png) | Matches |
 
+## Quiet (no mockup)
+
+`snapshot quiet`, run before the change and after it: the demo project with the rail open,
+idle (a few quick commands, a path under home, one over a second) and busy (a failed command,
+then the dev server running), in Kiln Dark and Kiln Light.
+
+| Item | Before → after | Verdict |
+| --- | --- | --- |
+| Header: project and git pills only (no runtime pill) | [before](screenshots/quiet/before-idle-dark.png) → [after](screenshots/quiet/after-idle-dark.png) | Matches |
+| A command's time only from 1 s up (`sleep 1.2` shows 1.21 s, the rest none) | same pair; test `copy::tests::only_commands_of_a_second_or_more_show_their_time` (and the copy keeps "312 ms") | Matches |
+| Home paths as `~/…` in command lines, copy as typed | `ls -d ~/.config` in [after](screenshots/quiet/after-idle-dark.png); test `copy::tests::home_paths_show_as_a_tilde_and_copy_as_typed` | Matches |
+| Older blocks dimmed, the latest at full strength; hover or selection restores | unchanged from before (60% opacity), [after](screenshots/quiet/after-busy-dark.png) | Matches |
+| Rail: Changes with the file count; Processes always; Runtimes only when found; empty sections left out; Session one muted line with a failed exit in red | [before](screenshots/quiet/before-busy-dark.png) → [after](screenshots/quiet/after-busy-dark.png) ("4 files", "zsh · 18 s · exit 2"; the size is in the details) | Matches |
+| Kiln Light | idle [before](screenshots/quiet/before-idle-light.png) → [after](screenshots/quiet/after-idle-light.png); busy [before](screenshots/quiet/before-busy-light.png) → [after](screenshots/quiet/after-busy-light.png) | Matches |
+| Sidebar unchanged | same in every pair | Matches |
+

@@ -507,12 +507,7 @@ impl TerminalView {
 
     /// The pills under the prompt.
     pub fn pills(&self) -> crate::pills::Pills {
-        crate::pills::pills(
-            self.cwd.as_deref(),
-            self.git.as_ref(),
-            &self.runtimes,
-            self.wsl.as_deref(),
-        )
+        crate::pills::pills(self.cwd.as_deref(), self.git.as_ref(), self.wsl.as_deref())
     }
 
     /// Language runtimes the current project uses, with versions.
@@ -1625,8 +1620,20 @@ impl TerminalView {
             .text_color(theme::hsla(palette().fg))
             .whitespace_nowrap()
             .overflow_hidden();
+        let ranges = self.search_highlights.header_ranges(ix);
+        // Home paths as `~/…` (the find highlights index the command as typed, so it shows
+        // as typed while they are on).
+        if ranges.is_empty() {
+            return title.child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(copy::display_command(&block.command)),
+            );
+        }
         let mut at = 0;
-        for &(start, end) in self.search_highlights.header_ranges(ix) {
+        for &(start, end) in ranges {
             if start > at {
                 title = title.child(block.command[at..start].to_string());
             }
@@ -1671,10 +1678,12 @@ impl TerminalView {
         } else {
             self.render_title(ix)
         };
+        // The time only from a second up: most commands are quicker, and the slow ones then
+        // stand out.
         let meta = if block.startup {
             String::new()
         } else {
-            copy::duration_label(block.duration)
+            copy::shown_duration(block.duration).unwrap_or_default()
         };
 
         let hovered = self.hovered_block == Some(block.id);
@@ -1937,7 +1946,7 @@ impl TerminalView {
         let elapsed = live
             .command_started
             .and_then(|t| t.elapsed().ok())
-            .map(copy::duration_label)
+            .and_then(copy::shown_duration)
             .unwrap_or_default();
         let header = div()
             .flex()
@@ -1962,7 +1971,9 @@ impl TerminalView {
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .child(live.command.clone().unwrap_or_default()),
+                    .child(copy::display_command(
+                        live.command.as_deref().unwrap_or_default(),
+                    )),
             )
             .child(
                 div()

@@ -423,4 +423,17 @@ Newest at the bottom.
   stays only where the window controls are (Windows and Linux, at the rail's top right); on
   macOS they are on the left, so a 24 px strip lies over the first title to move the window
   by, and nothing else.
+- **"Quiet": less on screen, same layout.** The header keeps the project and git pills; the
+  runtime pill is gone (the rail lists runtimes). A command's time shows only from 1 s up
+  (`copy::shown_duration`; most commands are quicker, so the slow ones stand out); copies, logs
+  and notifications keep the exact time. Command lines show paths in the home folder as `~/…`
+  (`copy::display_command`, the home path as a whole word or before "/"), for the eye only:
+  copies, logs and Rerun use the command as typed, and while find highlights a command it
+  shows as typed (the highlights index the typed text). Older blocks already sat at 60%, with
+  the latest, pinned, hovered and selected ones at full strength; that stays. The rail:
+  Changes counts the files (the branch is in the pill) and, like Ports and Runtimes, is left
+  out when empty; Processes always shows, "Nothing running" included; Session is one muted line,
+  "zsh · 30 s", with a failed last command's exit at its end in red, and the size, pid,
+  command count and last exit under the mouse or after a click (the size was on the line at
+  first; it was not worth the room).
 

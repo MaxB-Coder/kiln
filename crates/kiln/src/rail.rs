@@ -38,6 +38,9 @@ pub struct Rail {
     fetching: bool,
     /// The focus moved while a read was running: read again when it finishes.
     again: bool,
+    /// The session's details show: under the mouse, or opened with a click.
+    session_hover: bool,
+    session_open: bool,
     _poll: Task<()>,
 }
 
@@ -57,6 +60,8 @@ impl Workspace {
         });
         self.rail = Some(Rail {
             data: RailData::default(),
+            session_hover: false,
+            session_open: false,
             watcher: Arc::new(Mutex::new(ProcessWatcher::new())),
             fetching: false,
             again: false,
@@ -171,7 +176,12 @@ impl Workspace {
             .pt(px(8.))
             .px(px(14.))
             .pb(px(14.));
-        if fresh && let Some(status) = &rail.data.git {
+        // Sections with nothing in them stay out (Processes always shows, "Nothing running"
+        // included).
+        if fresh
+            && let Some(status) = &rail.data.git
+            && !status.files.is_empty()
+        {
             body = body.child(self.render_changes(status, cx));
         }
         body = body.child(render_processes(fresh.then_some(&rail.data.report)));
@@ -186,7 +196,7 @@ impl Workspace {
             body = body.child(section);
         }
         if let Some(info) = info {
-            body = body.child(render_session(&info));
+            body = body.child(self.render_session(&info, cx));
         }
 
         let mac = chrome() == Chrome::Mac;
@@ -242,9 +252,80 @@ impl Workspace {
         )
     }
 
+    /// The session as one muted line, "zsh · 30 s" (a failed last command's exit in red at its
+    /// end); the size, the pid, the command count and the last exit show under the mouse, or
+    /// stay open after a click.
+    fn render_session(&self, info: &SessionInfo, cx: &mut Context<Self>) -> Div {
+        let p = palette();
+        let open = self
+            .rail
+            .as_ref()
+            .is_some_and(|rail| rail.session_hover || rail.session_open);
+        let age = ago_label(info.started.elapsed());
+        let age = age.strip_suffix(" ago").unwrap_or(&age).to_string();
+        let failed = info.last_exit.filter(|code| *code != 0 && *code != 130);
+        let line = div()
+            .id("rail-session")
+            .flex()
+            .flex_row()
+            .gap(px(6.))
+            .px(px(6.))
+            .text_size(px(11.))
+            .text_color(theme::hsla(p.muted))
+            .cursor_pointer()
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if let Some(rail) = this.rail.as_mut() {
+                    rail.session_hover = *hovered;
+                    cx.notify();
+                }
+            }))
+            .on_click(cx.listener(|this, _, _, cx| {
+                if let Some(rail) = this.rail.as_mut() {
+                    rail.session_open = !rail.session_open;
+                    cx.notify();
+                }
+            }))
+            .child(format!("{} · {age}", info.shell))
+            .when_some(failed, |d, code| {
+                d.child(
+                    div()
+                        .text_color(theme::hsla(p.failed))
+                        .child(format!("· exit {code}")),
+                )
+            });
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .child(line)
+            .when(open, |d| {
+                d.child(key_value(
+                    "size",
+                    format!("{} × {}", info.columns, info.lines),
+                ))
+                .when_some(info.pid, |d, pid| {
+                    d.child(key_value("pid", pid.to_string()))
+                })
+                .child(key_value("commands", info.commands.to_string()))
+                .when_some(info.last_exit, |d, code| {
+                    d.child(
+                        key_value("last exit", code.to_string())
+                            .when(code != 0 && code != 130, |d| {
+                                d.text_color(theme::hsla(p.failed))
+                            }),
+                    )
+                })
+                .when_some(info.remote_host.clone(), |d, host| {
+                    d.child(key_value("remote", host))
+                })
+            })
+    }
+
     fn render_changes(&self, status: &GitStatus, cx: &mut Context<Self>) -> Div {
         let p = palette();
-        let mut aside = status.branch.clone().unwrap_or_else(|| "detached".into());
+        // The file count (the branch is in the header's pill).
+        let count = status.files.len();
+        let mut aside = format!("{count} {}", if count == 1 { "file" } else { "files" });
         if status.ahead > 0 {
             aside.push_str(&format!(" ↑{}", status.ahead));
         }
@@ -252,9 +333,6 @@ impl Workspace {
             aside.push_str(&format!(" ↓{}", status.behind));
         }
         let mut section = section("Changes", Some(aside));
-        if status.files.is_empty() {
-            return section.child(dim("Working tree clean"));
-        }
         for (i, file) in status.files.iter().take(MAX_FILES).enumerate() {
             let color = match file.kind {
                 'A' => p.ok,
@@ -362,32 +440,6 @@ fn render_processes(report: Option<&ProcessReport>) -> Div {
             "{} more",
             report.processes.len() - MAX_PROCESSES
         )));
-    }
-    section
-}
-
-fn render_session(info: &SessionInfo) -> Div {
-    let p = palette();
-    let mut section = section("Session", None)
-        .child(key_value("shell", info.shell.clone()))
-        .when_some(info.pid, |d, pid| {
-            d.child(key_value("pid", pid.to_string()))
-        })
-        .child(key_value(
-            "size",
-            format!("{} × {}", info.columns, info.lines),
-        ))
-        .child(key_value("started", ago_label(info.started.elapsed())))
-        .child(key_value("commands", info.commands.to_string()));
-    if let Some(code) = info.last_exit {
-        let failed = code != 0 && code != 130;
-        section = section.child(
-            key_value("last exit", code.to_string())
-                .when(failed, |d| d.text_color(theme::hsla(p.failed))),
-        );
-    }
-    if let Some(host) = &info.remote_host {
-        section = section.child(key_value("remote", host.clone()));
     }
     section
 }

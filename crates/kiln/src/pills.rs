@@ -1,5 +1,5 @@
-//! The pills in each pane's header: the project, the git branch with its change count, the
-//! runtimes the project uses, and the WSL distribution. Kiln draws them itself, so they look the
+//! The pills in each pane's header: the project, the git branch with its change count, and the
+//! WSL distribution (the runtimes are in the context rail). Kiln draws them itself, so they look the
 //! same on every system and shell.
 
 use gpui::{AnyElement, IntoElement, ParentElement, SharedString, Styled, div, px};
@@ -27,8 +27,6 @@ pub struct Pills {
     pub project_color: Option<u32>,
     /// "feat/auth" and how many files changed; only inside a repository.
     pub branch: Option<(String, usize)>,
-    /// "node 25", "rust 1.98".
-    pub runtimes: Vec<String>,
     /// "Ubuntu" (Windows, WSL sessions).
     pub wsl: Option<String>,
 }
@@ -43,12 +41,7 @@ pub fn short_version(version: &str) -> String {
     }
 }
 
-pub fn pills(
-    cwd: Option<&str>,
-    git: Option<&GitSummary>,
-    runtimes: &[(String, String)],
-    wsl: Option<&str>,
-) -> Pills {
+pub fn pills(cwd: Option<&str>, git: Option<&GitSummary>, wsl: Option<&str>) -> Pills {
     let root = match (git, cwd) {
         (Some(git), _) => Some(git.root.as_str()),
         (None, Some(cwd)) if !cwd.is_empty() => Some(cwd),
@@ -67,10 +60,6 @@ pub fn pills(
         project,
         project_color,
         branch,
-        runtimes: runtimes
-            .iter()
-            .map(|(name, version)| format!("{name} {}", short_version(version)))
-            .collect(),
         wsl: wsl.map(|label| {
             // "WSL · Ubuntu" → "Ubuntu".
             label.rsplit(" · ").next().unwrap_or(label).to_string()
@@ -124,8 +113,8 @@ pub fn render(pills: &Pills) -> AnyElement {
         }
         row = row.child(branch_pill);
     }
-    for runtime in pills.runtimes.iter().chain(&pills.wsl) {
-        row = row.child(pill(p.raised, p.ansi[7]).child(SharedString::from(runtime.clone())));
+    if let Some(wsl) = &pills.wsl {
+        row = row.child(pill(p.raised, p.ansi[7]).child(SharedString::from(wsl.clone())));
     }
     row.into_any_element()
 }
@@ -149,15 +138,9 @@ mod tests {
             branch: Some("feat/auth".into()),
             changes: 2,
         };
-        let p = pills(
-            Some("/code/receipts/api"),
-            Some(&git),
-            &[("node".into(), "25.0.0".into())],
-            None,
-        );
+        let p = pills(Some("/code/receipts/api"), Some(&git), None);
         assert_eq!(p.project.as_deref(), Some("receipts"));
         assert_eq!(p.branch, Some(("feat/auth".into(), 2)));
-        assert_eq!(p.runtimes, ["node 25"]);
         assert_eq!(p.wsl, None);
     }
 
@@ -168,16 +151,16 @@ mod tests {
             branch: Some("main".into()),
             changes: 0,
         };
-        let p = pills(Some("/code/kiln"), Some(&git), &[], None);
+        let p = pills(Some("/code/kiln"), Some(&git), None);
         assert_eq!(p.branch, Some(("main".into(), 0)));
     }
 
     #[test]
     fn outside_a_repository_there_is_no_branch() {
-        let p = pills(Some("/tmp/scratch"), None, &[], Some("WSL · Ubuntu"));
+        let p = pills(Some("/tmp/scratch"), None, Some("WSL · Ubuntu"));
         assert_eq!(p.project.as_deref(), Some("scratch"));
         assert_eq!(p.branch, None);
         assert_eq!(p.wsl.as_deref(), Some("Ubuntu"));
-        assert_eq!(pills(None, None, &[], None), Pills::default());
+        assert_eq!(pills(None, None, None), Pills::default());
     }
 }

@@ -76,7 +76,9 @@ small flame Kiln draws in the input box (muted red after a failed command; it ho
 without focus or with reduced motion); the shell prints only blank cells there, Starship
 included. Your line editor, plugins and completion stay as they are, and outside Kiln your
 prompt is unchanged. `[shell] prompt = "shell"` keeps your own prompt in Kiln too. Each pane's
-header shows the project, the branch with its change count, and the runtimes the project uses.
+header shows the project and the branch with its change count; the runtimes the project uses
+are in the context rail (⌘I). Each command shows its time when it took a second or more, and
+paths in your home folder read `~/…` (copies keep the command as typed).
 
 ## Settings
 
