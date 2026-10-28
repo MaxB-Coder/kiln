@@ -2016,6 +2016,54 @@ fn diff_viewer(s: &mut Shots) {
     s.type_only("\x03");
     s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
 
+    // The rail with the keyboard: ⌘⇧I, ↓ to the second file, Enter opens it, Esc comes back to
+    // the rail, Esc again to the terminal.
+    let rail_keys = |s: &mut Shots| {
+        let window = s.window;
+        s.cx.update(|cx| window.update(cx, |w, window, _| w.rail_keyboard(window)))
+            .unwrap()
+    };
+    let mac = cfg!(target_os = "macos");
+    s.keystroke(if mac {
+        "cmd-shift-i"
+    } else {
+        "ctrl-alt-shift-i"
+    });
+    s.pump(Duration::from_millis(2500));
+    let (focused, first) = rail_keys(s).expect("⌘⇧I opens the rail");
+    assert!(
+        focused && first.is_some(),
+        "the keyboard is on the first file"
+    );
+    s.keystroke("down");
+    let (_, second) = rail_keys(s).unwrap();
+    assert!(
+        second.is_some() && second != first,
+        "↓ moves to the next file"
+    );
+    s.shot("d11-rail-keyboard");
+    s.keystroke("enter");
+    s.pump(Duration::from_millis(1500));
+    let view = s
+        .workspace(|w| w.diff_view())
+        .expect("Enter opens the viewer");
+    assert_eq!(
+        s.cx.update(|cx| view.read(cx).file().map(|f| f.path.clone())),
+        second,
+        "on the chosen file"
+    );
+    s.shot("d12-rail-enter");
+    s.keystroke("escape");
+    assert!(s.workspace(|w| w.diff_view()).is_none());
+    assert_eq!(
+        rail_keys(s),
+        Some((true, second.clone())),
+        "Esc comes back to the rail, on the same file"
+    );
+    s.keystroke("escape");
+    assert!(!rail_keys(s).unwrap().0, "Esc again: back to the terminal");
+    s.keystroke(if mac { "cmd-i" } else { "ctrl-shift-i" });
+
     // Kiln Light.
     std::fs::write(
         &path,

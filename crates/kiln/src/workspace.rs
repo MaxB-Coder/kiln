@@ -33,11 +33,11 @@ use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
 use crate::{
     ClosePane, CloseWindow, CommandPaletteToggle, CopyLastOutput, CopyLastOutputRaw, EditConfig,
-    Find, FocusNextPane, FocusPrevPane, InstallUpdate, NewSession, NewWindow, NextSession,
-    OpenConfigFile, PrevSession, ProjectColour, Quit, RenameProject, RenameSession, SelectSession1,
-    SelectSession2, SelectSession3, SelectSession4, SelectSession5, SelectSession6, SelectSession7,
-    SelectSession8, SelectSession9, ShowChanges, SplitRight, ToggleFocusMode, ToggleRail,
-    ToggleShortcuts, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
+    Find, FocusNextPane, FocusPrevPane, FocusRail, InstallUpdate, NewSession, NewWindow,
+    NextSession, OpenConfigFile, PrevSession, ProjectColour, Quit, RenameProject, RenameSession,
+    SelectSession1, SelectSession2, SelectSession3, SelectSession4, SelectSession5, SelectSession6,
+    SelectSession7, SelectSession8, SelectSession9, ShowChanges, SplitRight, ToggleFocusMode,
+    ToggleRail, ToggleShortcuts, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 
 /// Height of the strip at the top that holds the window controls.
@@ -496,7 +496,7 @@ impl Workspace {
             .and_then(|v| v.read(cx).cwd().map(PathBuf::from))
     }
 
-    fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(view) = self.focused_view() {
             window.focus(&view.focus_handle(cx), cx);
         }
@@ -917,6 +917,7 @@ impl Workspace {
         action("Show changes", Box::new(ShowChanges));
         action("Toggle sidebar", Box::new(ToggleSidebar));
         action("Toggle context rail", Box::new(ToggleRail));
+        action("Focus context rail", Box::new(FocusRail));
         action("Focus mode", Box::new(ToggleFocusMode));
         action("Close pane", Box::new(ClosePane));
         action("Next session", Box::new(NextSession));
@@ -1244,17 +1245,35 @@ impl Workspace {
         self.settings = None;
         let metrics = self.metrics;
         let view = cx.new(|cx| DiffView::new(root, files, index, metrics, window, cx));
+        if let Some(rail) = self.rail.as_mut() {
+            rail.return_here = false;
+        }
         let events = cx.subscribe_in(&view, window, |this, _, event, window, cx| match event {
-            DiffEvent::Dismiss => {
-                this.diff = None;
-                this.focus_active(window, cx);
-                cx.notify();
-            }
+            DiffEvent::Dismiss => this.close_diff(window, cx),
             DiffEvent::OpenInEditor { path, line } => {
                 this.open_in_editor(path.clone(), *line, window, cx)
             }
         });
         self.diff = Some((view, events));
+        cx.notify();
+    }
+
+    /// Closes the diff viewer; the keyboard goes back where it came from (the rail, when the
+    /// viewer was opened from it with the keyboard focus there).
+    fn close_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.diff = None;
+        let back = self
+            .rail
+            .as_mut()
+            .filter(|rail| rail.return_here)
+            .map(|rail| {
+                rail.return_here = false;
+                rail.focus.clone()
+            });
+        match back {
+            Some(focus) => window.focus(&focus, cx),
+            None => self.focus_active(window, cx),
+        }
         cx.notify();
     }
 
@@ -3212,11 +3231,7 @@ impl Render for Workspace {
                 .bg(scrim())
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _, window, cx| {
-                        this.diff = None;
-                        this.focus_active(window, cx);
-                        cx.notify();
-                    }),
+                    cx.listener(|this, _, window, cx| this.close_diff(window, cx)),
                 )
                 .child(view.clone())
         });
@@ -3336,6 +3351,10 @@ impl Render for Workspace {
                     this.focus_mode = false;
                     this.toggle_rail(window, cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &FocusRail, window, cx| {
+                this.focus_mode = false;
+                this.focus_rail(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleFocusMode, _, cx| {
                 this.focus_mode = !this.focus_mode;

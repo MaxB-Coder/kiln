@@ -183,5 +183,6 @@ in the run.
 | Parsing: hunks, numbers, new/deleted/binary, split pairing; a real repository, staged and unstaged together, untracked as new | `diff::tests` | Matches |
 | ⌘O in each editor's way, commands through the login shell (so `EDITOR=nvim` from Homebrew starts), installed IDEs from their app bundle | `editor::tests` (not run against real IDEs); `zsh -lic 'exec which nvim'` from a bare PATH finds /opt/homebrew/bin/nvim | Matches |
 | Settings, "Open files in": $EDITOR (nvim), each installed IDE, Default app; arrows choose, Space opens the list, written as `editor` | [s04b](screenshots/settings/s04b-open-files-in.png), [s04c](screenshots/settings/s04c-open-files-chosen.png) (asserted) | Matches |
-| Enter on a rail file; a "staged" marker | not done (see DECISIONS) | Differs |
+| The rail with the keyboard: ⌘⇧I, ↓ to the next file, Enter opens it, Esc back to the rail on the same file, Esc to the terminal (each asserted) | [d11](screenshots/diff/d11-rail-keyboard.png), [d12](screenshots/diff/d12-rail-enter.png) | Matches |
+| A "staged" marker | not done (see DECISIONS) | Differs |
 

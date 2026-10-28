@@ -1,14 +1,16 @@
 //! The ⌘I context rail: the focused pane's changes, running processes and ports, runtimes and
 //! session. It reads processes and git status every two seconds in the background while open.
+//! ⌘⇧I takes the keyboard there and back: ↑↓ (or j/k) choose a changed file, Enter opens it in
+//! the diff viewer (Esc there comes back to the rail), Esc goes back to the terminal.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, Context, Div, EntityId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, PromptLevel, SharedString, StatefulInteractiveElement, Styled, Task, Window,
-    WindowControlArea, div, px,
+    AnyElement, Context, Div, EntityId, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
+    MouseButton, ParentElement, PromptLevel, SharedString, StatefulInteractiveElement, Styled,
+    Task, Window, WindowControlArea, div, px,
 };
 use kiln_term::process::{ProcessReport, ProcessWatcher};
 
@@ -39,12 +41,21 @@ pub struct Rail {
     /// The session's details show: under the mouse, or opened with a click.
     session_hover: bool,
     session_open: bool,
+    /// The keyboard's place (⌘⇧I), and the changed file chosen there, by path (so it stays put
+    /// when the list changes).
+    pub(crate) focus: FocusHandle,
+    selected: Option<String>,
+    /// The diff viewer was opened from here with the keyboard: closing it comes back here.
+    pub(crate) return_here: bool,
     _poll: Task<()>,
 }
 
 impl Workspace {
     pub(crate) fn toggle_rail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.rail.take().is_some() {
+        if let Some(rail) = self.rail.take() {
+            if rail.focus.contains_focused(window, cx) {
+                self.focus_active(window, cx);
+            }
             cx.notify();
             return;
         }
@@ -60,6 +71,9 @@ impl Workspace {
             data: RailData::default(),
             session_hover: false,
             session_open: false,
+            focus: cx.focus_handle(),
+            selected: None,
+            return_here: false,
             watcher: Arc::new(Mutex::new(ProcessWatcher::new())),
             fetching: false,
             again: false,
@@ -118,6 +132,98 @@ impl Workspace {
         .detach();
     }
 
+    /// ⌘⇧I: the keyboard to the rail (opening it), or back to the terminal when it is there.
+    pub(crate) fn focus_rail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.rail.is_none() {
+            self.toggle_rail(window, cx);
+        }
+        let Some(rail) = self.rail.as_ref() else {
+            return;
+        };
+        if rail.focus.is_focused(window) {
+            self.focus_active(window, cx);
+        } else {
+            window.focus(&rail.focus.clone(), cx);
+        }
+        cx.notify();
+    }
+
+    /// The changed files the rail shows, when its read is for the focused pane.
+    fn rail_files(&self) -> (Option<String>, Vec<FileChange>) {
+        let Some(rail) = self.rail.as_ref() else {
+            return (None, Vec::new());
+        };
+        let fresh = self.focused_view().map(|v| v.entity_id()) == rail.data.pane;
+        match rail.data.git.as_ref().filter(|_| fresh) {
+            Some(status) => (
+                Some(status.root.clone()),
+                status.files.iter().take(MAX_FILES).cloned().collect(),
+            ),
+            None => (None, Vec::new()),
+        }
+    }
+
+    /// The chosen file's place in `files`: the first one when none is chosen, or the chosen one
+    /// went away.
+    fn rail_selected(&self, files: &[FileChange]) -> Option<usize> {
+        let selected = self.rail.as_ref()?.selected.as_deref();
+        if files.is_empty() {
+            return None;
+        }
+        Some(
+            selected
+                .and_then(|path| files.iter().position(|f| f.path == path))
+                .unwrap_or(0),
+        )
+    }
+
+    /// Whether the keyboard is in the rail, and the file chosen there (the snapshots check it).
+    pub fn rail_keyboard(&self, window: &Window) -> Option<(bool, Option<String>)> {
+        let rail = self.rail.as_ref()?;
+        let (_, files) = self.rail_files();
+        let selected = self.rail_selected(&files).map(|i| files[i].path.clone());
+        Some((rail.focus.is_focused(window), selected))
+    }
+
+    fn rail_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let m = event.keystroke.modifiers;
+        // ⌘I, ⌘⇧I and the rest stay the workspace's.
+        if m.platform || m.control || m.alt || m.function {
+            return;
+        }
+        let (root, files) = self.rail_files();
+        let at = self.rail_selected(&files);
+        let last = files.len().saturating_sub(1);
+        let to = match event.keystroke.key.as_str() {
+            "up" | "k" => at.map(|i| i.saturating_sub(1)),
+            "down" | "j" => at.map(|i| (i + 1).min(last)),
+            "home" => at.map(|_| 0),
+            "end" => at.map(|_| last),
+            "enter" | "space" => {
+                if let (Some(root), Some(i)) = (root, at) {
+                    self.open_diff(root, files[i].clone(), window, cx);
+                    if let Some(rail) = self.rail.as_mut() {
+                        rail.return_here = true;
+                    }
+                }
+                cx.stop_propagation();
+                return;
+            }
+            "escape" => {
+                self.focus_active(window, cx);
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
+            _ => return,
+        };
+        if let (Some(i), Some(rail)) = (to, self.rail.as_mut()) {
+            rail.selected = Some(files[i].path.clone());
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
     fn open_diff(
         &mut self,
         root: String,
@@ -125,6 +231,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(rail) = self.rail.as_mut() {
+            rail.selected = Some(file.path.clone());
+        }
         // The viewer goes through all of the changes, from this one.
         let files = self
             .rail
@@ -186,11 +295,14 @@ impl Workspace {
             .pb(px(14.));
         // Sections with nothing in them stay out (Processes always shows, "Nothing running"
         // included).
+        let keyboard = rail.focus.is_focused(window);
         if fresh
             && let Some(status) = &rail.data.git
             && !status.files.is_empty()
         {
-            body = body.child(self.render_changes(status, cx));
+            let (_, files) = self.rail_files();
+            let chosen = keyboard.then(|| self.rail_selected(&files)).flatten();
+            body = body.child(self.render_changes(status, chosen, cx));
         }
         body = body.child(render_processes(fresh.then_some(&rail.data.report)));
         if fresh && !rail.data.report.ports.is_empty() {
@@ -240,6 +352,11 @@ impl Workspace {
         Some(
             div()
                 .id("rail")
+                .track_focus(&rail.focus)
+                .key_context("Rail")
+                .on_key_down(
+                    cx.listener(|this, event, window, cx| this.rail_key_down(event, window, cx)),
+                )
                 .relative()
                 .flex_none()
                 .w(px(self.shown_widths.1))
@@ -330,7 +447,13 @@ impl Workspace {
             })
     }
 
-    fn render_changes(&self, status: &GitStatus, cx: &mut Context<Self>) -> Div {
+    /// `chosen`: the file the keyboard is on, while it is in the rail.
+    fn render_changes(
+        &self,
+        status: &GitStatus,
+        chosen: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let p = palette();
         // The file count (the branch is in the header's pill).
         let count = status.files.len();
@@ -352,9 +475,13 @@ impl Workspace {
             };
             let root = status.root.clone();
             let file = file.clone();
+            let on = chosen == Some(i);
             section = section.child(
                 row(("rail-file", i))
                     .cursor_pointer()
+                    .border_1()
+                    .border_color(theme::hsla(if on { p.accent } else { p.bar }))
+                    .when(on, |d| d.bg(theme::hsla(p.raised)))
                     .hover(|s| s.bg(theme::hsla(p.raised)))
                     .child(
                         div()
@@ -363,7 +490,11 @@ impl Workspace {
                             .text_color(theme::hsla(color))
                             .child(file.kind.to_string()),
                     )
-                    .child(ellipsis(file.path.clone()).text_color(theme::hsla(p.fg_dim)))
+                    .child(ellipsis(file.path.clone()).text_color(theme::hsla(if on {
+                        p.fg
+                    } else {
+                        p.fg_dim
+                    })))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_diff(root.clone(), file.clone(), window, cx)
                     })),
@@ -371,6 +502,9 @@ impl Workspace {
         }
         if status.files.len() > MAX_FILES {
             section = section.child(dim(format!("{} more", status.files.len() - MAX_FILES)));
+        }
+        if chosen.is_some() {
+            section = section.child(dim("↑↓ choose · ⏎ open · esc back"));
         }
         section
     }

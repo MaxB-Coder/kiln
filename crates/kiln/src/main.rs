@@ -184,6 +184,7 @@ fn main() {
                     MenuItem::action("Command Palette", CommandPaletteToggle),
                     MenuItem::action("Toggle Sidebar", ToggleSidebar),
                     MenuItem::action("Toggle Context Rail", ToggleRail),
+                    MenuItem::action("Focus Context Rail", FocusRail),
                     MenuItem::action("Focus Mode", ToggleFocusMode),
                     MenuItem::separator(),
                     MenuItem::action("Bigger", ZoomIn),

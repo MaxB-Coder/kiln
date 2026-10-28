@@ -48,6 +48,14 @@ pub fn bindings(style: KeyStyle) -> Vec<KeyBinding> {
         KeyBinding::new(&k("["), FocusPrevPane, None),
         KeyBinding::new(&k("b"), ToggleSidebar, None),
         KeyBinding::new(&k("i"), ToggleRail, None),
+        KeyBinding::new(
+            match style {
+                KeyStyle::Mac => "cmd-shift-i",
+                KeyStyle::Pc => "ctrl-alt-shift-i",
+            },
+            FocusRail,
+            None,
+        ),
         KeyBinding::new(&k("."), ToggleFocusMode, None),
         KeyBinding::new(&k("f"), Find, None),
         KeyBinding::new(&k("k"), CommandPaletteToggle, None),
@@ -178,6 +186,7 @@ const DESCRIPTIONS: &[(&str, &str, Group)] = &[
     ("FocusPrevPane", "Previous pane", Group::Panes),
     ("ToggleSidebar", "Sidebar", Group::View),
     ("ToggleRail", "Context rail", Group::View),
+    ("FocusRail", "To the rail's changes and back", Group::View),
     ("ToggleFocusMode", "Focus mode", Group::View),
     ("ZoomIn", "Bigger text", Group::View),
     ("ZoomOut", "Smaller text", Group::View),

@@ -61,6 +61,7 @@ actions!(
         SelectSession9,
         ToggleSidebar,
         ToggleRail,
+        FocusRail,
         ToggleFocusMode,
         Find,
         CommandPaletteToggle,

@@ -483,6 +483,14 @@ Newest at the bottom.
   command inside the bundle where there is one, else `open -na App --args --line N f`, which
   hands the file to the running IDE; elsewhere by their command on the PATH. The list offers
   only what is installed; the file takes any name or command. Not
-  done: a "staged" marker on hunks (the combined diff has no clean mapping back), Enter on a
-  rail file (the rail takes no keyboard focus yet).
+  done: a "staged" marker on hunks (the combined diff has no clean mapping back).
+- **The rail with the keyboard.** ⌘⇧I (Ctrl+Alt+Shift+I: Ctrl+Shift+I is the rail itself)
+  takes the keyboard to the rail, opening it if it is closed, and back to the terminal when it
+  is there. ↑↓ or j/k choose among the changed files shown, Home/End the first and last, Enter
+  or Space opens the chosen one in the diff viewer, and Esc there comes back to the rail on the
+  same file (a viewer opened with the mouse or "Show changes" goes back to the terminal). Esc
+  in the rail goes back to the terminal. The chosen file is kept by path, so it stays put as
+  the list refreshes; it shows only while the keyboard is there (an accent ring, and a hint
+  line under the list). Keys with ⌘, Ctrl or Alt go on to the workspace, so ⌘I and the rest
+  still work. The rail's other sections take no keys: ports open with the mouse, after asking.
 

@@ -51,6 +51,7 @@ on macOS, the Help menu. The ones you will use most:
 | Copy the last output, fenced / raw | ⌘⇧C / ⌘⌥C | Ctrl+Shift+C (with no selection) / Ctrl+Shift+Alt+C |
 | Select a command / add to the selection (then ⌘C or Enter copies it, Esc clears) | ⌘↑ ⌘↓ / ⇧⌘↑ ⇧⌘↓, ⇧-click | Ctrl+Shift+↑ ↓ / Ctrl+Alt+Shift+↑ ↓, Shift+click |
 | Context rail: changes, processes, ports, runtimes, session | ⌘I | Ctrl+Shift+I |
+| Keyboard to the rail's changes and back (↑↓ choose, Enter opens, Esc back) | ⌘⇧I | Ctrl+Alt+Shift+I |
 | Focus mode | ⌘. | Ctrl+Shift+. |
 | Sidebar | ⌘B | Ctrl+Shift+B |
 | Rename session / project | ⌘R or F2 / ⌘⇧R | Ctrl+Shift+R or F2 / Ctrl+Alt+Shift+R |
