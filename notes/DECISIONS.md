@@ -436,4 +436,16 @@ Newest at the bottom.
   "zsh · 30 s", with a failed last command's exit at its end in red, and the size, pid,
   command count and last exit under the mouse or after a click (the size was on the line at
   first; it was not worth the room).
+- **Resizable sidebar and rail.** Each panel's inner edge is a 6 px handle with the resize
+  cursor and a 1 px accent line on hover and while dragging (nothing otherwise). The sidebar
+  goes from 160 to 420 px (default 220), the rail from 180 to 480 (default 280); a
+  double-click on the edge gives the default back. The terminal keeps at least 40 columns
+  (`panels::terminal_min`): while it is short of room the rail gives way to its least, then
+  the sidebar (`panels::widths`), and a drag stops there; only a window too small even then
+  squeezes the terminal. The layout follows the mouse; the shells keep their size until the
+  drag ends (`terminal_view::hold_resize`), then each gets its new size once, so full-screen
+  programs do not redraw at every step. The drag listens at the window level (capture), so a
+  pane under the mouse cannot keep the moves. The widths go into the saved sessions
+  (`WindowState.sidebar_width`, `rail_width`; older files read as the defaults), not the
+  config. No key binding.
 

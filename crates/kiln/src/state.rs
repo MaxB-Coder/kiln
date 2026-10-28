@@ -29,6 +29,11 @@ pub struct WindowState {
     pub rail: bool,
     pub active: usize,
     pub tabs: Vec<TabState>,
+    /// The panels' widths as dragged (`None` in older files: the defaults).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rail_width: Option<f32>,
 }
 
 /// A session: its panes' folders, left to right, and the name it was given, if any.
@@ -344,6 +349,7 @@ mod tests {
                 tab(&["/tmp"]),
                 tab(&["/code/b"]),
             ],
+            ..Default::default()
         };
         merge(&mut state, window.clone(), project_of, 100);
         let roots: Vec<_> = state.projects.iter().map(|p| p.root.as_str()).collect();
@@ -461,6 +467,24 @@ mod tests {
                 "~/src/app"
             );
         }
+    }
+
+    #[test]
+    fn panel_widths_are_saved_and_older_files_have_none() {
+        let window = WindowState {
+            sidebar_width: Some(300.),
+            rail_width: Some(200.),
+            ..Default::default()
+        };
+        let text = serde_json::to_string(&window).unwrap();
+        let back: WindowState = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            (back.sidebar_width, back.rail_width),
+            (Some(300.), Some(200.))
+        );
+        let old: WindowState =
+            serde_json::from_str(r#"{"sidebar":true,"rail":false,"active":0,"tabs":[]}"#).unwrap();
+        assert_eq!((old.sidebar_width, old.rail_width), (None, None));
     }
 
     #[test]

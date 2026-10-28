@@ -8,8 +8,8 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, Div, EntityId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, PromptLevel, SharedString, StatefulInteractiveElement, Styled, Task,
-    Window, WindowControlArea, div, px,
+    ParentElement, PromptLevel, SharedString, StatefulInteractiveElement, Styled, Task, Window,
+    WindowControlArea, div, px,
 };
 use kiln_term::process::{ProcessReport, ProcessWatcher};
 
@@ -19,7 +19,6 @@ use crate::terminal_view::SessionInfo;
 use crate::theme::{self, palette};
 use crate::workspace::{Chrome, TITLEBAR_HEIGHT, Workspace, chrome, window_controls};
 
-pub const RAIL_WIDTH: Pixels = px(280.);
 const POLL: Duration = Duration::from_secs(2);
 const MAX_FILES: usize = 14;
 const MAX_PROCESSES: usize = 12;
@@ -234,7 +233,7 @@ impl Workspace {
                 .id("rail")
                 .relative()
                 .flex_none()
-                .w(RAIL_WIDTH)
+                .w(px(self.shown_widths.1))
                 .h_full()
                 .flex()
                 .flex_col()
@@ -248,6 +247,7 @@ impl Workspace {
                         d.child(strip).child(body)
                     }
                 })
+                .child(self.panel_handle(crate::workspace::Panel::Rail, cx))
                 .into_any_element(),
         )
     }

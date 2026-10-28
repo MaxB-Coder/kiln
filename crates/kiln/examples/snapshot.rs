@@ -204,6 +204,50 @@ impl Shots {
         self.pump(Duration::from_millis(300));
     }
 
+    /// Presses at `from`, moves in steps to `to` (x only) and, if `release`, lets go there.
+    fn drag(&mut self, from: (f32, f32), to_x: f32, release: bool) {
+        let window: AnyWindowHandle = self.window.into();
+        let point = |x: f32| Point::new(px(x), px(from.1));
+        let send = |s: &mut Self, event: PlatformInput| {
+            let _ =
+                s.cx.update_window(window, |_, window, cx| window.dispatch_event(event, cx));
+            s.pump(Duration::from_millis(40));
+        };
+        send(
+            self,
+            PlatformInput::MouseDown(gpui::MouseDownEvent {
+                button: gpui::MouseButton::Left,
+                position: point(from.0),
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+        );
+        for step in 1..=8 {
+            let x = from.0 + (to_x - from.0) * step as f32 / 8.;
+            send(
+                self,
+                PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position: point(x),
+                    pressed_button: Some(gpui::MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                }),
+            );
+        }
+        if release {
+            send(
+                self,
+                PlatformInput::MouseUp(gpui::MouseUpEvent {
+                    button: gpui::MouseButton::Left,
+                    position: point(to_x),
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                }),
+            );
+        }
+        self.pump(Duration::from_millis(400));
+    }
+
     fn titles(&mut self) -> Vec<String> {
         let window = self.window;
         self.cx
@@ -328,6 +372,13 @@ fn main() {
     }
     if scenario == "quiet" {
         quiet(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        let _ = std::fs::remove_dir_all(&config_home);
+        println!("done");
+        return;
+    }
+    if scenario == "resize" {
+        resize(&mut s);
         let _ = std::fs::remove_file(&state_file);
         let _ = std::fs::remove_dir_all(&config_home);
         println!("done");
@@ -1575,6 +1626,164 @@ fn quiet(s: &mut Shots) {
     s.shot(&format!("{stage}-busy-light"));
     s.type_only("\x03");
     s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
+}
+
+/// The sidebar and the rail resized by their edges: the least, default and most widths, the
+/// shell's size held until the drag ends, a double-click back to the default, and the widths
+/// kept in the saved sessions.
+fn resize(s: &mut Shots) {
+    use kiln::panels::{RAIL, SIDEBAR};
+    let path = kiln::config::config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let demo = demo_project();
+    let demo_root = std::fs::canonicalize(&demo)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    // A tinted card, to see it at each width.
+    std::fs::write(
+        &path,
+        format!("cursor_blink = false\n\n[projects.\"{demo_root}\"]\ncolor = \"teal\"\n"),
+    )
+    .unwrap();
+    s.pump(Duration::from_millis(1500));
+    s.run(&format!("cd {}", demo.display()), Duration::from_secs(5));
+    s.run("git --no-pager log --oneline -2", Duration::from_secs(5));
+    s.action(Box::new(kiln::ToggleRail));
+    s.pump(Duration::from_millis(2500));
+    let widths = |s: &mut Shots| s.workspace(|w| w.panel_widths());
+    let columns = |s: &mut Shots| {
+        let pane = s.pane();
+        s.cx.update(|cx| pane.read(cx).grid_columns())
+    };
+    assert_eq!(widths(s), (SIDEBAR.default, RAIL.default));
+    s.shot("r1-default");
+    let window_w = 1180.;
+    let y = 400.;
+
+    // Both to their least: each drag stops at the panel's range.
+    let before = columns(s);
+    let (sidebar, rail) = widths(s);
+    s.drag((sidebar - 3., y), 20., false);
+    assert_eq!(widths(s).0, SIDEBAR.min, "the sidebar stops at its least");
+    assert_eq!(
+        columns(s),
+        before,
+        "the shell keeps its size while dragging"
+    );
+    // Mid-drag: the 1 px accent line on the edge.
+    s.shot("r2a-dragging");
+    s.drag((SIDEBAR.min - 3., y), 20., true);
+    s.pump(Duration::from_millis(500));
+    assert!(columns(s) > before, "and gets the room when the drag ends");
+    s.drag((window_w - rail + 3., y), window_w - 20., true);
+    assert_eq!(widths(s), (SIDEBAR.min, RAIL.min));
+    s.shot("r2-least");
+
+    // In 1180 px both at their most would leave the terminal too little: the rail stops short.
+    s.drag((SIDEBAR.min - 3., y), 900., true);
+    assert_eq!(widths(s).0, SIDEBAR.max);
+    let (_, rail) = widths(s);
+    s.drag((window_w - rail + 3., y), 100., true);
+    let (sidebar, rail) = widths(s);
+    assert!(
+        sidebar == SIDEBAR.max && rail < RAIL.max,
+        "{sidebar} {rail}"
+    );
+    let left = window_w - sidebar - rail;
+    let pane = s.pane();
+    let least = kiln::panels::terminal_min(s.cx.update(|cx| pane.read(cx).cell_width()));
+    assert!(
+        left >= least - 0.5,
+        "the terminal keeps 40 columns: {left} of {least}"
+    );
+    s.shot("r3-most-in-1180");
+    // A wider window (a new one, restoring the saved sessions and widths): both at their most.
+    let reopen = |s: &mut Shots, width: f32| {
+        s.pump(Duration::from_millis(2600));
+        let window =
+            s.cx.open_window(size(px(width), px(720.)), |window, cx| {
+                let metrics = CellMetrics::measure(px(13.), window);
+                cx.new(|cx| Workspace::new(None, metrics, false, true, Instant::now(), window, cx))
+            })
+            .unwrap();
+        let old = std::mem::replace(&mut s.window, window);
+        s.cx.update(|cx| old.update(cx, |_, window, _| window.remove_window()).ok());
+        s.wait_for(Duration::from_secs(15), |p| p.is_at_prompt());
+        s.run("git --no-pager log --oneline -2", Duration::from_secs(5));
+        s.pump(Duration::from_millis(2500));
+    };
+    let wide = 1500.;
+    reopen(s, wide);
+    assert_eq!(
+        widths(s).0,
+        SIDEBAR.max,
+        "the width came back from the saved sessions"
+    );
+    let (_, rail) = widths(s);
+    s.drag((wide - rail + 3., y), 100., true);
+    let (sidebar, rail) = widths(s);
+    assert_eq!((sidebar, rail), (SIDEBAR.max, RAIL.max));
+    let left = wide - sidebar - rail;
+    assert!(
+        left >= least,
+        "the terminal keeps 40 columns: {left} of {least}"
+    );
+    assert!(
+        columns(s) >= kiln::panels::MIN_COLUMNS,
+        "{} columns",
+        columns(s)
+    );
+    s.shot("r3-most");
+
+    // A narrow window: the rail gives way to its least first, then the sidebar; the
+    // terminal keeps its columns.
+    reopen(s, 900.);
+    let (sidebar, rail) = widths(s);
+    assert!(
+        rail == RAIL.min && sidebar < SIDEBAR.max,
+        "{sidebar} {rail}"
+    );
+    assert!(900. - sidebar - rail >= least - 0.5);
+    s.shot("r4-narrow-window");
+    reopen(s, window_w);
+
+    // A double-click on an edge: the default width again.
+    let (sidebar, _) = widths(s);
+    s.click_button(sidebar - 3., y, gpui::MouseButton::Left, 2);
+    assert_eq!(widths(s).0, SIDEBAR.default);
+    let (_, rail) = widths(s);
+    s.click_button(window_w - rail + 3., y, gpui::MouseButton::Left, 2);
+    assert_eq!(widths(s).1, RAIL.default);
+
+    // Windows chrome at the least widths: the controls strip at the top of the rail.
+    s.drag((SIDEBAR.default - 3., y), 20., true);
+    s.drag((window_w - RAIL.default + 3., y), window_w - 20., true);
+    // SAFETY: only this thread reads the variable (in the next render).
+    unsafe { std::env::set_var("KILN_CHROME", "windows") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::Pc));
+    });
+    s.pump(Duration::from_millis(500));
+    s.shot("r5-least-windows-chrome");
+    unsafe { std::env::remove_var("KILN_CHROME") };
+    s.cx.update(|cx| {
+        cx.clear_key_bindings();
+        cx.bind_keys(keymap::bindings(keymap::KeyStyle::current()));
+    });
+    s.pump(Duration::from_millis(300));
+
+    // Saved with the sessions.
+    s.pump(Duration::from_millis(2600));
+    let state = std::env::var("KILN_STATE_FILE").unwrap();
+    let saved: kiln::state::State =
+        serde_json::from_str(&std::fs::read_to_string(state).unwrap()).unwrap();
+    let window = saved.window.unwrap();
+    assert_eq!(
+        (window.sidebar_width, window.rail_width),
+        (Some(SIDEBAR.min), Some(RAIL.min))
+    );
 }
 
 fn demo_project() -> PathBuf {

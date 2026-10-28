@@ -145,3 +145,19 @@ then the dev server running), in Kiln Dark and Kiln Light.
 | Kiln Light | idle [before](screenshots/quiet/before-idle-light.png) → [after](screenshots/quiet/after-idle-light.png); busy [before](screenshots/quiet/before-busy-light.png) → [after](screenshots/quiet/after-busy-light.png) | Matches |
 | Sidebar unchanged | same in every pair | Matches |
 
+## Resizing the sidebar and the rail (no mockup)
+
+`snapshot resize`: the demo project on a teal card, the rail open. All asserted in the run.
+
+| Item | Kiln | Verdict |
+| --- | --- | --- |
+| Default widths (220, 280) | [r1](screenshots/resize/r1-default.png) | Matches |
+| Drag an inner edge: the layout follows, a 1 px accent line on the edge, the shell's size held until the drag ends (asserted: same columns mid-drag, more after) | [r2a](screenshots/resize/r2a-dragging.png) | Matches |
+| Least widths (160, 180): the card, the header row and the pills still fit | [r2](screenshots/resize/r2-least.png); Windows chrome at the least, the controls strip at the top of the rail: [r5](screenshots/resize/r5-least-windows-chrome.png) | Matches |
+| Most widths (420, 480) in a 1500 px window; in 1180 px the rail stops short so the terminal keeps 40 columns | [r3](screenshots/resize/r3-most.png), [r3 in 1180](screenshots/resize/r3-most-in-1180.png) | Matches |
+| A narrow window (900 px): the rail gives way to its least first, then the sidebar | [r4](screenshots/resize/r4-narrow-window.png). Tests: `panels::tests` (ranges, the rail first, the terminal's 40 columns) | Matches |
+| Double-click an edge: the default width; the widths come back in a new window from the saved sessions | asserted (the 1500 and 900 px windows restore them) | Matches |
+
+Not shown in pictures: the macOS traffic lights (not drawn headless); at the least sidebar
+width the header row keeps their 78 px clear, as at the default.
+

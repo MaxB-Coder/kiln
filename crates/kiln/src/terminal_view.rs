@@ -55,6 +55,14 @@ fn alt_mode() -> AltMode {
 const CURSOR_BLINK: Duration = Duration::from_millis(600);
 
 /// Space around the grid, in points.
+/// Set while a panel's edge is dragged: panes keep their shell's size until it ends.
+static RESIZE_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Holds the shells' sizes while a panel is dragged (`false` lets them follow again).
+pub fn hold_resize(held: bool) {
+    RESIZE_HELD.store(held, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub const PADDING_X: f32 = 20.;
 /// The input box's margin from the pane's edges. Its inner padding is the rest of
 /// `PADDING_X`, so typed text lines up with the blocks above.
@@ -762,6 +770,16 @@ impl TerminalView {
         if self.session.integration_loaded() && self.session.at_empty_prompt() {
             self.session.write(b"\r".to_vec());
         }
+    }
+
+    /// The width of a cell, in px.
+    pub fn cell_width(&self) -> f32 {
+        f32::from(self.metrics.cell_width)
+    }
+
+    /// The shell's grid width, in columns.
+    pub fn grid_columns(&self) -> usize {
+        self.session.size().columns
     }
 
     pub fn is_at_prompt(&self) -> bool {
@@ -1509,6 +1527,11 @@ impl TerminalView {
 
     /// Computes the grid size from the pane's bounds and resizes the session.
     fn resize_to(&mut self, bounds: Bounds<Pixels>, window: &mut Window) {
+        // While a panel's edge is dragged, the shell keeps its size (full-screen programs would
+        // redraw at every step); the pane measures itself again when the drag ends.
+        if RESIZE_HELD.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let metrics = CellMetrics::measure(self.metrics.font_size, window);
         let usable_w = f32::from(bounds.size.width) - 2. * PADDING_X;
         let usable_h = f32::from(bounds.size.height) - PADDING_TOP - PADDING_BOTTOM;

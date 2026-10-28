@@ -65,7 +65,9 @@ in the sidebar, the header pill and the palette. Right-click a project and choos
 "Project colour" in the palette): the project and its sessions then sit on a card tinted with
 it, and its header pill takes it. Auto (no card), one of sixteen colours that look the same in
 every theme, or any "#rrggbb". The arrows, Enter and Esc work in the menu and the colour pop-up. The bottom of the
-sidebar shows the shortcuts key; click it for the list.
+sidebar shows the shortcuts key; click it for the list. Drag the inner edge of the sidebar or the context rail to
+resize it (double-click the edge for its default width); the terminal always keeps at least 40
+columns, and the widths come back with your sessions.
 
 A pinned command (Pin in a block's hover actions) stays at the top of the timeline, through
 `clear`, with its first lines; a click shows more.

@@ -22,6 +22,7 @@ use crate::keymap::{self, KeyStyle};
 use crate::logs;
 use crate::naming;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteGroup, PaletteItem, PaletteTarget};
+use crate::panels;
 use crate::rail::Rail;
 use crate::search::Match;
 use crate::settings::{SettingsEvent, SettingsView};
@@ -41,7 +42,6 @@ use crate::{
 
 /// Height of the strip at the top that holds the window controls.
 pub const TITLEBAR_HEIGHT: Pixels = px(32.);
-const SIDEBAR_WIDTH: Pixels = px(220.);
 /// Room for the macOS traffic lights when the sidebar is hidden.
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(78.);
 const PANE_GAP: Pixels = px(10.);
@@ -76,6 +76,21 @@ struct Tab {
     attention: bool,
     /// The name the user gave it; it then no longer follows the folder or the program.
     name: Option<String>,
+}
+
+/// Which panel's edge is being dragged, from where.
+#[derive(Clone, Copy, Debug)]
+struct PanelDrag {
+    panel: Panel,
+    /// The mouse's x and the panel's width when the drag began.
+    from_x: f32,
+    from_width: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Sidebar,
+    Rail,
 }
 
 /// What the sidebar's inline editor renames.
@@ -216,6 +231,13 @@ pub struct Workspace {
     renaming: Option<Renaming>,
     sidebar_menu: Option<SidebarMenu>,
     colour_menu: Option<ColourMenu>,
+    /// The widths the sidebar and the rail were given (dragged by their inner edge), and the
+    /// widths they get this frame (held to their ranges and to the terminal's least room).
+    pub(crate) sidebar_width: f32,
+    pub(crate) rail_width: f32,
+    pub(crate) shown_widths: (f32, f32),
+    /// A panel's edge being dragged.
+    panel_drag: Option<PanelDrag>,
     /// Where the sidebar's rows were drawn (window y of their middles): each project's header
     /// and first session, and the shortcuts hint. For the snapshots' clicks.
     sidebar_ys: (Vec<(f32, f32)>, f32),
@@ -261,6 +283,10 @@ impl Workspace {
             sidebar_menu: None,
             colour_menu: None,
             sidebar_ys: (Vec::new(), 0.),
+            sidebar_width: panels::SIDEBAR.default,
+            rail_width: panels::RAIL.default,
+            shown_widths: (panels::SIDEBAR.default, panels::RAIL.default),
+            panel_drag: None,
             settings: None,
             applied: config.clone(),
             metrics,
@@ -1196,7 +1222,138 @@ impl Workspace {
             .unwrap_or_default()
     }
 
+    // ----- panel widths ---------------------------------------------------------------------
+
+    /// The 6 px strip on a panel's inner edge that drags its width: the resize cursor, and a
+    /// 1 px accent line under the mouse or while dragging (nothing otherwise). A double-click
+    /// gives the panel its default width back.
+    pub(crate) fn panel_handle(&self, panel: Panel, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let dragging = self.panel_drag.is_some_and(|d| d.panel == panel);
+        let group: SharedString = format!("panel-edge-{panel:?}").into();
+        let line = div()
+            .absolute()
+            .top_0()
+            .h_full()
+            .w(px(1.))
+            .map(|d| match panel {
+                Panel::Sidebar => d.right_0(),
+                Panel::Rail => d.left_0(),
+            })
+            .when(dragging, |d| d.bg(theme::hsla(p.accent)))
+            .group_hover(group.clone(), |s| s.bg(theme::hsla(p.accent)));
+        div()
+            .id(match panel {
+                Panel::Sidebar => "sidebar-edge",
+                Panel::Rail => "rail-edge",
+            })
+            .group(group)
+            .absolute()
+            .top_0()
+            .h_full()
+            .w(px(6.))
+            .map(|d| match panel {
+                Panel::Sidebar => d.right_0(),
+                Panel::Rail => d.left_0(),
+            })
+            .cursor_col_resize()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    if event.click_count >= 2 {
+                        this.panel_drag = None;
+                        crate::terminal_view::hold_resize(false);
+                        match panel {
+                            Panel::Sidebar => this.sidebar_width = panels::SIDEBAR.default,
+                            Panel::Rail => this.rail_width = panels::RAIL.default,
+                        }
+                        window.refresh();
+                        return;
+                    }
+                    let (sidebar, rail) = this.shown_widths;
+                    this.panel_drag = Some(PanelDrag {
+                        panel,
+                        from_x: f32::from(event.position.x),
+                        from_width: match panel {
+                            Panel::Sidebar => sidebar,
+                            Panel::Rail => rail,
+                        },
+                    });
+                    // The layout follows the mouse; the shells get their new size at the end.
+                    crate::terminal_view::hold_resize(true);
+                    cx.notify();
+                }),
+            )
+            .child(line)
+            .into_any_element()
+    }
+
+    fn drag_panel(
+        &mut self,
+        event: &gpui::MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(drag) = self.panel_drag else {
+            return;
+        };
+        if event.pressed_button != Some(MouseButton::Left) {
+            // Let go outside the window.
+            self.end_panel_drag(window, cx);
+            return;
+        }
+        let dx = f32::from(event.position.x) - drag.from_x;
+        let wanted = match drag.panel {
+            Panel::Sidebar => drag.from_width + dx,
+            Panel::Rail => drag.from_width - dx,
+        };
+        // Held where the terminal would get too narrow, so the width kept is the one shown.
+        let window_w = f32::from(window.viewport_size().width);
+        let terminal = panels::terminal_min(f32::from(self.metrics.cell_width));
+        let shown = self.shown_widths;
+        let (sidebar, rail) = match drag.panel {
+            Panel::Sidebar => panels::widths(
+                window_w,
+                Some(wanted),
+                self.rail_visible().then_some(shown.1),
+                terminal,
+            ),
+            Panel::Rail => panels::widths(
+                window_w,
+                self.sidebar_visible().then_some(shown.0),
+                Some(wanted),
+                terminal,
+            ),
+        };
+        match drag.panel {
+            Panel::Sidebar => {
+                let room = window_w - rail.unwrap_or(0.) - terminal;
+                self.sidebar_width = sidebar.unwrap_or(wanted).min(room.max(panels::SIDEBAR.min));
+            }
+            Panel::Rail => {
+                let room = window_w - sidebar.unwrap_or(0.) - terminal;
+                self.rail_width = rail.unwrap_or(wanted).min(room.max(panels::RAIL.min));
+            }
+        }
+        cx.notify();
+    }
+
+    fn end_panel_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.panel_drag.take().is_some() {
+            crate::terminal_view::hold_resize(false);
+            // Every pane measures itself again, and its shell gets the new size once.
+            window.refresh();
+            cx.notify();
+        }
+    }
+
     // ----- renaming sessions and projects, project colours ----------------------------------
+
+    /// The sidebar's and the rail's widths as shown (the snapshots check them).
+    pub fn panel_widths(&self) -> (f32, f32) {
+        self.shown_widths
+    }
 
     /// The sessions' names as the sidebar shows them (the snapshots check them).
     pub fn session_titles(&mut self, cx: &App) -> Vec<String> {
@@ -1811,6 +1968,12 @@ impl Workspace {
             return false;
         }
         self.sidebar_open = saved.sidebar;
+        if let Some(width) = saved.sidebar_width {
+            self.sidebar_width = panels::SIDEBAR.clamp(width);
+        }
+        if let Some(width) = saved.rail_width {
+            self.rail_width = panels::RAIL.clamp(width);
+        }
         if saved.rail && self.rail.is_none() {
             self.toggle_rail(window, cx);
         }
@@ -1908,6 +2071,8 @@ impl Workspace {
             rail: self.rail.is_some(),
             active,
             tabs,
+            sidebar_width: Some(self.sidebar_width),
+            rail_width: Some(self.rail_width),
         }
     }
 
@@ -2065,12 +2230,15 @@ impl Workspace {
             .sidebar_menu
             .as_ref()
             .map(|menu| self.render_sidebar_menu(menu, cx));
+        let handle = self.panel_handle(Panel::Sidebar, cx);
         div()
             .id("sidebar")
             .group("sidebar")
             .children(menu)
+            .child(handle)
+            .relative()
             .flex_none()
-            .w(SIDEBAR_WIDTH)
+            .w(px(self.shown_widths.0))
             .h_full()
             .flex()
             .flex_col()
@@ -2781,6 +2949,18 @@ fn resize_edges(window: &Window) -> Option<AnyElement> {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette();
+        // The panels' widths this frame: as dragged, held to their ranges and to the room the
+        // terminal keeps.
+        let (sidebar_w, rail_w) = panels::widths(
+            f32::from(window.viewport_size().width),
+            self.sidebar_visible().then_some(self.sidebar_width),
+            self.rail_visible().then_some(self.rail_width),
+            panels::terminal_min(f32::from(self.metrics.cell_width)),
+        );
+        self.shown_widths = (
+            sidebar_w.unwrap_or(self.sidebar_width),
+            rail_w.unwrap_or(self.rail_width),
+        );
         let sidebar = self
             .sidebar_visible()
             .then(|| self.render_sidebar(window, cx));
@@ -2929,6 +3109,38 @@ impl Render for Workspace {
             .key_context("Workspace")
             .relative()
             .size_full()
+            // A panel's edge being dragged: it follows the mouse anywhere in the window (heard
+            // before any pane can keep the events to itself).
+            .when(self.panel_drag.is_some(), |d| {
+                let entity = cx.entity();
+                d.cursor_col_resize().child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| {
+                            let moves = entity.clone();
+                            window.on_mouse_event(
+                                move |event: &gpui::MouseMoveEvent, phase, window, cx| {
+                                    if phase == gpui::DispatchPhase::Capture {
+                                        moves.update(cx, |this, cx| {
+                                            this.drag_panel(event, window, cx)
+                                        });
+                                    }
+                                },
+                            );
+                            let ups = entity.clone();
+                            window.on_mouse_event(
+                                move |_: &gpui::MouseUpEvent, phase, window, cx| {
+                                    if phase == gpui::DispatchPhase::Capture {
+                                        ups.update(cx, |this, cx| this.end_panel_drag(window, cx));
+                                    }
+                                },
+                            );
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
             .flex()
             .flex_row()
             .bg(theme::hsla(p.bg))
