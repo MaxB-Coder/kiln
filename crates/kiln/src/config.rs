@@ -28,6 +28,8 @@ pub struct Config {
     pub option_as_alt: bool,
     /// Commands running at least this long notify you when they finish out of sight.
     pub notify_after_secs: u64,
+    /// Where Open in the changes viewer opens a file (see `editor::plan`).
+    pub editor: String,
     pub shell: ShellConfig,
     pub window: WindowConfig,
     pub theme: ThemeConfig,
@@ -444,6 +446,7 @@ impl Default for Config {
             cursor_blink: true,
             option_as_alt: false,
             notify_after_secs: 10,
+            editor: "auto".into(),
             shell: ShellConfig::default(),
             window: WindowConfig::default(),
             theme: ThemeConfig::default(),
@@ -609,6 +612,10 @@ option_as_alt = false
 # Commands that run at least this long notify you when they finish while you look elsewhere
 # (0 turns it off).
 notify_after_secs = 10
+# Where Open (⌘O in the changes viewer) opens a file: "auto" (your $VISUAL or $EDITOR),
+# "system" (the file's default app), an app such as "IntelliJ IDEA" or "Visual Studio Code",
+# or any command ("code", "nvim -p").
+editor = "auto"
 
 [shell]
 # program = "/bin/zsh"

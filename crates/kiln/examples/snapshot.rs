@@ -953,6 +953,17 @@ fn settings(s: &mut Shots) {
     s.keystroke("tab tab right right");
     s.shot("s04-changed");
     std::fs::copy(&path, s.out.join("s04-kiln-after.toml")).unwrap();
+    // "Open files in": Space opens its list, the arrows choose ($EDITOR, the IDEs here, the
+    // default app).
+    s.keystroke("tab tab space");
+    s.pump(Duration::from_millis(300));
+    s.scroll(590., 500., -400.);
+    s.shot("s04b-open-files-in");
+    s.keystroke("right");
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("editor = \""), "{written}");
+    s.shot("s04c-open-files-chosen");
+    s.keystroke("escape");
     s.keystroke("escape");
     assert!(!open(s), "Esc closes Settings");
 

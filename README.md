@@ -73,8 +73,9 @@ Click a file in the rail's Changes (or "Show changes" in the palette) for its di
 HEAD, staged and unstaged together: unified or side by side, with line numbers. Select with
 the mouse (double-click a word, triple-click a line, shift-click to extend); ⌘C copies just
 the code, ⌘A the whole new side, "Copy diff" a patch `git apply` takes. ↑↓ or j/k scroll,
-Space pages, n/p jump between hunks, [ and ] between files, ⌘F finds, ⌘O opens the file in
-`$VISUAL`/`$EDITOR` at the first change, Esc closes. It follows the file as it changes.
+Space pages, n/p jump between hunks, [ and ] between files, ⌘F finds, ⌘O opens the file at the first change
+where Settings' "Open files in" says (`$VISUAL`/`$EDITOR`, an installed IDE, or the default
+app), Esc closes. It follows the file as it changes.
 
 A pinned command (Pin in a block's hover actions) stays at the top of the timeline, through
 `clear`, with its first lines; a click shows more.
@@ -105,6 +106,7 @@ changes apply as you save. A few:
 icon = "beehive"                # the app icon: "kiln", "flame", "beehive", "line" or "custom"
 font_size = 13.0
 notify_after_secs = 10          # notify when a long command finishes out of sight (0: off)
+editor = "auto"                 # ⌘O in the changes viewer: "auto" ($EDITOR), "system", "IntelliJ IDEA", "code", …
 
 [shell]
 prompt = "kiln"                 # a small flame in the input box; "shell": your prompt's last line (e.g. ❯)

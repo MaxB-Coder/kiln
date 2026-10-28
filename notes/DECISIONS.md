@@ -470,10 +470,19 @@ Newest at the bottom.
   hunk headers left out. In the split view it stays on the side the mouse went down on and
   copies that side's lines only (`diff::copy_split`). ⌘A selects the new side (context and added lines). Copy diff copies
   git's patch as is. Keys: ↑↓ j k, Space/PageDown, n/p, [ ], ⌘F (its own find over the rows,
-  in Kiln's find bar style), ⌘O, Esc. ⌘O uses `$VISUAL`/`$EDITOR`, from Kiln's environment or,
-  as an app started from the Dock has neither, the login shell's (`editor::user_editor`); each
-  known editor gets the line its way (`code -g f:12`, `nvim +12 f`, `hx f:12`, `subl f:12`, …),
-  terminal editors open in a new session, and with none set the system opens the file. Not
+  in Kiln's find bar style), ⌘O, Esc. ⌘O opens where the `editor` setting says (Settings,
+  "Open files in"): "auto" is `$VISUAL`/`$EDITOR`, from Kiln's environment or, as an app
+  started from the Dock has neither, the login shell's (`editor::user_editor`); "system" the
+  file's default app; an IDE by name; or any command. Each known editor gets the line its way
+  (`code -g f:12`, `nvim +12 f`, `hx f:12`, `subl f:12`, `idea --line 12 f`, …). Commands run
+  through the login shell (`$SHELL -lic 'exec …'`, `editor::through_shell`), because an app
+  gets the system's PATH, not the user's: `EDITOR=nvim` failed to start before, with nvim in
+  /opt/homebrew/bin. Terminal editors open in a new session. The IDEs (VS Code, Cursor,
+  Windsurf, Zed, Sublime Text, the JetBrains ones, Xcode) are found by their app in
+  /Applications or ~/Applications on macOS, so none needs its command-line tool installed: the
+  command inside the bundle where there is one, else `open -na App --args --line N f`, which
+  hands the file to the running IDE; elsewhere by their command on the PATH. The list offers
+  only what is installed; the file takes any name or command. Not
   done: a "staged" marker on hunks (the combined diff has no clean mapping back), Enter on a
   rail file (the rail takes no keyboard focus yet).
 

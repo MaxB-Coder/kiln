@@ -1280,7 +1280,7 @@ impl Workspace {
         .detach();
     }
 
-    /// Opens `path` in the user's editor at `line` (see `editor`).
+    /// Opens `path` at `line` where the `editor` setting says (see `editor`).
     fn open_in_editor(
         &mut self,
         path: PathBuf,
@@ -1288,30 +1288,54 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::editor::Launch;
-        let task = cx.background_spawn(async move { crate::editor::user_editor() });
+        use crate::editor::{self, Launch};
+        let setting = config::current().editor;
+        let file = path.clone();
+        let task = cx.background_spawn(async move {
+            // "auto" asks the login shell for $EDITOR: a moment, so off the UI thread.
+            let env_editor = matches!(setting.trim(), "" | "auto")
+                .then(editor::user_editor)
+                .flatten();
+            editor::plan(&setting, env_editor.as_deref(), editor::locate, &file, line)
+        });
         cx.spawn_in(window, async move |this, cx| {
-            let editor = task.await;
-            let launch = crate::editor::plan(editor.as_deref(), &path, line);
-            let _ = this.update_in(cx, |this, window, cx| match launch {
-                Launch::App { program, args } => {
+            let launch = task.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                let background = match &launch {
+                    Launch::App { program, args } => {
+                        Some((program.to_string_lossy().to_string(), args.clone()))
+                    }
+                    Launch::Shell { program, args } => Some(editor::through_shell(program, args)),
+                    Launch::Terminal { program, args } => {
+                        this.diff = None;
+                        let (shell, args) = editor::through_shell(program, args);
+                        let folder = path.parent().map(PathBuf::from);
+                        this.new_tab(folder, Some(ShellCommand::new(shell, args)), window, cx);
+                        None
+                    }
+                    Launch::System => {
+                        cx.open_with_system(&path);
+                        None
+                    }
+                };
+                if let Some((program, args)) = background {
                     let spawned = std::process::Command::new(&program)
                         .args(&args)
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null())
                         .spawn();
-                    if let Err(err) = spawned {
-                        log::warn!("could not start {program}: {err}");
-                        cx.open_with_system(&path);
+                    match spawned {
+                        // Reaped when it exits (an editor's command line returns at once).
+                        Ok(mut child) => {
+                            std::thread::spawn(move || child.wait());
+                        }
+                        Err(err) => {
+                            log::warn!("could not start {program}: {err}");
+                            cx.open_with_system(&path);
+                        }
                     }
                 }
-                Launch::Terminal { program, args } => {
-                    this.diff = None;
-                    let folder = path.parent().map(PathBuf::from);
-                    this.new_tab(folder, Some(ShellCommand::new(program, args)), window, cx);
-                }
-                Launch::System => cx.open_with_system(&path),
             });
         })
         .detach();

@@ -57,6 +57,8 @@ pub enum Change {
     TintRemote(bool),
     OptionAsAlt(bool),
     UpdatesCheck(bool),
+    /// Where Open in the changes viewer opens files (`editor::plan`).
+    Editor(String),
     /// A theme by name (presets and "system"), exactly as it is.
     Theme(&'static str),
     /// Back to the custom theme kept in `[theme.custom]`.
@@ -205,6 +207,7 @@ impl Change {
             Change::TintRemote(on) => (&["tints", "remote"], on.into()),
             Change::OptionAsAlt(on) => (&["option_as_alt"], on.into()),
             Change::UpdatesCheck(on) => (&["updates", "check"], on.into()),
+            Change::Editor(editor) => (&["editor"], editor.into()),
             _ => unreachable!("theme changes write several keys (see `edits`)"),
         }
     }
@@ -257,6 +260,7 @@ enum Control {
     Prompt,
     Restore,
     NotifyAfter,
+    Editor,
     TintRemote,
     OptionAsAlt,
     UpdatesCheck,
@@ -290,6 +294,11 @@ pub struct SettingsView {
     /// "Start from" is open.
     base_menu: bool,
     picker: Option<Picker>,
+    /// "Open files in": its choices (`editor::choices`), the editor "auto" means (from the login
+    /// shell, so it arrives a moment later), and whether its list is open.
+    editors: Vec<&'static str>,
+    env_editor: Option<String>,
+    editor_menu: bool,
 }
 
 /// The colour picker under the custom theme's colours.
@@ -371,7 +380,19 @@ impl SettingsView {
             _hex_events: hex_events,
             base_menu: false,
             picker: None,
+            editors: crate::editor::choices(),
+            env_editor: None,
+            editor_menu: false,
         };
+        let env_editor = cx.background_spawn(async { crate::editor::user_editor() });
+        cx.spawn(async move |this, cx| {
+            let editor = env_editor.await;
+            let _ = this.update(cx, |this, cx| {
+                this.env_editor = editor;
+                cx.notify();
+            });
+        })
+        .detach();
         this.reload_and_sync(cx);
         this
     }
@@ -530,6 +551,7 @@ impl SettingsView {
             Control::Prompt,
             Control::Restore,
             Control::NotifyAfter,
+            Control::Editor,
             Control::TintRemote,
         ];
         if self.mac {
@@ -625,6 +647,16 @@ impl SettingsView {
             Control::TintRemote if flip => Change::TintRemote(!c.tints.remote),
             Control::OptionAsAlt if flip => Change::OptionAsAlt(!c.option_as_alt),
             Control::UpdatesCheck if flip => Change::UpdatesCheck(!c.updates.check),
+            // The arrows move through the choices (Space opens the list).
+            Control::Editor if !flip => {
+                let count = self.editors.len() as i32;
+                let at = self
+                    .editors
+                    .iter()
+                    .position(|e| e.eq_ignore_ascii_case(c.editor.trim()))
+                    .map_or(if step > 0 { -1 } else { 0 }, |i| i as i32);
+                Change::Editor(self.editors[(at + step).rem_euclid(count) as usize].to_string())
+            }
             _ => return None,
         })
     }
@@ -635,6 +667,10 @@ impl SettingsView {
         let current = controls[self.focused.min(count - 1)];
         let shift = event.keystroke.modifiers.shift;
         match event.keystroke.key.as_str() {
+            "escape" if self.editor_menu => {
+                self.editor_menu = false;
+                cx.notify();
+            }
             "escape" if self.icon_menu => {
                 self.icon_menu = false;
                 cx.notify();
@@ -642,6 +678,7 @@ impl SettingsView {
             "escape" => cx.emit(SettingsEvent::Dismiss),
             "tab" | "down" | "up" => {
                 self.icon_menu = false;
+                self.editor_menu = false;
                 let back = shift || event.keystroke.key == "up";
                 let at = self.focused.min(count - 1);
                 self.focused = if !self.keyboard {
@@ -666,6 +703,8 @@ impl SettingsView {
                 self.keyboard = true;
                 if current == Control::OpenFile {
                     cx.emit(SettingsEvent::OpenFile);
+                } else if current == Control::Editor {
+                    self.editor_menu = !self.editor_menu;
                 } else if current == Control::Icon {
                     // The selected design's colours, or a new image for Custom.
                     if self.config.icon.design == IconDesign::Custom {
@@ -777,6 +816,75 @@ impl SettingsView {
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| this.set(change.clone(), cx)))
             .child(toggle(on))
+    }
+
+    /// "Open files in": the choice, opening its list.
+    fn editor_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let label = crate::editor::label(&self.config.editor, self.env_editor.as_deref());
+        div()
+            .id("editor")
+            .px(px(8.))
+            .py(px(2.))
+            .rounded(px(6.))
+            .bg(theme::hsla(p.bar))
+            .border_1()
+            .border_color(theme::hsla(p.bg1))
+            .text_size(px(11.))
+            .text_color(theme::hsla(p.fg))
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.editor_menu = !this.editor_menu;
+                cx.notify();
+            }))
+            .child(SharedString::from(format!("{label} ▾")))
+            .into_any_element()
+    }
+
+    /// The list under "Open files in": `$EDITOR`, the IDEs installed here, the default app.
+    fn editor_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette();
+        let current = self.config.editor.trim().to_lowercase();
+        let current = if current.is_empty() {
+            "auto".into()
+        } else {
+            current
+        };
+        div()
+            .flex()
+            .flex_col()
+            .ml_auto()
+            .mr(px(18.))
+            .mb(px(4.))
+            .w(px(220.))
+            .p(px(4.))
+            .rounded(px(6.))
+            .bg(theme::hsla(p.bar))
+            .border_1()
+            .border_color(theme::hsla(p.bg1))
+            .children(self.editors.iter().enumerate().map(|(i, choice)| {
+                let chosen = choice.to_lowercase() == current;
+                let choice = *choice;
+                div()
+                    .id(("editor-choice", i))
+                    .px(px(8.))
+                    .py(px(3.))
+                    .rounded(px(4.))
+                    .cursor_pointer()
+                    .text_size(px(11.))
+                    .text_color(theme::hsla(if chosen { p.fg } else { p.fg_dim }))
+                    .when(chosen, |d| d.bg(theme::hsla(p.bg1)))
+                    .hover(|s| s.bg(theme::hsla(p.bg1)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.editor_menu = false;
+                        this.set(Change::Editor(choice.to_string()), cx);
+                    }))
+                    .child(SharedString::from(crate::editor::label(
+                        choice,
+                        self.env_editor.as_deref(),
+                    )))
+            }))
+            .into_any_element()
     }
 
     fn stepper(
@@ -1726,6 +1834,13 @@ impl Render for SettingsView {
                     cx,
                 ),
             ))
+            .child(self.row(
+                Control::Editor,
+                "Open files in",
+                Some("Open in the changes viewer (⌘O)"),
+                self.editor_button(cx),
+            ))
+            .children(self.editor_menu.then(|| self.editor_list(cx)))
             .child(self.row(
                 Control::TintRemote,
                 "Tint remote sessions",

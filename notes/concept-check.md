@@ -181,6 +181,7 @@ in the run.
 | Follows the file while open | asserted (a line added, then removed) | Matches |
 | Kiln Light | [d10](screenshots/diff/d10-light.png) | Matches |
 | Parsing: hunks, numbers, new/deleted/binary, split pairing; a real repository, staged and unstaged together, untracked as new | `diff::tests` | Matches |
-| ⌘O in each editor's way | `editor::tests::each_editor_gets_the_line_its_way` (not run against real editors) | Matches |
+| ⌘O in each editor's way, commands through the login shell (so `EDITOR=nvim` from Homebrew starts), installed IDEs from their app bundle | `editor::tests` (not run against real IDEs); `zsh -lic 'exec which nvim'` from a bare PATH finds /opt/homebrew/bin/nvim | Matches |
+| Settings, "Open files in": $EDITOR (nvim), each installed IDE, Default app; arrows choose, Space opens the list, written as `editor` | [s04b](screenshots/settings/s04b-open-files-in.png), [s04c](screenshots/settings/s04c-open-files-chosen.png) (asserted) | Matches |
 | Enter on a rail file; a "staged" marker | not done (see DECISIONS) | Differs |
 
