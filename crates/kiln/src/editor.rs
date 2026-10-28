@@ -373,6 +373,15 @@ mod tests {
 
     const FILE: &str = "/code/app/src/main.rs";
 
+    /// A path as `plan` passes it on: absolute in this platform's way (`D:\\code\\…` on
+    /// Windows).
+    fn abs(path: impl AsRef<Path>) -> String {
+        std::path::absolute(path)
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    }
+
     fn plan_for(setting: &str, env: Option<&str>, installed: &[&str]) -> Launch {
         plan(
             setting,
@@ -394,14 +403,14 @@ mod tests {
             plan_for("auto", Some("nvim"), &[]),
             Launch::Terminal {
                 program: "nvim".into(),
-                args: vec!["+12".into(), FILE.into()]
+                args: vec!["+12".into(), abs(FILE)]
             }
         );
         assert_eq!(
             plan_for("auto", Some("code --wait"), &[]),
             Launch::Shell {
                 program: "code".into(),
-                args: vec!["-g".into(), format!("{FILE}:12")]
+                args: vec!["-g".into(), format!("{}:12", abs(FILE))]
             }
         );
         assert_eq!(plan_for("auto", None, &[]), Launch::System);
@@ -410,7 +419,7 @@ mod tests {
             plan_for("hx", None, &[]),
             Launch::Terminal {
                 program: "hx".into(),
-                args: vec![format!("{FILE}:12")]
+                args: vec![format!("{}:12", abs(FILE))]
             }
         );
     }
@@ -425,11 +434,7 @@ mod tests {
             Path::new("src/main.rs"),
             7,
         );
-        let file = std::env::current_dir()
-            .unwrap()
-            .join("src/main.rs")
-            .to_string_lossy()
-            .to_string();
+        let file = abs("src/main.rs");
         // The test runs inside Kiln's repository, which goes first as the project.
         let project: Vec<String> = project_of(Path::new(&file))
             .map(|p| p.to_string_lossy().to_string())
@@ -472,7 +477,7 @@ mod tests {
             repo.to_string_lossy().to_string(),
             "--line".into(),
             "9".into(),
-            file.to_string_lossy().to_string(),
+            abs(&file),
         ];
         let Launch::App { args, .. } = launch else {
             panic!("{launch:?}");
@@ -496,7 +501,7 @@ mod tests {
                     "--args".into(),
                     "--line".into(),
                     "12".into(),
-                    FILE.into()
+                    abs(FILE)
                 ]
             }
         );
@@ -505,7 +510,7 @@ mod tests {
             Launch::App {
                 program: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
                     .into(),
-                args: vec!["-g".into(), format!("{FILE}:12")]
+                args: vec!["-g".into(), format!("{}:12", abs(FILE))]
             }
         );
         // Named but not installed: its command, through the shell.
@@ -513,7 +518,7 @@ mod tests {
             plan_for("Zed", None, &[]),
             Launch::Shell {
                 program: "zed".into(),
-                args: vec![format!("{FILE}:12")]
+                args: vec![format!("{}:12", abs(FILE))]
             }
         );
     }
