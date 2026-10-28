@@ -15,6 +15,7 @@ pub mod editor;
 pub mod flame;
 pub mod git;
 pub mod grid_paint;
+pub mod image_diff;
 pub mod keymap;
 pub mod live_element;
 pub mod logs;

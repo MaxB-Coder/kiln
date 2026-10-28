@@ -11,9 +11,10 @@ use gpui::{
     AppContext as _, BoxShadow, ClipboardItem, Context, Div, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, ParentElement, Pixels, Render, ScrollStrategy, StatefulInteractiveElement,
-    Styled, Subscription, Task, UniformListScrollHandle, Window, canvas, div, point, px, relative,
-    uniform_list,
+    Styled, Subscription, Task, UniformListScrollHandle, Window, canvas, div, fill, img, point, px,
+    relative, size, uniform_list,
 };
+use std::sync::Arc;
 
 use crate::diff::{self, FileDiff, LineKind, Place, Row, Side, SplitRow, Token};
 use crate::git::FileChange;
@@ -65,6 +66,8 @@ pub struct DiffView {
     rows: Vec<Row>,
     split: Vec<SplitRow>,
     mode: Mode,
+    /// A changed image's pictures, before and after, ready to draw (made when they change).
+    pictures: [Option<Arc<gpui::Image>>; 2],
     show_all: bool,
     scroll: UniformListScrollHandle,
     /// The selection in unified rows: where it began and where it reaches.
@@ -132,6 +135,7 @@ impl DiffView {
             rows: Vec::new(),
             split: Vec::new(),
             mode: Mode::Unified,
+            pictures: [None, None],
             show_all: false,
             scroll: UniformListScrollHandle::new(),
             selection: None,
@@ -173,6 +177,20 @@ impl DiffView {
     }
 
     fn set_diff(&mut self, fresh: FileDiff, reset: bool, cx: &gpui::App) {
+        if self.diff.as_ref().map(|d| &d.binary_change) != Some(&fresh.binary_change) {
+            let picture = |side: Option<&crate::image_diff::Side>| {
+                let png = side?.picture.as_ref()?.png.clone();
+                Some(Arc::new(gpui::Image::from_bytes(
+                    gpui::ImageFormat::Png,
+                    png,
+                )))
+            };
+            let change = fresh.binary_change.as_ref();
+            self.pictures = [
+                picture(change.and_then(|c| c.before.as_ref())),
+                picture(change.and_then(|c| c.after.as_ref())),
+            ];
+        }
         self.rows = diff::unified_rows(&fresh);
         self.split = diff::split_rows(&fresh);
         self.diff = Some(fresh);
@@ -964,6 +982,145 @@ impl DiffView {
     }
 }
 
+impl DiffView {
+    /// A binary file: an image's before and after side by side (only one for a new or a deleted
+    /// file), each fitted in a box over a checkerboard with its size under it; any other binary
+    /// file, or an image too large to show, as its sizes.
+    fn render_binary(&self) -> gpui::AnyElement {
+        use crate::image_diff::{self, Status};
+        const BOX: f32 = 420.;
+        let p = palette();
+        let message = |text: String| {
+            div()
+                .flex_1()
+                .p(px(PAD + 4.))
+                .text_color(theme::hsla(p.muted))
+                .child(text)
+                .into_any_element()
+        };
+        let Some(change) = self.diff.as_ref().and_then(|d| d.binary_change.as_ref()) else {
+            return message("Binary file changed".into());
+        };
+        if !change.image {
+            return message(change.summary());
+        }
+        if self.pictures.iter().all(Option::is_none) {
+            return message(format!(
+                "{} · too large to show (over {} px or {})",
+                change.summary(),
+                crate::custom_icon::MAX_SIDE,
+                crate::rail::bytes_label(crate::custom_icon::MAX_BYTES)
+            ));
+        }
+        let status = change.status();
+        let sides = [
+            (
+                change.before.as_ref(),
+                &self.pictures[0],
+                "Before",
+                "deleted",
+            ),
+            (change.after.as_ref(), &self.pictures[1], "After", "new"),
+        ];
+        let light = p.bg;
+        let dark = theme::blend(p.bg, p.fg, 0.08);
+        let mut row = div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_center()
+            .gap(px(32.))
+            .p(px(PAD + 4.));
+        for (side, picture, label, alone) in sides {
+            let Some(side) = side else { continue };
+            let label = match status {
+                Status::Modified => label,
+                Status::New | Status::Deleted => alone,
+            };
+            let frame = match (picture, &side.picture) {
+                (Some(image), Some(pic)) => {
+                    let scale = (BOX / pic.width as f32)
+                        .min(BOX / pic.height as f32)
+                        .min(8.);
+                    let (w, h) = (pic.width as f32 * scale, pic.height as f32 * scale);
+                    div()
+                        .relative()
+                        .w(px(w))
+                        .h(px(h))
+                        .border_1()
+                        .border_color(theme::hsla(p.bg1))
+                        .child(
+                            canvas(
+                                |_, _, _| {},
+                                move |bounds, _, window, _| {
+                                    // A checkerboard behind the transparent parts.
+                                    const SQUARE: f32 = 8.;
+                                    window.paint_quad(fill(bounds, theme::hsla(light)));
+                                    let (bw, bh) = (
+                                        f32::from(bounds.size.width),
+                                        f32::from(bounds.size.height),
+                                    );
+                                    let mut y = 0.;
+                                    let mut row = 0;
+                                    while y < bh {
+                                        let mut x = if row % 2 == 0 { 0. } else { SQUARE };
+                                        while x < bw {
+                                            let square = gpui::Bounds::new(
+                                                bounds.origin + point(px(x), px(y)),
+                                                size(
+                                                    px(SQUARE.min(bw - x)),
+                                                    px(SQUARE.min(bh - y)),
+                                                ),
+                                            );
+                                            window.paint_quad(fill(square, theme::hsla(dark)));
+                                            x += SQUARE * 2.;
+                                        }
+                                        y += SQUARE;
+                                        row += 1;
+                                    }
+                                },
+                            )
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full(),
+                        )
+                        .child(img(image.clone()).absolute().top_0().left_0().size_full())
+                        .into_any_element()
+                }
+                _ => div()
+                    .w(px(BOX / 2.))
+                    .h(px(BOX / 2.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_1()
+                    .border_color(theme::hsla(p.bg1))
+                    .text_color(theme::hsla(p.muted))
+                    .child("Too large to show")
+                    .into_any_element(),
+            };
+            row = row.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(div().text_color(theme::hsla(p.fg_dim)).child(label))
+                    .child(frame)
+                    .child(
+                        div()
+                            .text_color(theme::hsla(p.muted))
+                            .child(image_diff::caption(side)),
+                    ),
+            );
+        }
+        row.into_any_element()
+    }
+}
+
 /// The thin bar in the gutter beside a staged line.
 fn staged_bar() -> Div {
     div()
@@ -1052,33 +1209,35 @@ impl Render for DiffView {
                         .text_color(theme::hsla(p.fg))
                         .child(path),
                 )
-                .child(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .flex_row()
-                        .gap(px(6.))
-                        .child(
-                            div()
-                                .text_color(theme::hsla(p.ok))
-                                .child(format!("+{added}")),
-                        )
-                        .child(
-                            div()
-                                .text_color(theme::hsla(p.failed))
-                                .child(format!("−{removed}")),
-                        )
-                        .when(staged > 0, |d| {
-                            d.child(div().text_color(theme::hsla(p.muted)).child(
-                                if staged == added + removed {
-                                    "· staged".to_string()
-                                } else {
-                                    format!("· {staged} staged")
-                                },
-                            ))
-                        }),
-                )
-                .when(can_split, |d| {
+                .when(!binary, |d| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .flex_row()
+                            .gap(px(6.))
+                            .child(
+                                div()
+                                    .text_color(theme::hsla(p.ok))
+                                    .child(format!("+{added}")),
+                            )
+                            .child(
+                                div()
+                                    .text_color(theme::hsla(p.failed))
+                                    .child(format!("−{removed}")),
+                            )
+                            .when(staged > 0, |d| {
+                                d.child(div().text_color(theme::hsla(p.muted)).child(
+                                    if staged == added + removed {
+                                        "· staged".to_string()
+                                    } else {
+                                        format!("· {staged} staged")
+                                    },
+                                ))
+                            }),
+                    )
+                })
+                .when(can_split && !binary, |d| {
                     d.child(
                         div()
                             .flex_none()
@@ -1129,12 +1288,7 @@ impl Render for DiffView {
                 .child("Reading the diff…")
                 .into_any_element()
         } else if binary {
-            div()
-                .flex_1()
-                .p(px(PAD + 4.))
-                .text_color(theme::hsla(p.muted))
-                .child("Binary file changed")
-                .into_any_element()
+            self.render_binary()
         } else if self.rows.is_empty() {
             div()
                 .flex_1()

@@ -102,6 +102,8 @@ pub struct FileDiff {
     pub staged: usize,
     /// The patch as git wrote it (Copy diff; `git apply` takes it).
     pub patch: String,
+    /// A binary file's sizes, and its pictures when it is an image.
+    pub binary_change: Option<crate::image_diff::BinaryChange>,
 }
 
 impl FileDiff {
@@ -205,6 +207,9 @@ pub fn load(root: &str, file: &FileChange) -> FileDiff {
                 &parse(&file.path, file.kind, &unstaged),
             );
         }
+    }
+    if diff.binary {
+        diff.binary_change = Some(crate::image_diff::load(root, &file.path));
     }
     highlight(&mut diff);
     diff

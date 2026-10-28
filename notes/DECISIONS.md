@@ -494,6 +494,17 @@ Newest at the bottom.
   first, `open -na … --args <repo> --line N <file>`, it opens the repository as the project
   and lands on the line ([d16](screenshots/diff/d16-intellij-at-line.png), 150:1). The first
   time, while the project is still opening, IntelliJ can lose the line; later Opens land.
+- **Changed images in the diff viewer.** A binary file whose name is an image (PNG, JPEG, GIF,
+  WebP, ICO) shows before (HEAD, `git cat-file blob HEAD:<path>`) and after (the worktree) side
+  by side, each fitted in a 420 px box (small ones up to 8×) over a checkerboard, its pixel
+  size and file size under it; a new file shows only "new", a deleted one only "deleted". The
+  format comes from the bytes (`image_diff::sniff`), never the name, and decoding uses the
+  custom icon's limits (10 MB, 4096 px) off the UI thread, in the diff's background read; an
+  image over them shows its sizes and says so. The pictures go to GPUI re-encoded as PNG (a
+  GIF's first frame), made again only when they change. SVG stays a text diff. Any other
+  binary file shows "Binary file · 12 KB → 14 KB". The image crate gains its gif, webp and ico
+  decoders (pure Rust; cargo-deny clean). ⌘C copies nothing for an image (there is no text);
+  Open uses the default app. The counts and the Unified/Split switch hide for binary files.
 - **Staged lines in the diff viewer.** The diff stays HEAD to the worktree; which of its
   changed lines are already in the index comes from two more diffs, read with it (and again
   with each refresh): `git diff --cached` (HEAD to the index) and `git diff` (the index to the

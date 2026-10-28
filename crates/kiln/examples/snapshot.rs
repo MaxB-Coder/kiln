@@ -2088,6 +2088,100 @@ fn diff_viewer(s: &mut Shots) {
     s.shot("d10-light");
     s.keystroke("escape");
     staged_shots(s, &demo, "light");
+    image_shots(s, &demo);
+}
+
+/// Changed images: modified (before and after), new, deleted, and one too large to show.
+fn image_shots(s: &mut Shots, demo: &Path) {
+    let git = |args: &[&str]| {
+        assert!(
+            std::process::Command::new("git")
+                .args(["-c", "user.name=K", "-c", "user.email=k@k", "-C"])
+                .arg(demo)
+                .args(args)
+                .status()
+                .unwrap()
+                .success(),
+            "git {args:?}"
+        );
+    };
+    // A round mark on a transparent square, in two colours.
+    let mark = |w: u32, h: u32, colour: [u8; 3]| {
+        let image = image::RgbaImage::from_fn(w, h, |x, y| {
+            let (dx, dy) = (x as f32 - w as f32 / 2., y as f32 - h as f32 / 2.);
+            let r = w.min(h) as f32 * 0.42;
+            if dx * dx + dy * dy < r * r {
+                image::Rgba([colour[0], colour[1], colour[2], 255])
+            } else {
+                image::Rgba([0, 0, 0, 0])
+            }
+        });
+        let mut out = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    };
+    std::fs::create_dir_all(demo.join("img")).unwrap();
+    std::fs::write(demo.join("img/icon.png"), mark(96, 96, [224, 123, 57])).unwrap();
+    std::fs::write(demo.join("img/old.png"), mark(64, 48, [104, 157, 106])).unwrap();
+    std::fs::write(demo.join("img/huge.png"), mark(4200, 8, [69, 133, 136])).unwrap();
+    git(&["add", "img"]);
+    git(&["commit", "-qm", "Images", "--", "img"]);
+    std::fs::write(demo.join("img/icon.png"), mark(128, 96, [69, 133, 136])).unwrap();
+    std::fs::remove_file(demo.join("img/old.png")).unwrap();
+    std::fs::write(demo.join("img/new.png"), mark(80, 80, [177, 98, 134])).unwrap();
+    std::fs::write(demo.join("img/huge.png"), mark(4300, 8, [69, 133, 136])).unwrap();
+    s.pump(Duration::from_millis(500));
+    s.action(Box::new(kiln::ShowChanges));
+    s.pump(Duration::from_millis(1500));
+    let view = s.workspace(|w| w.diff_view()).unwrap();
+    let change = |s: &mut Shots| {
+        s.cx.update(|cx| {
+            view.read(cx)
+                .file()
+                .map(|f| (f.path.clone(), f.binary_change.clone()))
+        })
+    };
+    let go_to = |s: &mut Shots, path: &str| {
+        for _ in 0..16 {
+            if change(s).is_some_and(|c| c.0 == path) {
+                return change(s).unwrap().1.expect("a binary change");
+            }
+            s.keystroke("]");
+            s.pump(Duration::from_millis(500));
+        }
+        panic!("no {path} in the changes");
+    };
+    use kiln::image_diff::Status;
+    let c = go_to(s, "img/icon.png");
+    assert_eq!(c.status(), Status::Modified);
+    let sizes = |c: &kiln::image_diff::BinaryChange| {
+        [&c.before, &c.after].map(|side| {
+            side.as_ref()
+                .and_then(|s| s.picture.as_ref())
+                .map(|p| (p.width, p.height))
+        })
+    };
+    assert_eq!(sizes(&c), [Some((96, 96)), Some((128, 96))]);
+    s.shot("d17-image-modified");
+    let c = go_to(s, "img/new.png");
+    assert_eq!(
+        (c.status(), sizes(&c)),
+        (Status::New, [None, Some((80, 80))])
+    );
+    s.shot("d18-image-new");
+    let c = go_to(s, "img/old.png");
+    assert_eq!(
+        (c.status(), sizes(&c)),
+        (Status::Deleted, [Some((64, 48)), None])
+    );
+    s.shot("d19-image-deleted");
+    let c = go_to(s, "img/huge.png");
+    assert_eq!(sizes(&c), [None, None], "over 4096 px: sizes only");
+    assert!(c.summary().starts_with("Binary file · "), "{}", c.summary());
+    s.shot("d20-image-too-large");
+    s.keystroke("escape");
 }
 
 /// The staged marks: a file all staged (docs/deploy.md, added with `git add`), one not staged
