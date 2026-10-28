@@ -1,7 +1,9 @@
 //! One file's changes for the diff viewer: `git diff` against HEAD (staged and unstaged
 //! together; an untracked file as new), parsed into hunks and lines, and laid out as rows for
-//! the unified and the split views. Copies take the lines' text only, never the gutter.
+//! the unified and the split views. Copies take the lines' text only, never the gutter. Changed
+//! lines already in the index are marked staged (`mark_staged`).
 
+use std::collections::HashSet;
 use std::process::{Command, Stdio};
 
 use crate::git::FileChange;
@@ -28,6 +30,8 @@ pub struct DiffLine {
     pub text: String,
     /// Syntax colouring: (from, to, kind) in shown columns; empty for plain text.
     pub tokens: Vec<(usize, usize, Token)>,
+    /// An added or removed line that is in the index already (`git add`ed).
+    pub staged: bool,
 }
 
 /// What a stretch of code is, for its colour (the theme picks the colour).
@@ -48,6 +52,30 @@ pub struct Hunk {
     pub lines: Vec<DiffLine>,
 }
 
+/// How much of a hunk is staged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Staged {
+    None,
+    Part,
+    All,
+}
+
+impl Hunk {
+    pub fn staged(&self) -> Staged {
+        let changed = self.lines.iter().filter(|l| l.kind != LineKind::Context);
+        let (mut staged, mut total) = (0, 0);
+        for line in changed {
+            total += 1;
+            staged += usize::from(line.staged);
+        }
+        match staged {
+            0 => Staged::None,
+            s if s == total => Staged::All,
+            _ => Staged::Part,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FileDiff {
     pub path: String,
@@ -57,6 +85,8 @@ pub struct FileDiff {
     pub hunks: Vec<Hunk>,
     pub added: usize,
     pub removed: usize,
+    /// How many of the added and removed lines are staged.
+    pub staged: usize,
     /// The patch as git wrote it (Copy diff; `git apply` takes it).
     pub patch: String,
 }
@@ -139,6 +169,7 @@ pub fn parse(path: &str, kind: char, patch: &str) -> FileDiff {
             new: n,
             text: text.to_string(),
             tokens: Vec::new(),
+            staged: false,
         });
     }
     diff
@@ -155,8 +186,101 @@ pub fn load(root: &str, file: &FileChange) -> FileDiff {
         .or_else(|| git_diff(root, &["--no-index", "--", "/dev/null", &file.path]))
         .unwrap_or_default();
     let mut diff = parse(&file.path, file.kind, &patch);
+    if tracked {
+        // HEAD to the index, and the index to the worktree.
+        let staged = git_diff(root, &["--cached", "--", &file.path]);
+        let unstaged = git_diff(root, &["--", &file.path]);
+        if let (Some(staged), Some(unstaged)) = (staged, unstaged) {
+            mark_staged(
+                &mut diff,
+                &parse(&file.path, file.kind, &staged),
+                &parse(&file.path, file.kind, &unstaged),
+            );
+        }
+    }
     highlight(&mut diff);
     diff
+}
+
+/// Marks the lines of `diff` (HEAD to the worktree) that are staged, from `staged` (HEAD to the
+/// index) and `unstaged` (the index to the worktree). A removed line is staged when the index
+/// has removed it too: both diffs number it in HEAD. An added line is staged when it is in the
+/// index as added: its worktree number maps to an index number through `unstaged` (a line
+/// `unstaged` adds is not in the index at all), and `staged` adds that index line.
+pub fn mark_staged(diff: &mut FileDiff, staged: &FileDiff, unstaged: &FileDiff) {
+    let lines = |d: &FileDiff, kind: LineKind| -> HashSet<u32> {
+        d.hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .filter(|l| l.kind == kind)
+            .filter_map(|l| {
+                if kind == LineKind::Removed {
+                    l.old
+                } else {
+                    l.new
+                }
+            })
+            .collect()
+    };
+    let removed_in_index = lines(staged, LineKind::Removed);
+    let added_in_index = lines(staged, LineKind::Added);
+    let mut count = 0;
+    for line in diff.hunks.iter_mut().flat_map(|h| &mut h.lines) {
+        line.staged = match line.kind {
+            LineKind::Context => false,
+            LineKind::Removed => line.old.is_some_and(|o| removed_in_index.contains(&o)),
+            LineKind::Added => line
+                .new
+                .and_then(|n| old_number(unstaged, n))
+                .is_some_and(|i| added_in_index.contains(&i)),
+        };
+        count += usize::from(line.staged);
+    }
+    diff.staged = count;
+}
+
+/// A new-side line number's number on the old side of `diff`; `None` when `diff` adds it.
+fn old_number(diff: &FileDiff, new: u32) -> Option<u32> {
+    // Old minus new, from the hunks before.
+    let mut shift: i64 = 0;
+    for hunk in &diff.hunks {
+        let (start, count) = new_range(&hunk.header);
+        // A hunk with no new lines comes after line `start`.
+        let before = if count == 0 {
+            new <= start
+        } else {
+            new < start
+        };
+        if before {
+            break;
+        }
+        if let Some(line) = hunk.lines.iter().find(|l| l.new == Some(new)) {
+            return line.old;
+        }
+        let added = hunk
+            .lines
+            .iter()
+            .filter(|l| l.kind == LineKind::Added)
+            .count() as i64;
+        let removed = hunk
+            .lines
+            .iter()
+            .filter(|l| l.kind == LineKind::Removed)
+            .count() as i64;
+        shift += removed - added;
+    }
+    u32::try_from(i64::from(new) + shift).ok()
+}
+
+/// "@@ -a,b +c,d @@": (c, d), d being 1 when left out.
+fn new_range(header: &str) -> (u32, u32) {
+    let part = header
+        .split(' ')
+        .find_map(|p| p.strip_prefix('+'))
+        .unwrap_or("1");
+    let mut numbers = part.split(',').map(|n| n.parse::<u32>().unwrap_or(1));
+    let start = numbers.next().unwrap_or(1);
+    (start, numbers.next().unwrap_or(1))
 }
 
 /// The grammars syntect ships, loaded once (on the first diff opened).
@@ -680,6 +804,44 @@ index 1111111..2222222 100644
     }
 
     #[test]
+    fn staged_lines_map_through_the_index() {
+        // HEAD: a b c d e f g h. The index: line 2 changed (B), a line added after f (f2).
+        // The worktree: that, plus "new" at the top and line 7 removed (g), unstaged.
+        let head_to_index = "@@ -2 +2 @@\n-b\n+B\n@@ -6,0 +7 @@\n+f2\n";
+        let index_to_worktree = "@@ -0,0 +1 @@\n+new\n@@ -8 +8,0 @@\n-g\n";
+        let head_to_worktree = "@@ -1,8 +1,9 @@\n+new\n a\n-b\n+B\n c\n d\n e\n f\n+f2\n-g\n h\n";
+        let mut diff = parse("f", 'M', head_to_worktree);
+        mark_staged(
+            &mut diff,
+            &parse("f", 'M', head_to_index),
+            &parse("f", 'M', index_to_worktree),
+        );
+        let marks: Vec<(&str, bool)> = diff.hunks[0]
+            .lines
+            .iter()
+            .filter(|l| l.kind != LineKind::Context)
+            .map(|l| (l.text.as_str(), l.staged))
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                ("new", false),
+                ("b", true),
+                ("B", true),
+                ("f2", true),
+                ("g", false)
+            ]
+        );
+        assert_eq!(diff.staged, 3);
+        // Line numbers through a diff: before, inside and after its hunks.
+        let unstaged = parse("f", 'M', index_to_worktree);
+        assert_eq!(old_number(&unstaged, 1), None, "added in the worktree");
+        assert_eq!(old_number(&unstaged, 2), Some(1));
+        assert_eq!(old_number(&unstaged, 8), Some(7));
+        assert_eq!(old_number(&unstaged, 9), Some(9), "after the removed line");
+    }
+
+    #[test]
     fn words_for_double_click() {
         assert_eq!(word_at("let foo_bar = 1;", 6), (4, 11));
         assert_eq!(word_at("a + b", 2), (2, 3));
@@ -723,6 +885,23 @@ index 1111111..2222222 100644
             },
         );
         assert_eq!((modified.added, modified.removed), (2, 1));
+        // "two" to "TWO" is staged; "three" is not.
+        let marks: Vec<(LineKind, &str, bool)> = modified.hunks[0]
+            .lines
+            .iter()
+            .map(|l| (l.kind, l.text.as_str(), l.staged))
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                (LineKind::Context, "one", false),
+                (LineKind::Removed, "two", true),
+                (LineKind::Added, "TWO", true),
+                (LineKind::Added, "three", false),
+            ]
+        );
+        assert_eq!(modified.staged, 2);
+        assert_eq!(modified.hunks[0].staged(), Staged::Part);
         let untracked = load(
             &root,
             &FileChange {

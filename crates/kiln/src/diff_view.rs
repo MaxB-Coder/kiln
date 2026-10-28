@@ -617,6 +617,28 @@ impl DiffView {
         (from < to).then_some(from..to)
     }
 
+    /// Hunk `h`'s header, and its "staged" tag when some of it is.
+    fn hunk_header(&self, h: usize) -> (String, Option<Div>) {
+        let p = palette();
+        let Some(hunk) = self.diff.as_ref().and_then(|d| d.hunks.get(h)) else {
+            return (String::new(), None);
+        };
+        let tag = match hunk.staged() {
+            diff::Staged::None => None,
+            diff::Staged::Part => Some("partly staged"),
+            diff::Staged::All => Some("staged"),
+        };
+        let tag = tag.map(|tag| {
+            div()
+                .flex_none()
+                .ml_auto()
+                .pl(px(PAD))
+                .text_color(theme::hsla(p.muted))
+                .child(tag)
+        });
+        (hunk.header.clone(), tag)
+    }
+
     fn render_rows(
         &mut self,
         range: Range<usize>,
@@ -695,15 +717,11 @@ impl DiffView {
             .overflow_hidden();
         match &self.rows[ix] {
             Row::Hunk(h) => {
-                let header = self
-                    .diff
-                    .as_ref()
-                    .and_then(|d| d.hunks.get(*h))
-                    .map(|h| h.header.clone())
-                    .unwrap_or_default();
+                let (header, staged) = self.hunk_header(*h);
                 row.bg(theme::hsla(theme::blend(p.bar, p.bg1, 0.6)))
                     .text_color(theme::hsla(p.muted))
                     .child(header)
+                    .children(staged)
                     .into_any_element()
             }
             Row::Line(line) => {
@@ -714,6 +732,8 @@ impl DiffView {
                 };
                 let text = self.render_text(line, self.selected_columns(ix), &self.matches_on(ix));
                 row.when_some(bg, |d, bg| d.bg(theme::hsla(bg)))
+                    .relative()
+                    .when(line.staged, |d| d.child(staged_bar()))
                     .cursor_text()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -839,16 +859,12 @@ impl DiffView {
             .whitespace_nowrap();
         match &self.split[ix] {
             SplitRow::Hunk(h) => {
-                let header = self
-                    .diff
-                    .as_ref()
-                    .and_then(|d| d.hunks.get(*h))
-                    .map(|h| h.header.clone())
-                    .unwrap_or_default();
+                let (header, staged) = self.hunk_header(*h);
                 row.px(px(PAD))
                     .bg(theme::hsla(theme::blend(p.bar, p.bg1, 0.6)))
                     .text_color(theme::hsla(p.muted))
                     .child(header)
+                    .children(staged)
                     .into_any_element()
             }
             SplitRow::Pair(left, right) => {
@@ -871,7 +887,11 @@ impl DiffView {
                         .flex_row()
                         .items_center()
                         .overflow_hidden()
+                        .relative()
                         .when_some(bg, |d, bg| d.bg(theme::hsla(bg)))
+                        .when(line.as_ref().is_some_and(|l| l.staged), |d| {
+                            d.child(staged_bar())
+                        })
                         .when_some(line.as_ref(), |d, line| {
                             d.cursor_text()
                                 .child(number(if old { line.old } else { line.new }))
@@ -915,6 +935,17 @@ impl DiffView {
     }
 }
 
+/// The thin bar in the gutter beside a staged line.
+fn staged_bar() -> Div {
+    div()
+        .absolute()
+        .left(px(PAD / 2. - 1.))
+        .top_0()
+        .h_full()
+        .w(px(2.))
+        .bg(theme::hsla(palette().ok))
+}
+
 impl Focusable for DiffView {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
         self.focus.clone()
@@ -930,6 +961,7 @@ impl Render for DiffView {
         if !can_split && self.mode == Mode::Split {
             self.mode = Mode::Unified;
         }
+        let staged = self.diff.as_ref().map_or(0, |d| d.staged);
         let (path, kind, added, removed, binary, loaded) = match &self.diff {
             Some(d) => (d.path.clone(), d.kind, d.added, d.removed, d.binary, true),
             None => (
@@ -1006,7 +1038,16 @@ impl Render for DiffView {
                             div()
                                 .text_color(theme::hsla(p.failed))
                                 .child(format!("−{removed}")),
-                        ),
+                        )
+                        .when(staged > 0, |d| {
+                            d.child(div().text_color(theme::hsla(p.muted)).child(
+                                if staged == added + removed {
+                                    "· staged".to_string()
+                                } else {
+                                    format!("· {staged} staged")
+                                },
+                            ))
+                        }),
                 )
                 .when(can_split, |d| {
                     d.child(

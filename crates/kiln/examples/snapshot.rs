@@ -7,7 +7,7 @@
 //! [phase1|phase2|phase3|prompt|shortcuts|concept]
 //! (default: notes/screenshots/phase1, scenario phase1)
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -2063,6 +2063,7 @@ fn diff_viewer(s: &mut Shots) {
     s.keystroke("escape");
     assert!(!rail_keys(s).unwrap().0, "Esc again: back to the terminal");
     s.keystroke(if mac { "cmd-i" } else { "ctrl-shift-i" });
+    staged_shots(s, &demo, "dark");
 
     // Kiln Light.
     std::fs::write(
@@ -2085,6 +2086,65 @@ fn diff_viewer(s: &mut Shots) {
         s.pump(Duration::from_millis(500));
     }
     s.shot("d10-light");
+    s.keystroke("escape");
+    staged_shots(s, &demo, "light");
+}
+
+/// The staged marks: a file all staged (docs/deploy.md, added with `git add`), one not staged
+/// (src/routes.js), and the same one partly staged (staged, then changed again).
+fn staged_shots(s: &mut Shots, demo: &Path, theme: &str) {
+    let git = |args: &[&str]| {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(demo)
+                .args(args)
+                .status()
+                .unwrap()
+                .success(),
+            "git {args:?}"
+        );
+    };
+    s.action(Box::new(kiln::ShowChanges));
+    s.pump(Duration::from_millis(1500));
+    let view = s.workspace(|w| w.diff_view()).unwrap();
+    let file = |s: &mut Shots| {
+        s.cx.update(|cx| {
+            view.read(cx)
+                .file()
+                .map(|f| (f.path.clone(), f.added + f.removed, f.staged))
+        })
+    };
+    let go_to = |s: &mut Shots, path: &str| {
+        for _ in 0..12 {
+            if file(s).is_some_and(|f| f.0 == path) {
+                return;
+            }
+            s.keystroke("]");
+            s.pump(Duration::from_millis(500));
+        }
+        panic!("no {path} in the changes");
+    };
+    go_to(s, "docs/deploy.md");
+    let (_, changed, staged) = file(s).unwrap();
+    assert!(changed > 0 && staged == changed, "all staged");
+    s.shot(&format!("d13-staged-all-{theme}"));
+    go_to(s, "src/routes.js");
+    let (_, changed, staged) = file(s).unwrap();
+    assert!(changed > 0 && staged == 0, "nothing staged");
+    s.shot(&format!("d14-unstaged-{theme}"));
+    // Staged, then changed again: the new line is not staged.
+    let routes = demo.join("src/routes.js");
+    let text = std::fs::read_to_string(&routes).unwrap();
+    git(&["add", "src/routes.js"]);
+    std::fs::write(&routes, format!("{text}module.exports.later = true;\n")).unwrap();
+    s.pump(Duration::from_millis(3000));
+    let (_, changed, staged) = file(s).unwrap();
+    assert_eq!(staged, changed - 1, "all but the later line staged");
+    s.shot(&format!("d15-staged-part-{theme}"));
+    std::fs::write(&routes, text).unwrap();
+    git(&["reset", "-q", "src/routes.js"]);
+    s.keystroke("escape");
 }
 
 fn demo_project() -> PathBuf {

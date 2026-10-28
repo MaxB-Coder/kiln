@@ -71,7 +71,8 @@ resize it (double-click the edge for its default width); the terminal always kee
 columns, and the widths come back with your sessions.
 
 Click a file in the rail's Changes (or "Show changes" in the palette) for its diff against
-HEAD, staged and unstaged together: unified or side by side, with line numbers. Select with
+HEAD, staged and unstaged together (staged lines have a green bar beside them, and their
+hunks say "staged"): unified or side by side, with line numbers. Select with
 the mouse (double-click a word, triple-click a line, shift-click to extend); ⌘C copies just
 the code, ⌘A the whole new side, "Copy diff" a patch `git apply` takes. ↑↓ or j/k scroll,
 Space pages, n/p jump between hunks, [ and ] between files, ⌘F finds, ⌘O opens the file at the first change

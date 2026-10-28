@@ -482,8 +482,19 @@ Newest at the bottom.
   /Applications or ~/Applications on macOS, so none needs its command-line tool installed: the
   command inside the bundle where there is one, else `open -na App --args --line N f`, which
   hands the file to the running IDE; elsewhere by their command on the PATH. The list offers
-  only what is installed; the file takes any name or command. Not
-  done: a "staged" marker on hunks (the combined diff has no clean mapping back).
+  only what is installed; the file takes any name or command.
+- **Staged lines in the diff viewer.** The diff stays HEAD to the worktree; which of its
+  changed lines are already in the index comes from two more diffs, read with it (and again
+  with each refresh): `git diff --cached` (HEAD to the index) and `git diff` (the index to the
+  worktree). A removed line is staged when the index removed it too (both number it in HEAD).
+  An added line is staged when its worktree number, mapped through the index-to-worktree diff
+  to an index number, is a line the cached diff adds; a line that diff adds itself is not in
+  the index (`diff::mark_staged`, `old_number`). Staged lines get a 2 px bar in the ok colour
+  in the gutter; unstaged lines look as before. A hunk with staged lines says "staged" (or
+  "partly staged") in muted text at the right of its header, and the header's "+N −M" gains
+  "· N staged" (changed lines, as +N −M counts them), or "· staged" when all of it is. Display
+  only: staging stays git's. Untracked files have nothing staged and skip the two reads. The
+  rail's Changes list is unchanged (its letter already says index or worktree).
 - **The rail with the keyboard.** ⌘⇧I (Ctrl+Alt+Shift+I: Ctrl+Shift+I is the rail itself)
   takes the keyboard to the rail, opening it if it is closed, and back to the terminal when it
   is there. ↑↓ or j/k choose among the changed files shown, Home/End the first and last, Enter
