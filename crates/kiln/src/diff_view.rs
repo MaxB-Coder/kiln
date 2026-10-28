@@ -31,10 +31,12 @@ const REFRESH: Duration = Duration::from_millis(1500);
 
 pub enum DiffEvent {
     Dismiss,
-    /// Open the file in the editor at a line.
+    /// Open the file in the editor at a line (an absolute path); a binary file (an image, say)
+    /// in its default app instead.
     OpenInEditor {
         path: std::path::PathBuf,
         line: u32,
+        binary: bool,
     },
 }
 
@@ -282,10 +284,37 @@ impl DiffView {
         let (Some((root, file)), Some(diff)) = (self.current_file(), self.diff.as_ref()) else {
             return;
         };
+        // A deleted file is not there to open.
+        if diff.kind == 'D' {
+            return;
+        }
         cx.emit(DiffEvent::OpenInEditor {
             path: std::path::Path::new(&root).join(&file.path),
-            line: diff.first_changed_line(),
+            line: self.line_in_view(),
+            binary: diff.binary,
         });
+    }
+
+    /// The first change of the hunk at the top of the view (the first hunk above the top row,
+    /// else the first one).
+    fn line_in_view(&self) -> u32 {
+        let Some(diff) = self.diff.as_ref() else {
+            return 1;
+        };
+        let top = top_row(&self.scroll);
+        let hunk = match self.mode {
+            Mode::Unified => self.rows.iter().take(top + 1).rev().find_map(|r| match r {
+                Row::Hunk(h) => Some(*h),
+                Row::Line(_) => None,
+            }),
+            Mode::Split => self.split.iter().take(top + 1).rev().find_map(|r| match r {
+                SplitRow::Hunk(h) => Some(*h),
+                SplitRow::Pair(..) => None,
+            }),
+        };
+        diff.hunks
+            .get(hunk.unwrap_or(0))
+            .map_or(1, diff::Hunk::first_changed_line)
     }
 
     // ----- moving --------------------------------------------------------------------------
@@ -1183,10 +1212,19 @@ impl Render for DiffView {
                 action("diff-path", "Copy path")
                     .on_click(cx.listener(|this, _, _, cx| this.copy_path(cx))),
             )
-            .child(
-                action("diff-open", "Open")
+            .when(kind != 'D', |d| {
+                d.child(
+                    action(
+                        "diff-open",
+                        if binary {
+                            "Open in default app"
+                        } else {
+                            "Open"
+                        },
+                    )
                     .on_click(cx.listener(|this, _, _, cx| this.open_in_editor(cx))),
-            );
+                )
+            });
 
         div()
             .id("diff-view")

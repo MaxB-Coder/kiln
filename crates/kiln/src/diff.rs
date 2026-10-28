@@ -61,6 +61,19 @@ pub enum Staged {
 }
 
 impl Hunk {
+    /// Where the hunk's first change is in the new file: an added line's number, or for a
+    /// removed one the line after the context before it.
+    pub fn first_changed_line(&self) -> u32 {
+        let mut last_new = new_range(&self.header).0.saturating_sub(1);
+        for line in &self.lines {
+            if line.kind != LineKind::Context {
+                return line.new.unwrap_or(last_new + 1);
+            }
+            last_new = line.new.unwrap_or(last_new);
+        }
+        last_new.max(1)
+    }
+
     pub fn staged(&self) -> Staged {
         let changed = self.lines.iter().filter(|l| l.kind != LineKind::Context);
         let (mut staged, mut total) = (0, 0);
@@ -94,12 +107,7 @@ pub struct FileDiff {
 impl FileDiff {
     /// The first changed line in the new file (Open in editor goes there).
     pub fn first_changed_line(&self) -> u32 {
-        self.hunks
-            .iter()
-            .flat_map(|h| &h.lines)
-            .find(|l| l.kind != LineKind::Context)
-            .and_then(|l| l.new.or(l.old))
-            .unwrap_or(1)
+        self.hunks.first().map_or(1, Hunk::first_changed_line)
     }
 }
 
@@ -801,6 +809,21 @@ index 1111111..2222222 100644
         let mut plain = parse("notes.xyz", 'M', "@@ -1 +1 @@\n-a\n+b\n");
         highlight(&mut plain);
         assert!(plain.hunks[0].lines.iter().all(|l| l.tokens.is_empty()));
+    }
+
+    #[test]
+    fn each_hunk_knows_its_first_change() {
+        let diff = parse("routes.js", 'M', PATCH);
+        assert_eq!(
+            diff.hunks[0].first_changed_line(),
+            2,
+            "the added line after context"
+        );
+        assert_eq!(diff.hunks[1].first_changed_line(), 11);
+        // Only removed lines: where they were, in the new file.
+        let removal = parse("f", 'M', "@@ -1,3 +1,2 @@\n a\n-b\n c\n");
+        assert_eq!(removal.hunks[0].first_changed_line(), 2);
+        assert_eq!(removal.first_changed_line(), 2);
     }
 
     #[test]

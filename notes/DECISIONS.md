@@ -483,6 +483,17 @@ Newest at the bottom.
   command inside the bundle where there is one, else `open -na App --args --line N f`, which
   hands the file to the running IDE; elsewhere by their command on the PATH. The list offers
   only what is installed; the file takes any name or command.
+- **Open from the diff viewer, checked against IntelliJ.** A report of IntelliJ "opening a
+  png": the viewer was on a regenerated PNG (the kiln repository's changes at the time), and
+  Open sent it there with `--line 1`. Now a binary file opens in its default app ("Open in
+  default app"), a deleted one has no Open, and the line is the first change of the hunk at the
+  top of the view. Paths are always absolute (`std::path::absolute`). Tried for real with
+  IntelliJ IDEA 2026.2: `open -na … --args --line N file` opens the right file, but IntelliJ
+  puts a file outside an open project in LightEdit, which ignores the line (and so does the
+  bundle's own `idea` launcher, and `idea://open?file=…&line=…`). With the file's repository
+  first, `open -na … --args <repo> --line N <file>`, it opens the repository as the project
+  and lands on the line ([d16](screenshots/diff/d16-intellij-at-line.png), 150:1). The first
+  time, while the project is still opening, IntelliJ can lose the line; later Opens land.
 - **Staged lines in the diff viewer.** The diff stays HEAD to the worktree; which of its
   changed lines are already in the index comes from two more diffs, read with it (and again
   with each refresh): `git diff --cached` (HEAD to the index) and `git diff` (the index to the

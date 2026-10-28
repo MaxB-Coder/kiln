@@ -1250,8 +1250,12 @@ impl Workspace {
         }
         let events = cx.subscribe_in(&view, window, |this, _, event, window, cx| match event {
             DiffEvent::Dismiss => this.close_diff(window, cx),
-            DiffEvent::OpenInEditor { path, line } => {
-                this.open_in_editor(path.clone(), *line, window, cx)
+            DiffEvent::OpenInEditor { path, line, binary } => {
+                if *binary {
+                    cx.open_with_system(path);
+                } else {
+                    this.open_in_editor(path.clone(), *line, window, cx)
+                }
             }
         });
         self.diff = Some((view, events));

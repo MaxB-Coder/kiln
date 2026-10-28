@@ -195,6 +195,14 @@ fn line_args(style: LineStyle, file: &str, line: u32) -> Vec<String> {
     }
 }
 
+/// The repository a file is in: the nearest folder above it with a `.git`.
+fn project_of(file: &Path) -> Option<PathBuf> {
+    file.ancestors()
+        .skip(1)
+        .find(|dir| dir.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
 /// For a shell: `'it''s'` style quoting.
 fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
@@ -209,6 +217,8 @@ pub fn plan(
     path: &Path,
     line: u32,
 ) -> Launch {
+    // An IDE resolves a relative path against its own folder, not the repository's.
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let file = path.to_string_lossy().to_string();
     let setting = setting.trim();
     match setting {
@@ -231,7 +241,15 @@ pub fn plan(
 /// An installed IDE: the command in its bundle, or `open -na App --args …` (macOS); its
 /// command elsewhere.
 fn ide_plan(ide: &Ide, place: &Path, file: &str, line: u32) -> Launch {
-    let args = line_args(ide.style, file, line);
+    let mut args = line_args(ide.style, file, line);
+    // JetBrains IDEs ignore --line in LightEdit, their mode for a file outside any open
+    // project: so the file's repository goes first, opened (or found already open) as the
+    // project, and the file opens in it at the line.
+    if ide.style == LineStyle::DashLine
+        && let Some(project) = project_of(Path::new(file))
+    {
+        args.insert(0, project.to_string_lossy().to_string());
+    }
     if !cfg!(target_os = "macos") {
         return Launch::App {
             program: place.to_path_buf(),
@@ -395,6 +413,72 @@ mod tests {
                 args: vec![format!("{FILE}:12")]
             }
         );
+    }
+
+    #[test]
+    fn jetbrains_ides_get_the_line_and_an_absolute_path() {
+        let app = PathBuf::from("/Applications/IntelliJ IDEA.app");
+        let launch = plan(
+            "IntelliJ IDEA",
+            None,
+            |_| Some(app.clone()),
+            Path::new("src/main.rs"),
+            7,
+        );
+        let file = std::env::current_dir()
+            .unwrap()
+            .join("src/main.rs")
+            .to_string_lossy()
+            .to_string();
+        // The test runs inside Kiln's repository, which goes first as the project.
+        let project: Vec<String> = project_of(Path::new(&file))
+            .map(|p| p.to_string_lossy().to_string())
+            .into_iter()
+            .collect();
+        let expected = if cfg!(target_os = "macos") {
+            Launch::App {
+                program: "/usr/bin/open".into(),
+                args: vec![
+                    "-na".into(),
+                    app.to_string_lossy().to_string(),
+                    "--args".into(),
+                ]
+                .into_iter()
+                .chain(project.clone())
+                .chain(["--line".into(), "7".into(), file])
+                .collect(),
+            }
+        } else {
+            Launch::App {
+                program: app,
+                args: project
+                    .into_iter()
+                    .chain(["--line".into(), "7".into(), file])
+                    .collect(),
+            }
+        };
+        assert_eq!(launch, expected);
+    }
+
+    #[test]
+    fn jetbrains_ides_open_the_files_repository_as_the_project() {
+        let repo = std::env::temp_dir().join(format!("kiln-editor-{}", std::process::id()));
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        let file = repo.join("src/main.rs");
+        let app = PathBuf::from("/Applications/IntelliJ IDEA.app");
+        let launch = plan("IntelliJ IDEA", None, |_| Some(app.clone()), &file, 9);
+        let tail: Vec<String> = vec![
+            repo.to_string_lossy().to_string(),
+            "--line".into(),
+            "9".into(),
+            file.to_string_lossy().to_string(),
+        ];
+        let Launch::App { args, .. } = launch else {
+            panic!("{launch:?}");
+        };
+        assert!(args.ends_with(&tail), "{args:?}");
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]
