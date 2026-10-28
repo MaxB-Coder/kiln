@@ -448,4 +448,26 @@ Newest at the bottom.
   pane under the mouse cannot keep the moves. The widths go into the saved sessions
   (`WindowState.sidebar_width`, `rail_width`; older files read as the defaults), not the
   config. No key binding.
+- **Diff viewer.** A file in the rail's Changes (or "Show changes", the focused session's first
+  changed file) opens a pop-up over the window: 90% of it, the veil, the bar colour with the
+  bg1 ring, radius 12. It replaces the pane that paged `git diff` through `less`. The data is
+  `git diff --no-color --no-ext-diff --no-textconv HEAD -- <file>` (staged and unstaged
+  together; an untracked file, or one in a repository with no commit, through `--no-index`
+  against /dev/null, so it shows as new and its patch applies), read off the UI thread with
+  the rail's precautions (no fsmonitor, no prompts, no optional locks), and again every 1.5 s
+  while open, keeping the scroll place. `diff::parse` makes hunks and lines with both line
+  numbers; binary files say so; deleted files show all removed. Unified is the default; Split
+  pairs each run of removed lines with the added run after it and shows only from 120 columns.
+  Added and removed lines sit on the ok and failed colours at 16% over the bar; no syntax
+  colours (plain text, which keeps it cheap). Rows go through `uniform_list`, and past 5,000
+  rows a "Show all" row ends the list. Selection is by shown column (tabs shown at four),
+  mapped back to the file's characters, so ⌘C pastes as code: no numbers, no +/−, tabs kept,
+  hunk headers left out. ⌘A selects the new side (context and added lines). Copy diff copies
+  git's patch as is. Keys: ↑↓ j k, Space/PageDown, n/p, [ ], ⌘F (its own find over the rows,
+  in Kiln's find bar style), ⌘O, Esc. ⌘O uses `$VISUAL`/`$EDITOR`, from Kiln's environment or,
+  as an app started from the Dock has neither, the login shell's (`editor::user_editor`); each
+  known editor gets the line its way (`code -g f:12`, `nvim +12 f`, `hx f:12`, `subl f:12`, …),
+  terminal editors open in a new session, and with none set the system opens the file. Not
+  done: a "staged" marker on hunks (the combined diff has no clean mapping back), Enter on a
+  rail file (the rail takes no keyboard focus yet), selecting in the split view.
 

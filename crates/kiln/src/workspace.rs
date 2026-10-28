@@ -36,8 +36,8 @@ use crate::{
     Find, FocusNextPane, FocusPrevPane, InstallUpdate, NewSession, NewWindow, NextSession,
     OpenConfigFile, PrevSession, ProjectColour, Quit, RenameProject, RenameSession, SelectSession1,
     SelectSession2, SelectSession3, SelectSession4, SelectSession5, SelectSession6, SelectSession7,
-    SelectSession8, SelectSession9, SplitRight, ToggleFocusMode, ToggleRail, ToggleShortcuts,
-    ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
+    SelectSession8, SelectSession9, ShowChanges, SplitRight, ToggleFocusMode, ToggleRail,
+    ToggleShortcuts, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 
 /// Height of the strip at the top that holds the window controls.
@@ -228,6 +228,8 @@ pub struct Workspace {
     palette: Option<(Entity<CommandPalette>, Subscription)>,
     shortcuts: Option<(Entity<ShortcutsView>, Subscription)>,
     settings: Option<(Entity<SettingsView>, Subscription)>,
+    /// The diff viewer, over everything.
+    diff: Option<(Entity<crate::diff_view::DiffView>, Subscription)>,
     renaming: Option<Renaming>,
     sidebar_menu: Option<SidebarMenu>,
     colour_menu: Option<ColourMenu>,
@@ -279,6 +281,7 @@ impl Workspace {
             search: None,
             palette: None,
             shortcuts: None,
+            diff: None,
             renaming: None,
             sidebar_menu: None,
             colour_menu: None,
@@ -911,6 +914,7 @@ impl Workspace {
         action("Rename session", Box::new(RenameSession));
         action("Rename project", Box::new(RenameProject));
         action("Project colour", Box::new(ProjectColour));
+        action("Show changes", Box::new(ShowChanges));
         action("Toggle sidebar", Box::new(ToggleSidebar));
         action("Toggle context rail", Box::new(ToggleRail));
         action("Focus mode", Box::new(ToggleFocusMode));
@@ -1220,6 +1224,97 @@ impl Workspace {
             .get(self.active)
             .map(|(project, label)| naming::breadcrumb(project.as_deref(), label))
             .unwrap_or_default()
+    }
+
+    // ----- the diff viewer ----------------------------------------------------------------
+
+    /// Opens the diff viewer on `files[index]` of the repository at `root` (`[` and `]` move
+    /// through `files`).
+    pub fn open_changes(
+        &mut self,
+        root: String,
+        files: Vec<crate::git::FileChange>,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::diff_view::{DiffEvent, DiffView};
+        self.palette = None;
+        self.shortcuts = None;
+        self.settings = None;
+        let metrics = self.metrics;
+        let view = cx.new(|cx| DiffView::new(root, files, index, metrics, window, cx));
+        let events = cx.subscribe_in(&view, window, |this, _, event, window, cx| match event {
+            DiffEvent::Dismiss => {
+                this.diff = None;
+                this.focus_active(window, cx);
+                cx.notify();
+            }
+            DiffEvent::OpenInEditor { path, line } => {
+                this.open_in_editor(path.clone(), *line, window, cx)
+            }
+        });
+        self.diff = Some((view, events));
+        cx.notify();
+    }
+
+    /// The diff viewer, while it is open (the snapshots drive it).
+    pub fn diff_view(&self) -> Option<Entity<crate::diff_view::DiffView>> {
+        self.diff.as_ref().map(|(view, _)| view.clone())
+    }
+
+    /// "Show changes": the focused session's repository, at its first changed file.
+    fn show_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(cwd) = self.focused_cwd(cx) else {
+            return;
+        };
+        let task = cx.background_spawn(async move { crate::git::status(&cwd.to_string_lossy()) });
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(status) = task.await.filter(|s| !s.files.is_empty()) else {
+                return;
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.open_changes(status.root, status.files, 0, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Opens `path` in the user's editor at `line` (see `editor`).
+    fn open_in_editor(
+        &mut self,
+        path: PathBuf,
+        line: u32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::editor::Launch;
+        let task = cx.background_spawn(async move { crate::editor::user_editor() });
+        cx.spawn_in(window, async move |this, cx| {
+            let editor = task.await;
+            let launch = crate::editor::plan(editor.as_deref(), &path, line);
+            let _ = this.update_in(cx, |this, window, cx| match launch {
+                Launch::App { program, args } => {
+                    let spawned = std::process::Command::new(&program)
+                        .args(&args)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
+                    if let Err(err) = spawned {
+                        log::warn!("could not start {program}: {err}");
+                        cx.open_with_system(&path);
+                    }
+                }
+                Launch::Terminal { program, args } => {
+                    this.diff = None;
+                    let folder = path.parent().map(PathBuf::from);
+                    this.new_tab(folder, Some(ShellCommand::new(program, args)), window, cx);
+                }
+                Launch::System => cx.open_with_system(&path),
+            });
+        })
+        .detach();
     }
 
     // ----- panel widths ---------------------------------------------------------------------
@@ -3082,6 +3177,26 @@ impl Render for Workspace {
                 .child(view.clone())
         });
 
+        let diff_overlay = self.diff.as_ref().map(|(view, _)| {
+            div()
+                .id("diff-scrim")
+                .absolute()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(scrim())
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.diff = None;
+                        this.focus_active(window, cx);
+                        cx.notify();
+                    }),
+                )
+                .child(view.clone())
+        });
+
         let shortcuts_overlay = self.shortcuts.as_ref().map(|(view, _)| {
             div()
                 .id("shortcuts-scrim")
@@ -3216,6 +3331,9 @@ impl Render for Workspace {
                     this.start_rename(RenameTarget::Project(root), window, cx)
                 }
             }))
+            .on_action(
+                cx.listener(|this, _: &ShowChanges, window, cx| this.show_changes(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &ProjectColour, window, cx| {
                 if let Some(root) = this.active_project(cx) {
                     this.open_colour_menu(root, window, cx)
@@ -3251,6 +3369,7 @@ impl Render for Workspace {
             .when_some(palette_overlay, |d, overlay| d.child(overlay))
             .when_some(shortcuts_overlay, |d, overlay| d.child(overlay))
             .when_some(settings_overlay, |d, overlay| d.child(overlay))
+            .when_some(diff_overlay, |d, overlay| d.child(overlay))
             .when_some(resize_edges(window), |d, edges| d.child(edges))
     }
 }

@@ -69,6 +69,13 @@ sidebar shows the shortcuts key; click it for the list. Drag the inner edge of t
 resize it (double-click the edge for its default width); the terminal always keeps at least 40
 columns, and the widths come back with your sessions.
 
+Click a file in the rail's Changes (or "Show changes" in the palette) for its diff against
+HEAD, staged and unstaged together: unified or side by side, with line numbers. Select with
+the mouse (double-click a word, triple-click a line, shift-click to extend); ⌘C copies just
+the code, ⌘A the whole new side, "Copy diff" a patch `git apply` takes. ↑↓ or j/k scroll,
+Space pages, n/p jump between hunks, [ and ] between files, ⌘F finds, ⌘O opens the file in
+`$VISUAL`/`$EDITOR` at the first change, Esc closes. It follows the file as it changes.
+
 A pinned command (Pin in a block's hover actions) stays at the top of the timeline, through
 `clear`, with its first lines; a click shows more.
 

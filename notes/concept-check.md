@@ -161,3 +161,24 @@ then the dev server running), in Kiln Dark and Kiln Light.
 Not shown in pictures: the macOS traffic lights (not drawn headless); at the least sidebar
 width the header row keeps their 78 px clear, as at the default.
 
+## Diff viewer (no mockup)
+
+`snapshot diff`: the demo project's changes plus a binary and a 6,000-line file. All asserted
+in the run.
+
+| Item | Kiln | Verdict |
+| --- | --- | --- |
+| Pop-up at 90%, veil, bar colour, ring, radius 12; header: status letter, path, +N −M, Unified/Split, esc; footer hints and Copy diff, Copy path, Open | [d3](screenshots/diff/d3-unified.png) | Matches |
+| Unified with hunk headers, both line numbers, added/removed tinted | [d3](screenshots/diff/d3-unified.png) | Matches |
+| Split, from 120 columns | [d4](screenshots/diff/d4-split.png) | Matches |
+| Deleted file all removed; new file all added; binary says so | [d1](screenshots/diff/d1-deleted.png), [d2](screenshots/diff/d2-new.png), [d7](screenshots/diff/d7-binary.png) | Matches |
+| A selection, and its text pasted into the shell: no numbers, no +/−, indentation kept | [d5](screenshots/diff/d5-selection.png), [d9](screenshots/diff/d9-pasted.png). Tests: `diff::tests::copies_have_no_gutter_and_keep_tabs` | Matches |
+| Copy diff is a patch git applies | `git apply --check --reverse` on it, asserted | Matches |
+| ⌘F finds in the diff | [d6](screenshots/diff/d6-find.png); test `diff_view::tests::find_marks_each_match_in_shown_columns` | Matches |
+| Over 5,000 rows: "Show all" at the end | [d8](screenshots/diff/d8-large-show-all.png); test `diff::tests::large_diffs_are_capped_until_show_all` | Matches |
+| Follows the file while open | asserted (a line added, then removed) | Matches |
+| Kiln Light | [d10](screenshots/diff/d10-light.png) | Matches |
+| Parsing: hunks, numbers, new/deleted/binary, split pairing; a real repository, staged and unstaged together, untracked as new | `diff::tests` | Matches |
+| ⌘O in each editor's way | `editor::tests::each_editor_gets_the_line_its_way` (not run against real editors) | Matches |
+| Enter on a rail file; a "staged" marker | not done (see DECISIONS) | Differs |
+

@@ -384,6 +384,13 @@ fn main() {
         println!("done");
         return;
     }
+    if scenario == "diff" {
+        diff_viewer(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        let _ = std::fs::remove_dir_all(&config_home);
+        println!("done");
+        return;
+    }
     if scenario == "sidebar" {
         sidebar(&mut s, &state_file);
         let _ = std::fs::remove_file(&state_file);
@@ -1784,6 +1791,173 @@ fn resize(s: &mut Shots) {
         (window.sidebar_width, window.rail_width),
         (Some(SIDEBAR.min), Some(RAIL.min))
     );
+}
+
+/// The diff viewer on the demo project's changes: deleted, new, modified (unified and split),
+/// a selection and its text pasted into the shell, find, a binary file, a very large one, and
+/// Kiln Light.
+fn diff_viewer(s: &mut Shots) {
+    use kiln::diff_view::Mode;
+    let path = kiln::config::config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "cursor_blink = false\n").unwrap();
+    let demo = demo_project();
+    // A binary file and a very large one, both new.
+    std::fs::write(
+        demo.join("logo.png"),
+        b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01",
+    )
+    .unwrap();
+    let big: String = (0..6000).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(demo.join("big.txt"), big).unwrap();
+    s.pump(Duration::from_millis(1000));
+    s.run(&format!("cd {}", demo.display()), Duration::from_secs(5));
+    s.action(Box::new(kiln::ShowChanges));
+    s.pump(Duration::from_millis(1500));
+    let view = s
+        .workspace(|w| w.diff_view())
+        .expect("Show changes opens the viewer");
+    let file = |s: &mut Shots| {
+        s.cx.update(|cx| {
+            view.read(cx)
+                .file()
+                .map(|f| (f.path.clone(), f.kind, f.added, f.removed, f.binary))
+        })
+    };
+    // Steps through the files with ] until `path`.
+    let go_to = |s: &mut Shots, path: &str| {
+        for _ in 0..12 {
+            if file(s).is_some_and(|f| f.0 == path) {
+                return;
+            }
+            s.keystroke("]");
+            s.pump(Duration::from_millis(500));
+        }
+        panic!("no {path} in the changes");
+    };
+    go_to(s, "README.md");
+    let (_, kind, added, removed, _) = file(s).unwrap();
+    assert_eq!((kind, added), ('D', 0));
+    assert!(removed > 0);
+    s.shot("d1-deleted");
+    go_to(s, "docs/deploy.md");
+    let (_, _, added, removed, _) = file(s).unwrap();
+    assert!(added > 0 && removed == 0, "a new file is all added");
+    s.shot("d2-new");
+    go_to(s, "src/routes.js");
+    s.shot("d3-unified");
+    // Live: the file changes while it is open; the diff follows.
+    let before = file(s).unwrap().2;
+    let routes = demo.join("src/routes.js");
+    let mut text = std::fs::read_to_string(&routes).unwrap();
+    text.push_str("// later\n");
+    std::fs::write(&routes, &text).unwrap();
+    s.pump(Duration::from_millis(3500));
+    assert_eq!(
+        file(s).unwrap().2,
+        before + 1,
+        "the open diff follows the file"
+    );
+    std::fs::write(&routes, text.trim_end_matches("// later\n")).unwrap();
+    s.pump(Duration::from_millis(3500));
+    assert_eq!(file(s).unwrap().2, before);
+    s.cx.update(|cx| view.update(cx, |v, cx| v.set_mode(Mode::Split, cx)));
+    s.pump(Duration::from_millis(300));
+    assert_eq!(s.cx.update(|cx| view.read(cx).mode()), Mode::Split);
+    s.shot("d4-split");
+    s.cx.update(|cx| view.update(cx, |v, cx| v.set_mode(Mode::Unified, cx)));
+
+    // A selection over several lines: it copies as code, no numbers, no "+" or "-".
+    s.cx.update(|cx| view.update(cx, |v, cx| v.select((1, 0), (4, usize::MAX), cx)));
+    s.pump(Duration::from_millis(300));
+    s.shot("d5-selection");
+    let copied =
+        s.cx.update(|cx| view.read(cx).selected_text())
+            .expect("a selection");
+    assert!(
+        !copied.lines().any(|l| l.starts_with(['+', '-', '−'])),
+        "{copied}"
+    );
+    assert!(
+        !copied.lines().any(|l| l
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && l.contains("  ")),
+        "{copied}"
+    );
+    // The whole patch applies (backwards, onto the changed file).
+    let patch =
+        s.cx.update(|cx| view.read(cx).file().map(|f| f.patch.clone()))
+            .unwrap();
+    let patch_file = std::env::temp_dir().join(format!("kiln-diff-{}.patch", std::process::id()));
+    std::fs::write(&patch_file, &patch).unwrap();
+    let applies = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&demo)
+        .args(["apply", "--check", "--reverse"])
+        .arg(&patch_file)
+        .status()
+        .unwrap()
+        .success();
+    assert!(applies, "Copy diff gives a patch git applies");
+    let _ = std::fs::remove_file(&patch_file);
+
+    // Find.
+    s.keystroke(if cfg!(target_os = "macos") {
+        "cmd-f"
+    } else {
+        "ctrl-shift-f"
+    });
+    s.keystroke("r e s");
+    s.pump(Duration::from_millis(300));
+    s.shot("d6-find");
+    s.keystroke("escape");
+
+    // Binary, and very large (Show all at the end).
+    go_to(s, "logo.png");
+    assert!(file(s).unwrap().4, "binary");
+    s.shot("d7-binary");
+    go_to(s, "big.txt");
+    s.keystroke("end");
+    s.pump(Duration::from_millis(500));
+    s.shot("d8-large-show-all");
+
+    // The text the selection copied, pasted into the shell.
+    s.keystroke("escape");
+    assert!(
+        s.workspace(|w| w.diff_view()).is_none(),
+        "Esc closes the viewer"
+    );
+    // Pasted as a paste arrives (bracketed): the shell holds it in the line, unrun.
+    s.type_only(&format!("\x1b[200~{copied}\x1b[201~"));
+    s.pump(Duration::from_millis(1500));
+    s.shot("d9-pasted");
+    s.type_only("\x03");
+    s.wait_for(Duration::from_secs(5), |p| p.is_at_prompt());
+
+    // Kiln Light.
+    std::fs::write(
+        &path,
+        "cursor_blink = false\n[theme]\nname = \"kiln-light\"\n",
+    )
+    .unwrap();
+    s.pump(Duration::from_millis(2000));
+    s.action(Box::new(kiln::ShowChanges));
+    s.pump(Duration::from_millis(1500));
+    let view = s.workspace(|w| w.diff_view()).unwrap();
+    let file = |s: &mut Shots| {
+        s.cx.update(|cx| view.read(cx).file().map(|f| f.path.clone()))
+    };
+    for _ in 0..12 {
+        if file(s).as_deref() == Some("src/routes.js") {
+            break;
+        }
+        s.keystroke("]");
+        s.pump(Duration::from_millis(500));
+    }
+    s.shot("d10-light");
 }
 
 fn demo_project() -> PathBuf {

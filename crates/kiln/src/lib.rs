@@ -9,6 +9,9 @@ pub mod config_write;
 pub mod context;
 pub mod copy;
 pub mod custom_icon;
+pub mod diff;
+pub mod diff_view;
+pub mod editor;
 pub mod flame;
 pub mod git;
 pub mod grid_paint;
@@ -65,6 +68,7 @@ actions!(
         RenameSession,
         RenameProject,
         ProjectColour,
+        ShowChanges,
         ZoomIn,
         ZoomOut,
         ZoomReset,

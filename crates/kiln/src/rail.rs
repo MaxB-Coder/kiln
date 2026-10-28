@@ -1,7 +1,6 @@
 //! The ⌘I context rail: the focused pane's changes, running processes and ports, runtimes and
 //! session. It reads processes and git status every two seconds in the background while open.
 
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -126,8 +125,18 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let command = git::diff_command(&root, &file);
-        self.split_right(Some(PathBuf::from(root)), Some(command), window, cx);
+        // The viewer goes through all of the changes, from this one.
+        let files = self
+            .rail
+            .as_ref()
+            .and_then(|rail| rail.data.git.as_ref())
+            .map(|status| status.files.clone())
+            .unwrap_or_default();
+        let (files, index) = match files.iter().position(|f| *f == file) {
+            Some(index) => (files, index),
+            None => (vec![file], 0),
+        };
+        self.open_changes(root, files, index, window, cx);
     }
 
     /// Opens a local port in the browser, after asking (links always ask first).

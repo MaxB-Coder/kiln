@@ -42,52 +42,6 @@ pub fn status(cwd: &str) -> Option<GitStatus> {
     Some(status)
 }
 
-/// A pane command that pages one file's changes against HEAD (untracked files: the whole file)
-/// and exits when the pager closes.
-pub fn diff_command(root: &str, file: &FileChange) -> kiln_term::ShellCommand {
-    let untracked = file.kind == '?';
-    if cfg!(windows) {
-        let quote = |s: &str| format!("'{}'", s.replace('\'', "''"));
-        let what = if untracked {
-            format!("--no-index -- /dev/null {}", quote(&file.path))
-        } else {
-            format!("HEAD -- {}", quote(&file.path))
-        };
-        kiln_term::ShellCommand::new(
-            "powershell.exe",
-            [
-                "-NoLogo".to_string(),
-                "-NoProfile".to_string(),
-                "-Command".to_string(),
-                format!(
-                    "git --literal-pathspecs -C {} --no-pager diff {what} | more",
-                    quote(root)
-                ),
-            ],
-        )
-    } else {
-        let what = if untracked {
-            "--no-index -- /dev/null \"$2\""
-        } else {
-            "HEAD -- \"$2\""
-        };
-        // -+F -+E: stay open for short diffs even when $LESS says otherwise.
-        let script = format!(
-            "git --literal-pathspecs -C \"$1\" --no-pager diff --color=always {what} | less -R -+F -+E"
-        );
-        kiln_term::ShellCommand::new(
-            "/bin/sh",
-            [
-                "-c".to_string(),
-                script,
-                "kiln-diff".to_string(),
-                root.to_string(),
-                file.path.clone(),
-            ],
-        )
-    }
-}
-
 fn run(dir: &str, args: &[&str]) -> Option<Vec<u8>> {
     let output = Command::new("git")
         // A repository's own config must not run commands here: the rail reads status in any
