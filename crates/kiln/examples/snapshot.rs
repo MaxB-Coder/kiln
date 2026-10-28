@@ -248,6 +248,49 @@ impl Shots {
         self.pump(Duration::from_millis(400));
     }
 
+    /// Presses at `from`, moves in steps to `to` and lets go there.
+    fn drag_between(&mut self, from: (f32, f32), to: (f32, f32)) {
+        let window: AnyWindowHandle = self.window.into();
+        let send = |s: &mut Self, event: PlatformInput| {
+            let _ =
+                s.cx.update_window(window, |_, window, cx| window.dispatch_event(event, cx));
+            s.pump(Duration::from_millis(40));
+        };
+        let at = |(x, y): (f32, f32)| Point::new(px(x), px(y));
+        send(
+            self,
+            PlatformInput::MouseDown(gpui::MouseDownEvent {
+                button: gpui::MouseButton::Left,
+                position: at(from),
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+        );
+        for step in 1..=6 {
+            let t = step as f32 / 6.;
+            let point = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+            send(
+                self,
+                PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position: at(point),
+                    pressed_button: Some(gpui::MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                }),
+            );
+        }
+        send(
+            self,
+            PlatformInput::MouseUp(gpui::MouseUpEvent {
+                button: gpui::MouseButton::Left,
+                position: at(to),
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }),
+        );
+        self.pump(Duration::from_millis(300));
+    }
+
     fn titles(&mut self) -> Vec<String> {
         let window = self.window;
         self.cx
@@ -1865,7 +1908,32 @@ fn diff_viewer(s: &mut Shots) {
     s.pump(Duration::from_millis(300));
     assert_eq!(s.cx.update(|cx| view.read(cx).mode()), Mode::Split);
     s.shot("d4-split");
+    // A real drag down the new side: it stays on that side and copies its lines only.
+    use kiln::diff::Side;
+    let from =
+        s.cx.update(|cx| view.read(cx).row_point(2, Some(Side::New), 0));
+    let to =
+        s.cx.update(|cx| view.read(cx).row_point(4, Some(Side::New), 30));
+    s.drag_between(from, to);
+    s.shot("d4b-split-selection");
+    let split_copy =
+        s.cx.update(|cx| view.read(cx).selected_text())
+            .expect("a selection");
+    assert_eq!(
+        split_copy, "  if (req.url === '/health') return res.end('up');\n  res.end('ok');\n};",
+        "the new side's lines, no gutter"
+    );
+    // And a real drag in the unified view (after switching back).
     s.cx.update(|cx| view.update(cx, |v, cx| v.set_mode(Mode::Unified, cx)));
+    s.pump(Duration::from_millis(300));
+    let from = s.cx.update(|cx| view.read(cx).row_point(3, None, 2));
+    let to = s.cx.update(|cx| view.read(cx).row_point(3, None, 16));
+    s.drag_between(from, to);
+    assert_eq!(
+        s.cx.update(|cx| view.read(cx).selected_text()).as_deref(),
+        Some("if (req.url =="),
+        "a drag selects the columns under the mouse"
+    );
 
     // A selection over several lines: it copies as code, no numbers, no "+" or "-".
     s.cx.update(|cx| view.update(cx, |v, cx| v.select((1, 0), (4, usize::MAX), cx)));

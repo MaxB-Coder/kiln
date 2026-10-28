@@ -15,7 +15,7 @@ use gpui::{
     uniform_list,
 };
 
-use crate::diff::{self, FileDiff, LineKind, Place, Row, SplitRow};
+use crate::diff::{self, FileDiff, LineKind, Place, Row, Side, SplitRow, Token};
 use crate::git::FileChange;
 use crate::grid_paint::{CellMetrics, FONT_FAMILY};
 use crate::text_input::{TextInput, TextInputEvent};
@@ -72,6 +72,10 @@ pub struct DiffView {
     dragging: bool,
     /// Where the rows' text starts (window x) and the list's top and height.
     text_x: f32,
+    /// The selection in the split view: its side, where it began and where it reaches.
+    split_selection: Option<(Side, Place, Place)>,
+    list_x: f32,
+    list_w: f32,
     list_top: f32,
     list_h: f32,
     metrics: CellMetrics,
@@ -132,6 +136,9 @@ impl DiffView {
             all_new: false,
             dragging: false,
             text_x: 0.,
+            split_selection: None,
+            list_x: 0.,
+            list_w: 0.,
             list_top: 0.,
             list_h: 0.,
             metrics,
@@ -217,8 +224,16 @@ impl DiffView {
         if self.all_new {
             return Some(diff::new_side(&self.rows));
         }
-        let (a, b) = self.selection?;
-        (a != b).then(|| diff::copy_text(&self.rows, a, b))
+        match self.mode {
+            Mode::Unified => {
+                let (a, b) = self.selection?;
+                (a != b).then(|| diff::copy_text(&self.rows, a, b))
+            }
+            Mode::Split => {
+                let (side, a, b) = self.split_selection?;
+                (a != b).then(|| diff::copy_split(&self.split, side, a, b))
+            }
+        }
     }
 
     fn copy(&mut self, text: String, note: &'static str, cx: &mut Context<Self>) {
@@ -257,6 +272,8 @@ impl DiffView {
 
     pub fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
         self.mode = mode;
+        self.selection = None;
+        self.split_selection = None;
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
@@ -426,17 +443,121 @@ impl DiffView {
         cx.stop_propagation();
     }
 
-    /// The shown column under a window x.
-    fn column_at(&self, x: Pixels) -> usize {
+    /// The shown column under a window x, for text starting at `from`.
+    fn column_at(&self, x: Pixels, from: f32) -> usize {
         let cell = f32::from(self.metrics.cell_width);
-        ((f32::from(x) - self.text_x) / cell).max(0.).round() as usize
+        ((f32::from(x) - from) / cell).max(0.).round() as usize
+    }
+
+    /// Where a split side's text starts (window x): after its padding, number and gap.
+    fn split_text_x(&self, side: Side) -> f32 {
+        let gutter = PAD + 7. * f32::from(self.metrics.cell_width);
+        match side {
+            Side::Old => self.list_x + gutter,
+            // The right half, after the 1 px divider.
+            Side::New => self.list_x + (self.list_w - 1.) / 2. + 1. + gutter,
+        }
+    }
+
+    /// The split view's selection stays on the side the mouse went down on.
+    fn split_mouse_down(
+        &mut self,
+        row: usize,
+        side: Side,
+        event: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(line) = self.split.get(row).and_then(|r| diff::split_line(r, side)) else {
+            return;
+        };
+        let column = self.column_at(event.position.x, self.split_text_x(side));
+        self.all_new = false;
+        match event.click_count {
+            2 => {
+                let (from, to) = diff::word_at(&line.text, column);
+                self.split_selection = Some((side, (row, from), (row, to)));
+            }
+            3.. => self.split_selection = Some((side, (row, 0), (row, usize::MAX))),
+            _ if event.modifiers.shift
+                && self.split_selection.is_some_and(|(s, _, _)| s == side) =>
+            {
+                if let Some((_, _, head)) = self.split_selection.as_mut() {
+                    *head = (row, column);
+                }
+            }
+            _ => {
+                self.split_selection = Some((side, (row, column), (row, column)));
+                self.dragging = true;
+            }
+        }
+        cx.notify();
+    }
+
+    fn split_mouse_move(&mut self, row: usize, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if !self.dragging || event.pressed_button != Some(MouseButton::Left) {
+            self.dragging = false;
+            return;
+        }
+        // Over the other side, the place is taken on the selection's own side.
+        let Some((side, _, _)) = self.split_selection else {
+            return;
+        };
+        let column = self.column_at(event.position.x, self.split_text_x(side));
+        if let Some((_, _, head)) = self.split_selection.as_mut() {
+            *head = (row, column);
+            cx.notify();
+        }
+    }
+
+    /// Where a row's text column sits in the window (the snapshots drag between such points):
+    /// `side` for the split view, `None` for unified. Rows count from the top of the list.
+    pub fn row_point(&self, row: usize, side: Option<Side>, column: usize) -> (f32, f32) {
+        let cell = f32::from(self.metrics.cell_width);
+        let line = f32::from(self.metrics.line_height);
+        let x = match side {
+            Some(side) => self.split_text_x(side),
+            None => self.text_x,
+        };
+        (
+            x + (column as f32 + 0.3) * cell,
+            self.list_top + (row as f32 + 0.5) * line,
+        )
+    }
+
+    /// For the snapshots: selects on one side of the split view as a drag would.
+    pub fn select_split(&mut self, side: Side, from: Place, to: Place, cx: &mut Context<Self>) {
+        self.split_selection = Some((side, from, to));
+        self.all_new = false;
+        cx.notify();
+    }
+
+    /// The selected shown columns on `side` of split row `row`, if any.
+    fn split_selected_columns(&self, row: usize, side: Side) -> Option<Range<usize>> {
+        let line = self
+            .split
+            .get(row)
+            .and_then(|r| diff::split_line(r, side))?;
+        if self.all_new {
+            return (side == Side::New && line.kind != LineKind::Removed).then_some(0..usize::MAX);
+        }
+        let (on, a, b) = self.split_selection?;
+        if on != side {
+            return None;
+        }
+        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        if row < start.0 || row > end.0 || start == end {
+            return None;
+        }
+        let from = if row == start.0 { start.1 } else { 0 };
+        let to = if row == end.0 { end.1 } else { usize::MAX };
+        (from < to).then_some(from..to)
     }
 
     fn mouse_down(&mut self, row: usize, event: &MouseDownEvent, cx: &mut Context<Self>) {
         let Some(Row::Line(line)) = self.rows.get(row) else {
             return;
         };
-        let column = self.column_at(event.position.x);
+        let column = self.column_at(event.position.x, self.text_x);
         self.all_new = false;
         match event.click_count {
             2 => {
@@ -462,7 +583,7 @@ impl DiffView {
             self.dragging = false;
             return;
         }
-        let column = self.column_at(event.position.x);
+        let column = self.column_at(event.position.x, self.text_x);
         if let Some((_, head)) = self.selection.as_mut() {
             *head = (row, column);
             cx.notify();
@@ -545,7 +666,7 @@ impl DiffView {
             }
             let element = match self.mode {
                 Mode::Unified => self.render_unified_row(ix, &number, added_bg, removed_bg, cx),
-                Mode::Split => self.render_split_row(ix, &number, added_bg, removed_bg),
+                Mode::Split => self.render_split_row(ix, &number, added_bg, removed_bg, cx),
             };
             out.push(element);
         }
@@ -591,8 +712,7 @@ impl DiffView {
                     LineKind::Removed => (Some(removed_bg), "−", p.failed),
                     LineKind::Context => (None, " ", p.muted),
                 };
-                let shown = diff::display(&line.text);
-                let text = self.render_text(ix, &shown);
+                let text = self.render_text(line, self.selected_columns(ix), &self.matches_on(ix));
                 row.when_some(bg, |d, bg| d.bg(theme::hsla(bg)))
                     .cursor_text()
                     .on_mouse_down(
@@ -625,16 +745,9 @@ impl DiffView {
         }
     }
 
-    /// A line's text, with the selection and the find matches marked.
-    fn render_text(&self, ix: usize, shown: &str) -> Div {
-        let p = palette();
-        let chars: Vec<char> = shown.chars().collect();
-        let len = chars.len();
-        let selected = self
-            .selected_columns(ix)
-            .map(|r| r.start.min(len)..r.end.min(len));
-        let matches: Vec<(usize, usize, bool)> = self
-            .find
+    /// The find matches on unified row `ix`: (from, to, whether it is the current one).
+    fn matches_on(&self, ix: usize) -> Vec<(usize, usize, bool)> {
+        self.find
             .as_ref()
             .map(|f| {
                 f.matches
@@ -644,8 +757,21 @@ impl DiffView {
                     .map(|(i, (_, from, to))| (*from, *to, f.current == Some(i)))
                     .collect()
             })
-            .unwrap_or_default();
-        // Each column's mark: 0 plain, 1 selected, 2 a match, 3 the current match.
+            .unwrap_or_default()
+    }
+
+    /// A line's text in its syntax colours, with the selection and the find matches marked.
+    fn render_text(
+        &self,
+        line: &diff::DiffLine,
+        selected: Option<Range<usize>>,
+        matches: &[(usize, usize, bool)],
+    ) -> Div {
+        let p = palette();
+        let chars: Vec<char> = diff::display(&line.text).chars().collect();
+        let len = chars.len();
+        let selected = selected.map(|r| r.start.min(len)..r.end.min(len));
+        // Each column's mark (0 plain, 1 selected, 2 a match, 3 the current match) and colour.
         let mark = |c: usize| {
             if let Some(&(_, _, current)) = matches.iter().find(|(f, t, _)| c >= *f && c < *t) {
                 return if current { 3 } else { 2 };
@@ -655,16 +781,22 @@ impl DiffView {
                 _ => 0,
             }
         };
+        let colour = |c: usize| {
+            line.tokens
+                .iter()
+                .find(|(f, t, _)| c >= *f && c < *t)
+                .map_or(p.fg, |(_, _, token)| token_colour(&p, *token))
+        };
         let mut text = div().flex().flex_row().text_color(theme::hsla(p.fg));
         let mut at = 0;
         while at < len {
-            let kind = mark(at);
+            let (kind, fg) = (mark(at), colour(at));
             let mut end = at + 1;
-            while end < len && mark(end) == kind {
+            while end < len && mark(end) == kind && colour(end) == fg {
                 end += 1;
             }
             let span: String = chars[at..end].iter().collect();
-            let piece = div().child(span);
+            let piece = div().text_color(theme::hsla(fg)).child(span);
             text = text.child(match kind {
                 1 => piece.bg(theme::hsla(theme::blend(p.bg1, p.accent, 0.35))),
                 2 => piece.bg(theme::hsla(theme::blend(p.bg1, p.modified, 0.5))),
@@ -693,6 +825,7 @@ impl DiffView {
         number: &dyn Fn(Option<u32>) -> Div,
         added_bg: u32,
         removed_bg: u32,
+        cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let p = palette();
         let line_h = self.metrics.line_height;
@@ -719,7 +852,8 @@ impl DiffView {
                     .into_any_element()
             }
             SplitRow::Pair(left, right) => {
-                let side = |line: &Option<diff::DiffLine>, old: bool| {
+                let side = |line: &Option<diff::DiffLine>, which: Side| {
+                    let old = which == Side::Old;
                     let bg = match line.as_ref().map(|l| l.kind) {
                         Some(LineKind::Removed) => Some(removed_bg),
                         Some(LineKind::Added) => Some(added_bg),
@@ -728,6 +862,7 @@ impl DiffView {
                         Some(LineKind::Context) => None,
                     };
                     div()
+                        .id(if old { "old" } else { "new" })
                         .flex_1()
                         .min_w_0()
                         .h_full()
@@ -738,23 +873,43 @@ impl DiffView {
                         .overflow_hidden()
                         .when_some(bg, |d, bg| d.bg(theme::hsla(bg)))
                         .when_some(line.as_ref(), |d, line| {
-                            d.child(number(if old { line.old } else { line.new }))
+                            d.cursor_text()
+                                .child(number(if old { line.old } else { line.new }))
                                 .child(
                                     div()
                                         .flex_none()
                                         .w(px(f32::from(self.metrics.cell_width) * 2.)),
                                 )
-                                .child(
-                                    div()
-                                        .text_color(theme::hsla(p.fg))
-                                        .child(diff::display(&line.text)),
-                                )
+                                .child(self.render_text(
+                                    line,
+                                    self.split_selected_columns(ix, which),
+                                    &[],
+                                ))
                         })
                 };
-                row.child(side(left, true))
-                    .child(div().flex_none().w(px(1.)).h_full().bg(theme::hsla(p.bg1)))
-                    .child(side(right, false))
-                    .into_any_element()
+                let left_side = side(left, Side::Old).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        this.split_mouse_down(ix, Side::Old, event, cx)
+                    }),
+                );
+                let right_side = side(right, Side::New).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        this.split_mouse_down(ix, Side::New, event, cx)
+                    }),
+                );
+                row.on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                    this.split_mouse_move(ix, event, cx)
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, _| this.dragging = false),
+                )
+                .child(left_side)
+                .child(div().flex_none().w(px(1.)).h_full().bg(theme::hsla(p.bg1)))
+                .child(right_side)
+                .into_any_element()
             }
         }
     }
@@ -929,6 +1084,8 @@ impl Render for DiffView {
                         move |bounds, _, cx| {
                             entity.update(cx, |this, _| {
                                 this.text_x = f32::from(bounds.origin.x) + gutter;
+                                this.list_x = f32::from(bounds.origin.x);
+                                this.list_w = f32::from(bounds.size.width);
                                 this.list_top = f32::from(bounds.origin.y);
                                 this.list_h = f32::from(bounds.size.height);
                             })
@@ -1026,6 +1183,18 @@ impl Render for DiffView {
             .children(find_bar)
             .child(body)
             .child(footer)
+    }
+}
+
+/// A token's colour in the theme: comments muted, the rest from its bright ANSI colours.
+fn token_colour(p: &theme::Palette, token: Token) -> u32 {
+    match token {
+        Token::Comment => p.muted,
+        Token::String => p.ansi[10],
+        Token::Keyword => p.ansi[13],
+        Token::Number => p.ansi[11],
+        Token::Function => p.ansi[12],
+        Token::Type => p.ansi[14],
     }
 }
 

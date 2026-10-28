@@ -171,6 +171,8 @@ in the run.
 | Pop-up at 90%, veil, bar colour, ring, radius 12; header: status letter, path, +N −M, Unified/Split, esc; footer hints and Copy diff, Copy path, Open | [d3](screenshots/diff/d3-unified.png) | Matches |
 | Unified with hunk headers, both line numbers, added/removed tinted | [d3](screenshots/diff/d3-unified.png) | Matches |
 | Split, from 120 columns | [d4](screenshots/diff/d4-split.png) | Matches |
+| Syntax colours from the theme (syntect), in both themes | [d3](screenshots/diff/d3-unified.png), [d10](screenshots/diff/d10-light.png); test `diff::tests::code_is_coloured_by_its_language` | Matches |
+| Selecting in the split view: a real drag down the new side stays on it and copies its lines, no gutter (asserted); in unified a drag selects the columns under the mouse (asserted) | [d4b](screenshots/diff/d4b-split-selection.png); test `diff::tests::split_copies_take_one_side` | Matches |
 | Deleted file all removed; new file all added; binary says so | [d1](screenshots/diff/d1-deleted.png), [d2](screenshots/diff/d2-new.png), [d7](screenshots/diff/d7-binary.png) | Matches |
 | A selection, and its text pasted into the shell: no numbers, no +/−, indentation kept | [d5](screenshots/diff/d5-selection.png), [d9](screenshots/diff/d9-pasted.png). Tests: `diff::tests::copies_have_no_gutter_and_keep_tabs` | Matches |
 | Copy diff is a patch git applies | `git apply --check --reverse` on it, asserted | Matches |

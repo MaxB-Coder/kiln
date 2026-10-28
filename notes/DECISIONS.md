@@ -458,16 +458,22 @@ Newest at the bottom.
   while open, keeping the scroll place. `diff::parse` makes hunks and lines with both line
   numbers; binary files say so; deleted files show all removed. Unified is the default; Split
   pairs each run of removed lines with the added run after it and shows only from 120 columns.
-  Added and removed lines sit on the ok and failed colours at 16% over the bar; no syntax
-  colours (plain text, which keeps it cheap). Rows go through `uniform_list`, and past 5,000
+  Added and removed lines sit on the ok and failed colours at 16% over the bar. Syntax
+  colours come from syntect (its bundled grammars, the pure-Rust fancy-regex engine, so no C
+  library; three new crates, cargo-deny clean), loaded on the first diff opened and run in the
+  background read: each hunk's old side and new side are read in order from the hunk's start,
+  and each stretch is kept as a kind (comment, string, keyword, number, function, type), not
+  a colour, so the theme colours it (comments muted, the rest its bright ANSI colours) and a
+  theme switch needs no new read. A language syntect does not know stays plain. Rows go through `uniform_list`, and past 5,000
   rows a "Show all" row ends the list. Selection is by shown column (tabs shown at four),
   mapped back to the file's characters, so ⌘C pastes as code: no numbers, no +/−, tabs kept,
-  hunk headers left out. ⌘A selects the new side (context and added lines). Copy diff copies
+  hunk headers left out. In the split view it stays on the side the mouse went down on and
+  copies that side's lines only (`diff::copy_split`). ⌘A selects the new side (context and added lines). Copy diff copies
   git's patch as is. Keys: ↑↓ j k, Space/PageDown, n/p, [ ], ⌘F (its own find over the rows,
   in Kiln's find bar style), ⌘O, Esc. ⌘O uses `$VISUAL`/`$EDITOR`, from Kiln's environment or,
   as an app started from the Dock has neither, the login shell's (`editor::user_editor`); each
   known editor gets the line its way (`code -g f:12`, `nvim +12 f`, `hx f:12`, `subl f:12`, …),
   terminal editors open in a new session, and with none set the system opens the file. Not
   done: a "staged" marker on hunks (the combined diff has no clean mapping back), Enter on a
-  rail file (the rail takes no keyboard focus yet), selecting in the split view.
+  rail file (the rail takes no keyboard focus yet).
 
