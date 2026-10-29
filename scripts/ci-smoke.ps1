@@ -104,7 +104,13 @@ if (-not $Wsl) {
         $psi.UseShellExecute = $false
         $psi.RedirectStandardError = $true
         $psi.Environment["PATH"] = $strippedPath
-        if ($case.hide) { $psi.Environment["ProgramFiles"] = $empty; $psi.Environment["LOCALAPPDATA"] = $empty }
+        # PowerShell 7 hidden: its folders, and (as the runner may still reach it some other way)
+        # Kiln's test switch to pass over pwsh.exe.
+        if ($case.hide) {
+            $psi.Environment["ProgramFiles"] = $empty
+            $psi.Environment["LOCALAPPDATA"] = $empty
+            $psi.Environment["KILN_TEST_SKIP_SHELLS"] = "pwsh.exe"
+        }
         $psi.Environment["KILN_BENCH_FILE"] = $result
         $psi.Environment["RUST_LOG"] = "kiln_term=info,kiln=info"
         $proc = [System.Diagnostics.Process]::Start($psi)
@@ -112,6 +118,7 @@ if (-not $Wsl) {
         if (-not $proc.WaitForExit(120000)) { $proc.Kill(); $stderr.Result | Set-Content $log; Get-Content $log; throw "Kiln did not finish within 2 minutes ($($case.name))" }
         $stderr.Result | Set-Content $log
         $started = Select-String -Path $log -Pattern 'starting .* arguments' | Select-Object -First 1
+        "$($case.name): $((Select-String -Path $log -Pattern 'shell: ' | Select-Object -First 1).Line)"
         "$($case.name): $($started.Line)"
         $out = Get-Content $result -ErrorAction SilentlyContinue
         "$($case.name): $out"

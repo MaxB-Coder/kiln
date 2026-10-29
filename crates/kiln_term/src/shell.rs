@@ -36,7 +36,16 @@ impl ShellCommand {
     #[cfg(windows)]
     pub fn powershell() -> Self {
         let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-        windows_shell(env, |path| std::path::Path::new(path).is_file())
+        let shell = windows_shell(env, |path| std::path::Path::new(path).is_file());
+        log::info!(
+            "shell: {} (ProgramFiles {:?}, LOCALAPPDATA {:?}, SystemRoot {:?}, skipping {:?})",
+            shell.program,
+            env("ProgramFiles"),
+            env("LOCALAPPDATA"),
+            env("SystemRoot"),
+            env("KILN_TEST_SKIP_SHELLS"),
+        );
+        shell
     }
 
     /// A WSL session, in the distribution's home folder.
@@ -141,9 +150,21 @@ pub fn windows_shell(
     exists: impl Fn(&str) -> bool,
 ) -> ShellCommand {
     let candidates = windows_shell_candidates(&env);
+    // For tests: file names to pass over ("pwsh.exe"), so a machine with PowerShell 7 can
+    // prove the fallbacks.
+    let skip: Vec<String> = env("KILN_TEST_SKIP_SHELLS")
+        .unwrap_or_default()
+        .split(';')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let skipped = |c: &str| {
+        let name = c.rsplit('\\').next().unwrap_or(c).to_ascii_lowercase();
+        skip.contains(&name)
+    };
     let program = candidates
         .iter()
-        .find(|c| exists(c))
+        .find(|c| !skipped(c) && exists(c))
         .cloned()
         .unwrap_or_else(|| {
             format!(
@@ -257,6 +278,14 @@ mod tests {
         assert_eq!(
             shell,
             ShellCommand::new("D:\\Windows\\system32\\cmd.exe", Vec::<String>::new())
+        );
+        // A test skips PowerShell 7 (KILN_TEST_SKIP_SHELLS): Windows PowerShell next.
+        let mut vars = VARS.to_vec();
+        vars.push(("KILN_TEST_SKIP_SHELLS", "PWSH.exe"));
+        let shell = windows_shell(env(&vars), |_| true);
+        assert_eq!(
+            shell.program,
+            "D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
         );
         // Nothing found: Windows PowerShell's path, so the error names it.
         assert_eq!(
