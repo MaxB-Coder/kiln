@@ -265,8 +265,10 @@ mod tests {
         );
         // No SystemRoot either: still never a bare name.
         let bare = windows_shell(env(&[]), |_| false).program;
+        // GetSystemDirectoryW may say "system32": Windows paths ignore case.
         assert!(
-            bare.ends_with("\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
+            bare.to_ascii_lowercase()
+                .ends_with("\\system32\\windowspowershell\\v1.0\\powershell.exe"),
             "{bare}"
         );
     }
