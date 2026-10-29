@@ -89,7 +89,6 @@ if (-not $Wsl) {
     $empty = Join-Path ([System.IO.Path]::GetTempPath()) "kiln-smoke-empty"
     New-Item -ItemType Directory -Force $empty | Out-Null
     $strippedPath = (($env:PATH -split ';') | Where-Object { $_ -and $_ -notmatch 'PowerShell' }) -join ';'
-    $saved = @{ PATH = $env:PATH; ProgramFiles = $env:ProgramFiles; LOCALAPPDATA = $env:LOCALAPPDATA }
     foreach ($case in @(
         @{ name = "pwsh7"; hide = $false; expect = 'PowerShell\\7\\pwsh\.exe' },
         @{ name = "windows-powershell"; hide = $true; expect = '(?i)System32\\WindowsPowerShell\\v1\.0\\powershell\.exe' }
@@ -97,14 +96,21 @@ if (-not $Wsl) {
         $result = Join-Path (Resolve-Path smoke) "default-shell-$($case.name).txt"
         $log = Join-Path (Resolve-Path smoke) "default-shell-$($case.name).log"
         Remove-Item $result, $log -ErrorAction SilentlyContinue
-        $env:PATH = $strippedPath
-        if ($case.hide) { $env:ProgramFiles = $empty; $env:LOCALAPPDATA = $empty }
-        $env:KILN_BENCH_FILE = $result
-        $env:RUST_LOG = "kiln_term=info,kiln=info"
-        $proc = Start-Process -FilePath (Resolve-Path $Kiln) -ArgumentList @("--bench-startup", "--cols", "80", "--rows", "20") -RedirectStandardError $log -PassThru
-        $env:PATH = $saved.PATH; $env:ProgramFiles = $saved.ProgramFiles; $env:LOCALAPPDATA = $saved.LOCALAPPDATA
-        Remove-Item Env:KILN_BENCH_FILE, Env:RUST_LOG
-        if (-not $proc.WaitForExit(120000)) { Stop-Process -Id $proc.Id -Force; Get-Content $log -ErrorAction SilentlyContinue; throw "Kiln did not finish within 2 minutes ($($case.name))" }
+        # The environment set on the process itself: Start-Process rebuilds a child's
+        # environment and loses an override such as ProgramFiles.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = (Resolve-Path $Kiln).Path
+        foreach ($arg in @("--bench-startup", "--cols", "80", "--rows", "20")) { $psi.ArgumentList.Add($arg) }
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardError = $true
+        $psi.Environment["PATH"] = $strippedPath
+        if ($case.hide) { $psi.Environment["ProgramFiles"] = $empty; $psi.Environment["LOCALAPPDATA"] = $empty }
+        $psi.Environment["KILN_BENCH_FILE"] = $result
+        $psi.Environment["RUST_LOG"] = "kiln_term=info,kiln=info"
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        if (-not $proc.WaitForExit(120000)) { $proc.Kill(); $stderr.Result | Set-Content $log; Get-Content $log; throw "Kiln did not finish within 2 minutes ($($case.name))" }
+        $stderr.Result | Set-Content $log
         $started = Select-String -Path $log -Pattern 'starting .* arguments' | Select-Object -First 1
         "$($case.name): $($started.Line)"
         $out = Get-Content $result -ErrorAction SilentlyContinue
