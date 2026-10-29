@@ -84,30 +84,38 @@ if (-not $Wsl) {
 # 4. The default shell without PowerShell on PATH (a real report: "starting powershell.exe: The
 #    system could not find the file specified"). Kiln finds it by its full path: PowerShell 7 in
 #    Program Files, and with that hidden too, Windows PowerShell in System32. Each run starts
-#    Kiln with no shell named and waits for the first frame with shell output.
+#    Kiln with no shell named and waits for that shell to run as Kiln's child (Kiln's own prompt
+#    prints nothing, so there is no output to wait for).
 if (-not $Wsl) {
     $empty = Join-Path ([System.IO.Path]::GetTempPath()) "kiln-smoke-empty"
     New-Item -ItemType Directory -Force $empty | Out-Null
     $strippedPath = (($env:PATH -split ';') | Where-Object { $_ -and $_ -notmatch 'PowerShell' }) -join ';'
     $saved = @{ PATH = $env:PATH; ProgramFiles = $env:ProgramFiles; LOCALAPPDATA = $env:LOCALAPPDATA }
     foreach ($case in @(
-        @{ name = "pwsh7"; hide = $false; expect = 'PowerShell\\7\\pwsh\.exe' },
-        @{ name = "windows-powershell"; hide = $true; expect = 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe' }
+        @{ name = "pwsh7"; hide = $false; exe = "pwsh.exe"; expect = 'PowerShell\\7\\pwsh\.exe' },
+        @{ name = "windows-powershell"; hide = $true; exe = "powershell.exe"; expect = '(?i)System32\\WindowsPowerShell\\v1\.0\\powershell\.exe' }
     )) {
-        $result = Join-Path (Resolve-Path smoke) "default-shell-$($case.name).txt"
         $log = Join-Path (Resolve-Path smoke) "default-shell-$($case.name).log"
-        Remove-Item $result, $log -ErrorAction SilentlyContinue
+        Remove-Item $log -ErrorAction SilentlyContinue
         $env:PATH = $strippedPath
         if ($case.hide) { $env:ProgramFiles = $empty; $env:LOCALAPPDATA = $empty }
-        $env:KILN_BENCH_FILE = $result
-        $env:RUST_LOG = "kiln_term=info"
-        $proc = Start-Process -FilePath (Resolve-Path $Kiln) -ArgumentList @("--bench-startup", "--cols", "80", "--rows", "20") -RedirectStandardError $log -PassThru
+        $env:RUST_LOG = "kiln_term=info,kiln=info"
+        $proc = Start-Process -FilePath (Resolve-Path $Kiln) -ArgumentList @("--fresh", "--cols", "80", "--rows", "20") -RedirectStandardError $log -PassThru
         $env:PATH = $saved.PATH; $env:ProgramFiles = $saved.ProgramFiles; $env:LOCALAPPDATA = $saved.LOCALAPPDATA
-        Remove-Item Env:KILN_BENCH_FILE, Env:RUST_LOG
-        if (-not $proc.WaitForExit(120000)) { Stop-Process -Id $proc.Id -Force; Get-Content $log -ErrorAction SilentlyContinue; throw "Kiln did not finish within 2 minutes ($($case.name))" }
+        Remove-Item Env:RUST_LOG
+        $child = $null
+        for ($i = 0; $i -lt 60 -and -not $child; $i++) {
+            Start-Sleep 1
+            $child = Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" |
+                Where-Object { $_.Name -eq $case.exe } | Select-Object -First 1
+        }
+        Start-Sleep 2
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         $started = Select-String -Path $log -Pattern 'starting .* arguments' | Select-Object -First 1
         "$($case.name): $($started.Line)"
-        if (-not ((Get-Content $result -ErrorAction SilentlyContinue) -match '^startup_ms=')) { Get-Content $log; throw "no shell started without PowerShell on PATH ($($case.name))" }
+        if (Select-String -Path $log -Pattern 'could not start the shell' -Quiet) { Get-Content $log; throw "the shell did not start ($($case.name))" }
+        if (-not $child) { Get-Content $log; throw "no $($case.exe) ran under Kiln ($($case.name))" }
+        "$($case.name): $($child.Name) running, from $($child.ExecutablePath)"
         if (-not ($started.Line -match $case.expect)) { throw "expected $($case.expect) ($($case.name)), got: $($started.Line)" }
         "ok: the default shell starts without PowerShell on PATH ($($case.name))"
     }

@@ -260,7 +260,6 @@ mod platform {
 #[cfg(target_os = "linux")]
 mod platform {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, PropMode};
     use x11rb::wrapper::ConnectionExt as _;
 
@@ -283,10 +282,22 @@ mod platform {
             .reply()
             .map_err(|e| e.to_string())?
             .atom;
-        conn.change_property32(PropMode::REPLACE, id, atom, AtomEnum::CARDINAL, &data)
-            .map_err(|e| e.to_string())?;
-        conn.flush().map_err(|e| e.to_string())?;
-        Ok(())
+        // This is a connection of its own: at start-up the window may not exist on the server
+        // yet (GPUI's connection has not sent it), and the property would be lost with a
+        // BadWindow nobody reads. So each try is checked, and a missing window tried again.
+        let mut last = String::new();
+        for _ in 0..40 {
+            let checked = conn
+                .change_property32(PropMode::REPLACE, id, atom, AtomEnum::CARDINAL, &data)
+                .map_err(|e| e.to_string())?
+                .check();
+            match checked {
+                Ok(()) => return Ok(()),
+                Err(err) => last = err.to_string(),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Err(format!("the window never took its icon: {last}"))
     }
 
     /// The icons as `_NET_WM_ICON` wants them: width, height, then ARGB pixels, for each size.
