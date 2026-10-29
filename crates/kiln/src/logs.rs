@@ -107,10 +107,22 @@ fn utc_stamp(secs: u64) -> String {
 /// The command that shows a log file in a pane.
 pub fn viewer_command(path: &std::path::Path) -> kiln_term::ShellCommand {
     let path = path.to_string_lossy().into_owned();
-    if cfg!(windows) {
+    #[cfg(windows)]
+    {
+        // The shell Kiln found by its full path (PowerShell, or cmd.exe as the last resort).
+        let shell = kiln_term::ShellCommand::platform_default();
+        let cmd = std::path::Path::new(&shell.program)
+            .file_stem()
+            .is_some_and(|s| s.eq_ignore_ascii_case("cmd"));
+        if cmd {
+            return kiln_term::ShellCommand::new(
+                shell.program,
+                ["/C".to_string(), format!("type \"{path}\" | more")],
+            );
+        }
         let quoted = path.replace('\'', "''");
         kiln_term::ShellCommand::new(
-            "powershell.exe",
+            shell.program,
             [
                 "-NoLogo",
                 "-NoProfile",
@@ -118,7 +130,9 @@ pub fn viewer_command(path: &std::path::Path) -> kiln_term::ShellCommand {
                 &format!("Get-Content -LiteralPath '{quoted}' | more"),
             ],
         )
-    } else {
+    }
+    #[cfg(not(windows))]
+    {
         // -R keeps colours, +G starts at the end like a terminal, -X leaves it on screen.
         kiln_term::ShellCommand::new("less", ["-R", "+G", path.as_str()])
     }

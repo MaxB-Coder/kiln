@@ -17,4 +17,4 @@ pub use alacritty_terminal as engine;
 pub use blocks::{Block, LiveState, Phase};
 pub use marks::{Mark, MarkRecord};
 pub use session::{EngineTerm, GridSize, Session, SessionEvent, SessionOptions};
-pub use shell::ShellCommand;
+pub use shell::{ShellCommand, windows_shell, windows_shell_candidates, windows_shell_tried};

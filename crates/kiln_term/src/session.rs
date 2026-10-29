@@ -213,6 +213,13 @@ impl Session {
             #[cfg(windows)]
             escape_args: true,
         };
+        log::info!(
+            "starting {} with {} arguments in {:?}; PATH has {} entries",
+            options.shell.program,
+            options.shell.args.len(),
+            pty_options.working_directory,
+            std::env::var_os("PATH").map_or(0, |p| std::env::split_paths(&p).count()),
+        );
         let pty = tty::new(&pty_options, size.into(), 0)
             .with_context(|| format!("starting {}", options.shell.program))?;
         #[cfg(unix)]

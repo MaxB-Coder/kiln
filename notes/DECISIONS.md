@@ -527,3 +527,19 @@ Newest at the bottom.
   line under the list). Keys with ⌘, Ctrl or Alt go on to the workspace, so ⌘I and the rest
   still work. The rail's other sections take no keys: ports open with the mouse, after asking.
 
+- **Windows' shell by its full path.** A real report on the v2026.10.26 installer: "Kiln could
+  not start the shell: starting powershell.exe: The system could not find the file specified
+  (os error 2)". Kiln named the shell by its bare name, so CreateProcess looked in Kiln's
+  folder, System32 and PATH, and PowerShell lives in System32\WindowsPowerShell\v1.0, which
+  only PATH knows. CI never saw it: every Windows smoke run named its shell. Now the shell is
+  resolved to a full path (`kiln_term::windows_shell`): pwsh.exe on PATH, then
+  %ProgramFiles%\PowerShell\7, then the Microsoft Store alias in %LOCALAPPDATA%, then
+  %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe (the system's own folder from
+  GetSystemDirectoryW when SystemRoot is unset), then %ComSpec% (cmd.exe, with no PowerShell
+  arguments). wsl.exe and the log viewer go by System32 the same way. The PowerShell
+  integration is inline (`-EncodedCommand`), so no script file can be missing. The start is
+  logged (program, argument count, folder, PATH entry count), and if no shell starts the panel
+  says what was tried and how to name one: `[shell] program = "…"` in kiln.toml. The Windows
+  smoke run now starts Kiln with its default shell twice, with PowerShell's folders taken off
+  PATH: it must find PowerShell 7 in Program Files, and with that hidden too, Windows
+  PowerShell in System32.

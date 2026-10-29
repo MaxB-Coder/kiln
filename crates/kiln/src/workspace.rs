@@ -2753,16 +2753,37 @@ impl Workspace {
     fn render_panes(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(tab) = self.tabs.get(self.active) else {
             let p = palette();
-            let message = self
-                .start_error
-                .clone()
-                .unwrap_or_else(|| "No sessions".into());
+            let Some(message) = self.start_error.clone() else {
+                return div()
+                    .p(px(16.))
+                    .pt(TITLEBAR_HEIGHT)
+                    .text_color(theme::hsla(p.failed))
+                    .font_family(FONT_FAMILY)
+                    .child("No sessions")
+                    .into_any_element();
+            };
+            // What was tried, and where to name a shell instead.
+            let config = config::config_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "kiln.toml".into());
+            let tried =
+                cfg!(windows).then(|| format!("Kiln tried {}.", kiln_term::windows_shell_tried()));
             return div()
                 .p(px(16.))
                 .pt(TITLEBAR_HEIGHT)
-                .text_color(theme::hsla(p.failed))
+                .flex()
+                .flex_col()
+                .gap(px(8.))
                 .font_family(FONT_FAMILY)
-                .child(format!("Kiln could not start the shell: {message}"))
+                .child(
+                    div()
+                        .text_color(theme::hsla(p.failed))
+                        .child(format!("Kiln could not start the shell: {message}")),
+                )
+                .children(tried.map(|t| div().text_color(theme::hsla(p.fg_dim)).child(t)))
+                .child(div().text_color(theme::hsla(p.fg_dim)).child(format!(
+                    "Name the shell to use in {config}: [shell] program = \"…\""
+                )))
                 .into_any_element();
         };
         let several = tab.panes.len() > 1 && !self.focus_mode;
