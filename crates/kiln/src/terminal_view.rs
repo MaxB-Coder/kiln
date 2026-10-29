@@ -653,7 +653,7 @@ impl TerminalView {
         }
         self.first_frame_logged = true;
         let elapsed = self.started.elapsed();
-        log::info!("first frame with shell output after {elapsed:?}");
+        log::info!("first frame with shell output or at a prompt after {elapsed:?}");
         if self.bench_startup {
             let line = format!("startup_ms={:.1}", elapsed.as_secs_f64() * 1000.);
             println!("{line}");
@@ -2165,9 +2165,17 @@ impl Focusable for TerminalView {
 }
 
 impl Render for TerminalView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.hit_regions.clear();
         let entity: Entity<Self> = cx.entity();
+        // The shell is up once it reaches its first prompt, even when nothing shows on the
+        // grid: Kiln's own prompt draws in the input box and prints nothing.
+        if !self.first_frame_logged && self.is_at_prompt() {
+            let view = entity.clone();
+            window.defer(cx, move |window, cx| {
+                view.update(cx, |view, cx| view.on_first_frame(window, cx));
+            });
+        }
 
         enum Layout {
             Classic {
