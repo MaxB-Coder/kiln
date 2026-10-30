@@ -790,6 +790,7 @@ impl Workspace {
     /// The shortcuts pop-up: opens over everything, closes with the same keys, Esc or a click
     /// outside.
     fn toggle_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("shortcuts: toggled (open: {})", self.shortcuts.is_none());
         if self.shortcuts.take().is_some() {
             self.focus_active(window, cx);
             cx.notify();
@@ -1539,6 +1540,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        log::info!("rename: started for {target:?}");
         self.sidebar_menu = None;
         self.colour_menu = None;
         self.show_sidebar();
@@ -1990,6 +1992,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        log::info!("sidebar menu: opened for {target:?} at {position:?}");
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         self.sidebar_menu = Some(SidebarMenu {
@@ -2087,7 +2090,12 @@ impl Workspace {
                     }])
                     .font_family(FONT_FAMILY)
                     .text_size(px(12.))
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                        log::info!(
+                            "sidebar menu: closed by a {:?} click outside at {:?}",
+                            event.button,
+                            event.position
+                        );
                         this.sidebar_menu = None;
                         cx.notify();
                     }))

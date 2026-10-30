@@ -127,3 +127,65 @@ if (-not $Wsl) {
         "ok: the default shell reaches a prompt without PowerShell on PATH ($($case.name))"
     }
 }
+
+# 5. The sidebar with a real mouse and keyboard (reports from a Windows PC: right-click on a
+#    session did nothing; Ctrl+Shift+/ did not open the shortcuts). Input goes through user32 as
+#    a person's would; Kiln's log says what happened.
+if (-not $Wsl) {
+    Add-Type -Namespace KilnInput -Name Win -MemberDefinition @"
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+[StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+[DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
+[DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+"@
+    $log = Join-Path (Resolve-Path smoke) "sidebar-input.log"
+    $env:RUST_LOG = "kiln=info"
+    $proc = Start-Process -FilePath (Resolve-Path $Kiln) -ArgumentList @("--fresh", "--cols", "90", "--rows", "24", "--", "powershell.exe", "-NoLogo", "-Command", "Start-Sleep 90") -RedirectStandardError $log -PassThru
+    Remove-Item Env:RUST_LOG
+    $hwnd = [IntPtr]::Zero
+    for ($i = 0; $i -lt 30 -and $hwnd -eq [IntPtr]::Zero; $i++) { Start-Sleep 1; $proc.Refresh(); $hwnd = $proc.MainWindowHandle }
+    if ($hwnd -eq [IntPtr]::Zero) { throw "no Kiln window" }
+    Start-Sleep 4
+    [KilnInput.Win]::SetForegroundWindow($hwnd) | Out-Null
+    $scale = [KilnInput.Win]::GetDpiForWindow($hwnd) / 96.0
+    # A point in Kiln's window, in logical pixels from its top-left corner.
+    $at = {
+        param($x, $y)
+        $p = New-Object KilnInput.Win+POINT
+        $p.X = [int]($x * $scale); $p.Y = [int]($y * $scale)
+        [KilnInput.Win]::ClientToScreen($hwnd, [ref]$p) | Out-Null
+        [KilnInput.Win]::SetCursorPos($p.X, $p.Y) | Out-Null
+        Start-Sleep -Milliseconds 300
+    }
+    $click = { param($down, $up) [KilnInput.Win]::mouse_event($down, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60; [KilnInput.Win]::mouse_event($up, 0, 0, 0, [UIntPtr]::Zero) }
+    $key = { param([byte[]]$keys) foreach ($k in $keys) { [KilnInput.Win]::keybd_event($k, 0, 0, [UIntPtr]::Zero) }; [array]::Reverse($keys); foreach ($k in $keys) { [KilnInput.Win]::keybd_event($k, 0, 2, [UIntPtr]::Zero) }; Start-Sleep -Milliseconds 800 }
+    $shot = {
+        param($name)
+        $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+        [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+        $bitmap.Save("smoke/$name.png")
+    }
+    # The terminal first, to give the window the keyboard; then the session's row in the sidebar.
+    & $at 500 200; & $click 0x0002 0x0004
+    & $at 70 69; & $click 0x0008 0x0010
+    Start-Sleep 1; & $shot "windows-sidebar-right-click"
+    & $key @(0x1B)
+    & $at 70 69; & $click 0x0002 0x0004; Start-Sleep -Milliseconds 80; & $click 0x0002 0x0004
+    Start-Sleep 1; & $shot "windows-sidebar-double-click"
+    & $key @(0x1B)
+    & $at 500 200; & $click 0x0002 0x0004
+    & $key @(0x11, 0x10, 0xBF)
+    Start-Sleep 1; & $shot "windows-shortcuts-key"
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    Start-Sleep 1
+    $lines = Get-Content $log | Select-String -Pattern 'sidebar menu|rename: started|shortcuts: toggled'
+    $lines | ForEach-Object { $_.Line }
+    if (-not ($lines -match 'sidebar menu: opened')) { throw "a right-click on a session opened no menu" }
+    if (-not ($lines -match 'rename: started')) { throw "a double-click on a session started no rename" }
+    if (-not ($lines -match 'shortcuts: toggled \(open: true\)')) { throw "Ctrl+Shift+/ did not open the shortcuts" }
+    "ok: right-click, double-click and Ctrl+Shift+/ work with real input"
+}

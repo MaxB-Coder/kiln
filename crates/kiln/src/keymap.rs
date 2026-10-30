@@ -118,6 +118,19 @@ pub fn bindings(style: KeyStyle) -> Vec<KeyBinding> {
             KeyBinding::new("cmd-9", SelectSession9, None),
         ]),
         KeyStyle::Pc => bindings.extend([
+            // Windows reports Shift with a punctuation or digit key as the character it types
+            // ("ctrl-shift-/" arrives as "ctrl-?"), so each Ctrl+Shift binding on one of those
+            // keys has that form too (`is_layout_alias`; the pop-up lists only the first).
+            KeyBinding::new("ctrl-?", ToggleShortcuts, None),
+            KeyBinding::new("ctrl-<", EditConfig, None),
+            KeyBinding::new("ctrl->", ToggleFocusMode, None),
+            KeyBinding::new("ctrl-+", ZoomIn, None),
+            KeyBinding::new("ctrl-_", ZoomOut, None),
+            KeyBinding::new("ctrl-)", ZoomReset, None),
+            KeyBinding::new("ctrl-}", FocusNextPane, None),
+            KeyBinding::new("ctrl-{", FocusPrevPane, None),
+            // F1 for the shortcuts on any layout, as F2 renames (not in full-screen programs).
+            KeyBinding::new("f1", ToggleShortcuts, Some("Terminal && !full_screen")),
             KeyBinding::new("shift-insert", Paste, terminal),
             KeyBinding::new("ctrl-tab", NextSession, None),
             KeyBinding::new("ctrl-shift-tab", PrevSession, None),
@@ -428,21 +441,49 @@ pub fn rows<'a>(
     rows
 }
 
+/// The shifted characters of the Ctrl+Shift bindings on punctuation and digits, keyed by the
+/// key: what Windows reports instead (on US and UK layouts).
+const SHIFTED: [(&str, &str); 8] = [
+    ("/", "?"),
+    (",", "<"),
+    (".", ">"),
+    ("=", "+"),
+    ("-", "_"),
+    ("0", ")"),
+    ("]", "}"),
+    ("[", "{"),
+];
+
+/// A binding's second form for Windows ("ctrl-?" for "ctrl-shift-/"), left out of what Kiln
+/// shows.
+pub fn is_layout_alias(keystrokes: &[Keystroke]) -> bool {
+    keystrokes
+        .iter()
+        .any(|k| !k.modifiers.shift && SHIFTED.iter().any(|(_, shifted)| k.key == *shifted))
+}
+
 /// The rows for the keymap in effect.
 pub fn live_rows(cx: &App, style: KeyStyle) -> Vec<ShortcutRow> {
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
     rows(
-        keymap.bindings().map(|binding| {
-            (
-                binding.action().name(),
-                binding
-                    .keystrokes()
-                    .iter()
-                    .map(|k| k.inner().clone())
-                    .collect(),
-            )
-        }),
+        keymap
+            .bindings()
+            .filter(|b| {
+                let keys: Vec<Keystroke> =
+                    b.keystrokes().iter().map(|k| k.inner().clone()).collect();
+                !is_layout_alias(&keys)
+            })
+            .map(|binding| {
+                (
+                    binding.action().name(),
+                    binding
+                        .keystrokes()
+                        .iter()
+                        .map(|k| k.inner().clone())
+                        .collect(),
+                )
+            }),
         style,
     )
 }
@@ -453,7 +494,10 @@ pub fn keys_for(action: &dyn Action, cx: &App, style: KeyStyle) -> String {
     let keymap = keymap.borrow();
     keymap
         .bindings_for_action(action)
-        .next()
+        .find(|b| {
+            let keys: Vec<Keystroke> = b.keystrokes().iter().map(|k| k.inner().clone()).collect();
+            !is_layout_alias(&keys)
+        })
         .map(|binding| format_chord(binding.keystrokes().iter().map(|k| k.inner()), style))
         .unwrap_or_default()
 }
@@ -502,7 +546,10 @@ mod tests {
     use super::*;
 
     fn rows_for(style: KeyStyle) -> (Vec<KeyBinding>, Vec<ShortcutRow>) {
-        let bindings = bindings(style);
+        let bindings: Vec<KeyBinding> = bindings(style)
+            .into_iter()
+            .filter(|b| !is_layout_alias(&keys_of(b)))
+            .collect();
         let rows = rows(
             bindings.iter().map(|b| {
                 (
@@ -570,7 +617,42 @@ mod tests {
             assert!(!p, "{style:?}: something is bound to P");
         }
         assert_eq!(keys(&pc, "Next session").unwrap(), ["Ctrl+Tab"]);
-        assert_eq!(keys(&pc, "Keyboard shortcuts").unwrap(), ["Ctrl+Shift+/"]);
+        assert_eq!(
+            keys(&pc, "Keyboard shortcuts").unwrap(),
+            ["Ctrl+Shift+/", "F1"]
+        );
+    }
+
+    fn keys_of(binding: &KeyBinding) -> Vec<Keystroke> {
+        binding
+            .keystrokes()
+            .iter()
+            .map(|k| k.inner().clone())
+            .collect()
+    }
+
+    #[test]
+    fn shifted_punctuation_also_binds_the_character_windows_reports() {
+        let all = bindings(KeyStyle::Pc);
+        for binding in &all {
+            let keys = keys_of(binding);
+            let [k] = keys.as_slice() else { continue };
+            let Some((_, shifted)) = SHIFTED.iter().find(|(key, _)| k.key == *key) else {
+                continue;
+            };
+            if !(k.modifiers.control && k.modifiers.shift) || k.modifiers.alt {
+                continue;
+            }
+            let alias = all.iter().any(|other| {
+                let other_keys = keys_of(other);
+                other.action().name() == binding.action().name()
+                    && other_keys.len() == 1
+                    && other_keys[0].key == *shifted
+                    && other_keys[0].modifiers.control
+                    && !other_keys[0].modifiers.shift
+            });
+            assert!(alias, "{} has no ctrl-{shifted}", binding.action().name());
+        }
     }
 
     #[test]
