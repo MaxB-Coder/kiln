@@ -1567,7 +1567,11 @@ fn sidebar(s: &mut Shots, state_file: &std::path::Path) {
 
     // The shortcuts hint opens the pop-up, which lists the new keys.
     let hint_y = s.workspace(|w| w.sidebar_rows())[0].2;
-    s.click_button(40., hint_y, MouseButton::Left, 1);
+    // Only the key shows; the name comes as a tooltip under the mouse.
+    s.mouse_move(22., hint_y);
+    s.pump(Duration::from_millis(1500));
+    s.shot("sb9a-hint-tooltip");
+    s.click_button(22., hint_y, MouseButton::Left, 1);
     s.shot("sb9-shortcuts");
     s.keystroke("escape");
     std::fs::copy(&path, s.out.join("sb-kiln.toml")).unwrap();

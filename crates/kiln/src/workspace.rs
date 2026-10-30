@@ -93,6 +93,33 @@ pub enum Panel {
     Rail,
 }
 
+/// A small label shown under the mouse (GPUI shows it after a moment's hover).
+pub struct Tooltip(SharedString);
+
+impl Tooltip {
+    pub fn view(text: impl Into<SharedString>, cx: &mut App) -> gpui::AnyView {
+        let text = text.into();
+        cx.new(|_| Tooltip(text)).into()
+    }
+}
+
+impl Render for Tooltip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = palette();
+        div()
+            .px(px(8.))
+            .py(px(4.))
+            .rounded(px(6.))
+            .bg(theme::hsla(p.raised))
+            .border_1()
+            .border_color(theme::hsla(p.bg1))
+            .font_family(FONT_FAMILY)
+            .text_size(px(11.))
+            .text_color(theme::hsla(p.fg))
+            .child(self.0.clone())
+    }
+}
+
 /// What the sidebar's inline editor renames.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenameTarget {
@@ -2490,12 +2517,12 @@ impl Workspace {
                         .on_click(|_, window, cx| {
                             window.dispatch_action(Box::new(ToggleShortcuts), cx)
                         })
+                        .tooltip(|_, cx| Tooltip::view("Keyboard shortcuts", cx))
                         .child(SharedString::from(keymap::keys_for(
                             &ToggleShortcuts,
                             cx,
                             key_style(),
-                        )))
-                        .child("Shortcuts"),
+                        ))),
                 ),
             )
             .into_any_element()
