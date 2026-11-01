@@ -244,6 +244,8 @@ pub struct TerminalView {
     _context_task: Option<Task<()>>,
     started: Instant,
     pub(crate) first_frame_logged: bool,
+    /// The prompt row's cursor column and text last logged (each change logs once, at info).
+    logged_prompt: Option<(usize, String)>,
     first_output_logged: bool,
     bench_startup: bool,
     /// `KILN_TRACE_LATENCY=1`: logs keystroke → first frame painted after the shell answered.
@@ -342,6 +344,7 @@ impl TerminalView {
             _context_task: None,
             started,
             first_frame_logged: false,
+            logged_prompt: None,
             first_output_logged: false,
             bench_startup,
             trace_latency: std::env::var_os("KILN_TRACE_LATENCY").is_some(),
@@ -2217,6 +2220,15 @@ impl Render for TerminalView {
                     let row = live.prompt_top.map_or(0, |p| p.saturating_sub(top));
                     (row, live.prompt_column, failed)
                 });
+                if log::log_enabled!(log::Level::Info) && prompt.is_some() {
+                    let row = &grid[grid.cursor.point.line];
+                    let text: String = (0..grid.columns()).map(|c| row[Column(c)].c).collect();
+                    let now = (grid.cursor.point.column.0, text.trim_end().to_string());
+                    if self.logged_prompt.as_ref() != Some(&now) {
+                        log::info!("prompt: cursor at column {}, line {:?}", now.0, now.1);
+                        self.logged_prompt = Some(now);
+                    }
+                }
                 Layout::Blocks { prompt, flame }
             }
         };

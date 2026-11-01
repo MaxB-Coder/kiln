@@ -174,6 +174,10 @@ impl BlockRecorder {
                 // Line editors may redraw the prompt (and with it this mark) while the user
                 // types; the first one marks where the input really starts.
                 if live.input_start.is_none() {
+                    log::info!(
+                        "prompt: input starts at column {column} (the prompt at column {})",
+                        live.prompt_column
+                    );
                     live.input_start = Some((abs, column));
                 }
                 live.phase = Phase::Prompt;

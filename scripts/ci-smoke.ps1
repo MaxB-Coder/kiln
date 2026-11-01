@@ -189,3 +189,53 @@ if (-not $Wsl) {
     if (-not ($lines -match 'shortcuts: toggled \(open: true\)')) { throw "Ctrl+Shift+/ did not open the shortcuts" }
     "ok: right-click, double-click and Ctrl+Shift+/ work with real input"
 }
+
+# 6. Kiln's flame prompt in PowerShell 7 and Windows PowerShell 5.1 (a report from a Windows PC:
+#    the cursor sat under the flame), and the shell's own prompt. Kiln logs where input starts,
+#    the cursor's column and the prompt line at each change; "ab" is typed to see where it lands.
+if (-not $Wsl) {
+    $failures = @()
+    foreach ($case in @(
+        @{ name = "pwsh7"; skip = ""; prompt = "kiln" },
+        @{ name = "windows-powershell"; skip = "pwsh.exe"; prompt = "kiln" },
+        @{ name = "windows-powershell-own-prompt"; skip = "pwsh.exe"; prompt = "shell" }
+    )) {
+        $log = Join-Path (Resolve-Path smoke) "prompt-$($case.name).log"
+        $appdata = Join-Path ([System.IO.Path]::GetTempPath()) "kiln-prompt-$($case.name)"
+        New-Item -ItemType Directory -Force (Join-Path $appdata "Kiln") | Out-Null
+        Set-Content -Path (Join-Path $appdata "Kiln\kiln.toml") -Value @('[shell]', "prompt = `"$($case.prompt)`"")
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = (Resolve-Path $Kiln).Path
+        foreach ($arg in @("--fresh", "--cols", "90", "--rows", "24")) { $psi.ArgumentList.Add($arg) }
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardError = $true
+        $psi.Environment["APPDATA"] = $appdata
+        $psi.Environment["RUST_LOG"] = "kiln=info,kiln_term=info"
+        if ($case.skip) { $psi.Environment["KILN_TEST_SKIP_SHELLS"] = $case.skip }
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        $hwnd = [IntPtr]::Zero
+        for ($i = 0; $i -lt 30 -and $hwnd -eq [IntPtr]::Zero; $i++) { Start-Sleep 1; $proc.Refresh(); $hwnd = $proc.MainWindowHandle }
+        Start-Sleep 6
+        [KilnInput.Win]::SetForegroundWindow($hwnd) | Out-Null
+        $scale = [KilnInput.Win]::GetDpiForWindow($hwnd) / 96.0
+        & $at 500 200; & $click 0x0002 0x0004
+        Start-Sleep 1; & $shot "windows-prompt-$($case.name)"
+        & $key @(0x41); & $key @(0x42)
+        Start-Sleep 1; & $shot "windows-prompt-typed-$($case.name)"
+        $proc.Kill()
+        $proc.WaitForExit(10000) | Out-Null
+        $stderr.Result | Set-Content $log
+        $lines = Get-Content $log | Select-String -Pattern 'prompt: ' | ForEach-Object { $_.Line -replace '^\[[^\]]*\] ', '' }
+        $lines | ForEach-Object { "$($case.name): $_" }
+        if ($case.prompt -eq "kiln") {
+            if (-not ($lines -match 'input starts at column 2 ')) { $failures += "$($case.name): input does not start at column 2" }
+            if (-not ($lines -match 'cursor at column 2, line ""')) { $failures += "$($case.name): the cursor was never at column 2 on the blank prompt" }
+            if (-not ($lines -match 'cursor at column 4, line "  ab"')) { $failures += "$($case.name): typed text is not after the flame" }
+        } else {
+            if (-not ($lines -match 'line "PS [A-Z]:\\.*>')) { $failures += "$($case.name): no PowerShell prompt shown" }
+        }
+    }
+    if ($failures) { $failures; throw "the prompt is not where Kiln draws it" }
+    "ok: the flame prompt and the shell's own prompt in PowerShell 7 and 5.1"
+}
