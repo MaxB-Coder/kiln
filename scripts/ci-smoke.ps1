@@ -203,7 +203,7 @@ if (-not $Wsl) {
         $log = Join-Path (Resolve-Path smoke) "prompt-$($case.name).log"
         $appdata = Join-Path ([System.IO.Path]::GetTempPath()) "kiln-prompt-$($case.name)"
         New-Item -ItemType Directory -Force (Join-Path $appdata "Kiln") | Out-Null
-        Set-Content -Path (Join-Path $appdata "Kiln\kiln.toml") -Value @('[shell]', "prompt = `"$($case.prompt)`"")
+        Set-Content -Path (Join-Path $appdata "Kiln\kiln.toml") -Value @('cursor_blink = false', '[shell]', "prompt = `"$($case.prompt)`"")
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = (Resolve-Path $Kiln).Path
         foreach ($arg in @("--fresh", "--cols", "90", "--rows", "24")) { $psi.ArgumentList.Add($arg) }

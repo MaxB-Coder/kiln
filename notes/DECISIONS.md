@@ -559,6 +559,9 @@ Newest at the bottom.
   row, with Kiln's prompt, the cursor is never drawn left of the two flame cells
   (`live_element::drawn_column`). If the shell really were at column 0, typed text would still
   land under the flame, and this would not help.
+  The flame's width is also capped so at least half a cell stays free before the cursor at any
+  line height and cell width (`flame::size`, tested at 100, 125, 150 and 200% rounding). The
+  runner runs at 100% only, so other display scales are covered by that test, not by a shot.
 - **Lighter dev builds.** `debug = "line-tables-only"`, and no debug info for dependencies: a
   fresh debug, test and dist build went from 5.9 GB in 9 minutes to 3.9 GB in 5 (macOS arm64;
   debug alone 2.8 to 1.4 GB). A panic's backtrace still gives file and line in Kiln's code.

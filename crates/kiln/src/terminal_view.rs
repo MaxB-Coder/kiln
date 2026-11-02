@@ -2307,7 +2307,7 @@ impl Render for TerminalView {
                     let cursor_floor = flame.map(|(row, column, _)| (row, column + 2));
                     // Where the flame goes: the workspace paints it (see `Self::flame`).
                     let flame = flame.map(|(row, column, _)| {
-                        let (w, h) = flame::size(self.metrics.line_height);
+                        let (w, h) = flame::size(self.metrics.line_height, self.metrics.cell_width);
                         let line = self.metrics.line_height;
                         let view = entity.clone();
                         canvas(

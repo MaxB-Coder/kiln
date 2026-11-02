@@ -110,10 +110,13 @@ pub fn parse_path(d: &str) -> Vec<Segment> {
     out
 }
 
-/// The flame's size for a text line: a little under the line's height, the frames' aspect.
-pub fn size(line_height: Pixels) -> (Pixels, Pixels) {
-    let height = line_height * 0.82;
-    (height * (VIEW_W / VIEW_H), height)
+/// The flame's size for a text line: a little under the line's height, the frames' aspect. It
+/// fits its two cells with at least half a cell left before the cursor, whatever the font's
+/// line height and cell width (they differ by platform and font).
+pub fn size(line_height: Pixels, cell_width: Pixels) -> (Pixels, Pixels) {
+    let aspect = VIEW_W / VIEW_H;
+    let height = (line_height * 0.82).min(cell_width * 1.5 / aspect);
+    (height * aspect, height)
 }
 
 /// Paints `frame` into `bounds`: accent orange, or muted red after a failed command; `opacity`
@@ -294,8 +297,23 @@ mod tests {
 
     #[test]
     fn the_flame_sits_inside_a_line() {
-        let (w, h) = size(px(20.));
+        let (w, h) = size(px(20.), px(9.));
         assert!(h < px(20.));
         assert!((f32::from(w) / f32::from(h) - 0.75).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_flame_leaves_a_gap_before_the_cursor_at_any_scale() {
+        // Cell width and line height as JetBrains Mono gives them at 13 pt, then taller lines.
+        for (cell, line) in [(7.8_f32, 17.2_f32), (7.8, 24.), (6., 20.)] {
+            for scale in [1.0_f32, 1.25, 1.5, 2.] {
+                let snap = |v: f32| (v * scale).round() / scale;
+                let (cell, line) = (snap(cell), snap(line));
+                let (w, h) = size(px(line), px(cell));
+                let gap = cell * 2. - f32::from(w);
+                assert!(gap >= cell * 0.49, "{cell} {line} at {scale}: gap {gap}");
+                assert!(f32::from(h) <= line);
+            }
+        }
     }
 }
