@@ -72,3 +72,9 @@ DESKTOP
     ;;
 esac
 ls -la "$out"
+# Build files unused for 14 days go; the current build stays. Optional, and never fails the build.
+if command -v cargo-sweep >/dev/null; then
+  cargo sweep --time 14 || true
+else
+  echo "package.sh: cargo install cargo-sweep clears old build files automatically"
+fi

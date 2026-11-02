@@ -2303,6 +2303,8 @@ impl Render for TerminalView {
                     let inner_x = PADDING_X - INPUT_INSET;
                     let p = palette();
                     let input_bg = self.tint().map_or(p.raised, |(tint, _)| tint.raised(&p));
+                    // The two cells under the flame: the cursor is drawn after them.
+                    let cursor_floor = flame.map(|(row, column, _)| (row, column + 2));
                     // Where the flame goes: the workspace paints it (see `Self::flame`).
                     let flame = flame.map(|(row, column, _)| {
                         let (w, h) = flame::size(self.metrics.line_height);
@@ -2346,7 +2348,8 @@ impl Render for TerminalView {
                                             top,
                                             rows,
                                         )
-                                        .blank(blank),
+                                        .blank(blank)
+                                        .cursor_floor(cursor_floor),
                                     )
                                     .children(flame),
                             ),

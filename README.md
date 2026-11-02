@@ -159,6 +159,11 @@ scripts/linux-check.sh                                       # Linux build and t
 scripts/package.sh                                           # installers for this platform
 ```
 
+Dev builds keep line tables only, so stack traces still have file and line numbers. If
+[cargo-sweep](https://crates.io/crates/cargo-sweep) is installed, `scripts/package.sh` ends by
+removing build files unused for 14 days; without it, nothing is removed and the build still
+succeeds.
+
 `PLAN.md` is the plan; `notes/` has each phase's report, the decisions made along the way
 (`DECISIONS.md`) and open questions (`QUESTIONS.md`).
 

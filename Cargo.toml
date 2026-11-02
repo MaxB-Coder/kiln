@@ -33,9 +33,14 @@ calloop = { git = "https://github.com/zed-industries/calloop", rev = "3759371fee
 khronos-egl = { git = "https://github.com/zed-industries/khronos-egl", rev = "42214b36347b108fd9630ca6254b96dde59e04fe" }
 
 [profile.dev]
-# GPUI is slow unoptimised; keep our code debuggable but deps fast.
+# GPUI is slow unoptimised; keep our code debuggable but deps fast. Line tables keep file and
+# line numbers in stack traces at a fraction of full debug info's size (the test profile
+# inherits all of this).
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.release]
 lto = "thin"

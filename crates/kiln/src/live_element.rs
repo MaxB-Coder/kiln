@@ -33,6 +33,19 @@ pub struct LiveElement {
     input: bool,
     /// Draws nothing (a prompt still being drawn; see `TerminalView`).
     blank: bool,
+    /// A row and the column the cursor is not drawn left of (see `drawn_column`).
+    cursor_floor: Option<(usize, usize)>,
+}
+
+/// Where the cursor is drawn. Kiln's prompt is two blank cells with the flame over them, and
+/// typing starts after them; but some Windows consoles leave the reported cursor at the row's
+/// start until something is typed (blanks over blanks paint nothing), which puts it under the
+/// flame. So on the prompt's row it is never drawn left of `floor`.
+pub fn drawn_column(column: usize, row: i32, floor: Option<(usize, usize)>) -> usize {
+    match floor {
+        Some((floor_row, floor_column)) if row == floor_row as i32 => column.max(floor_column),
+        _ => column,
+    }
 }
 
 impl LiveElement {
@@ -53,7 +66,13 @@ impl LiveElement {
             show_cursor: true,
             input: true,
             blank: false,
+            cursor_floor: None,
         }
+    }
+
+    pub fn cursor_floor(mut self, floor: Option<(usize, usize)>) -> Self {
+        self.cursor_floor = floor;
+        self
     }
 
     pub fn blank(mut self, blank: bool) -> Self {
@@ -142,6 +161,7 @@ impl Element for LiveElement {
         let cursor = content.cursor;
         let cursor_abs = history + cursor.point.line.0;
         let cursor_row = cursor_abs - self.top as i32;
+        let cursor_column = drawn_column(cursor.point.column.0, cursor_row, self.cursor_floor);
         let rows = if self.fill {
             ((f32::from(bounds.size.height) / f32::from(metrics.line_height)) as usize)
                 .min(self.rows)
@@ -152,7 +172,7 @@ impl Element for LiveElement {
             !self.blank && self.show_cursor && cursor_row >= 0 && (cursor_row as usize) < rows;
         let block_cursor_at =
             (focused && blink_on && cursor_in_view && cursor.shape == CursorShape::Block)
-                .then_some((cursor_row as usize, cursor.point.column.0));
+                .then_some((cursor_row as usize, cursor_column));
 
         let mut painter = GridPainter::new(bounds.origin, metrics, &colors, Tone::Normal)
             .with_scale(window.scale_factor());
@@ -180,7 +200,7 @@ impl Element for LiveElement {
         let mut cursor_under_text = false;
         if cursor_in_view && cursor.shape != CursorShape::Hidden && marked_text.is_none() {
             let cell = Bounds::new(
-                painter.cell_origin(cursor.point.column.0, cursor_row as usize),
+                painter.cell_origin(cursor_column, cursor_row as usize),
                 size(cell_w, line_h),
             );
             let thickness = px(CURSOR_THICKNESS);
@@ -230,7 +250,7 @@ impl Element for LiveElement {
                 window
                     .text_system()
                     .shape_line(marked.into(), metrics.font_size, &[style], None);
-            let at = painter.cell_origin(cursor.point.column.0, cursor_row.max(0) as usize);
+            let at = painter.cell_origin(cursor_column, cursor_row.max(0) as usize);
             let bounds = Bounds::new(at, size(shaped.width, line_h));
             (at, shaped, bounds)
         });
@@ -312,5 +332,24 @@ impl Element for LiveElement {
         if self.input && self.view.read(cx).output_since_input {
             self.view.update(cx, |view, _| view.frame_painted());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::drawn_column;
+
+    #[test]
+    fn the_cursor_stays_right_of_the_flame() {
+        let floor = Some((0, 2));
+        // A console that has not moved it yet: after the two flame cells.
+        assert_eq!(drawn_column(0, 0, floor), 2);
+        assert_eq!(drawn_column(2, 0, floor), 2);
+        // Typing moves it on.
+        assert_eq!(drawn_column(7, 0, floor), 7);
+        // A wrapped line's next row starts at the left edge.
+        assert_eq!(drawn_column(0, 1, floor), 0);
+        // The shell's own prompt has no floor.
+        assert_eq!(drawn_column(0, 0, None), 0);
     }
 }

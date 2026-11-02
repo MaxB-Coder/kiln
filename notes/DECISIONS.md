@@ -543,3 +543,25 @@ Newest at the bottom.
   smoke run now starts Kiln with its default shell twice, with PowerShell's folders taken off
   PATH: it must find PowerShell 7 in Program Files, and with that hidden too, Windows
   PowerShell in System32.
+- **Windows keys and the sidebar hint.** GPUI on Windows reports Shift with a punctuation or
+  digit key as the character typed, shift cleared: Ctrl+Shift+/ arrives as `ctrl-?`. So every
+  Ctrl+Shift binding on those keys failed on every layout, not only UK. Each also binds that
+  form (`keymap::is_layout_alias`, left out of the hint and the pop-up), and F1 opens the
+  shortcuts outside full-screen programs. The sidebar hint is the key alone, with a tooltip.
+  The reported dead right-click did not reproduce: on the Windows runner real input opens the
+  menu and draws it. A group outside any repository has no project, so its header has no menu.
+- **The cursor and the flame on Windows.** Reported from a PC: the cursor sat under the flame.
+  On Windows Server 2025 it does not, in PowerShell 7 or 5.1: input and the cursor are at
+  column 2 and typed text lands after the flame (smoke step 6, real keystrokes, Kiln's own
+  `prompt:` log lines). Kiln uses the system's ConPTY, which differs by Windows build, so a
+  console that leaves the reported cursor at column 0 until something is typed would give
+  exactly the report. Unproven on that build; the fix does not depend on it: on the prompt's
+  row, with Kiln's prompt, the cursor is never drawn left of the two flame cells
+  (`live_element::drawn_column`). If the shell really were at column 0, typed text would still
+  land under the flame, and this would not help.
+- **Lighter dev builds.** `debug = "line-tables-only"`, and no debug info for dependencies: a
+  fresh debug, test and dist build went from 5.9 GB in 9 minutes to 3.9 GB in 5 (macOS arm64;
+  debug alone 2.8 to 1.4 GB). A panic's backtrace still gives file and line in Kiln's code.
+  The release and dist profiles are unchanged. The 72 GB that prompted this came from
+  build files piling up over time, so `scripts/package.sh` ends with `cargo sweep --time 14`
+  when cargo-sweep is installed, and otherwise prints how to get it. It never fails the build.
