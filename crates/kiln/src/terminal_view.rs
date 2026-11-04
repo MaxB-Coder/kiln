@@ -2223,9 +2223,17 @@ impl Render for TerminalView {
                 if log::log_enabled!(log::Level::Info) && prompt.is_some() {
                     let row = &grid[grid.cursor.point.line];
                     let text: String = (0..grid.columns()).map(|c| row[Column(c)].c).collect();
-                    let now = (grid.cursor.point.column.0, text.trim_end().to_string());
+                    // Where the flame and the box are too: a resize reflows the rows.
+                    let place = format!(
+                        "line {:?}; cursor row {cursor_abs}, box {:?}, flame {:?}, {} columns",
+                        text.trim_end(),
+                        prompt.map(|(top, rows, _)| (top, rows)),
+                        flame.map(|(row, column, _)| (row, column)),
+                        grid.columns()
+                    );
+                    let now = (grid.cursor.point.column.0, place);
                     if self.logged_prompt.as_ref() != Some(&now) {
-                        log::info!("prompt: cursor at column {}, line {:?}", now.0, now.1);
+                        log::info!("prompt: cursor at column {}, {}", now.0, now.1);
                         self.logged_prompt = Some(now);
                     }
                 }

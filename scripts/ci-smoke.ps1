@@ -239,3 +239,42 @@ if (-not $Wsl) {
     if ($failures) { $failures; throw "the prompt is not where Kiln draws it" }
     "ok: the flame prompt and the shell's own prompt in PowerShell 7 and 5.1"
 }
+
+# 7. Maximising (a report: after normal → maximised the cursor moved left onto the flame).
+#    Windows PowerShell 5.1 with the flame prompt; the window is maximised, restored and
+#    maximised again, with Kiln's prompt log and a shot of the input box after each.
+if (-not $Wsl) {
+    Add-Type -Namespace KilnShow -Name Win -MemberDefinition @"
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
+"@
+    $log = Join-Path (Resolve-Path smoke) "prompt-maximise.log"
+    $appdata = Join-Path ([System.IO.Path]::GetTempPath()) "kiln-prompt-maximise"
+    New-Item -ItemType Directory -Force (Join-Path $appdata "Kiln") | Out-Null
+    Set-Content -Path (Join-Path $appdata "Kiln\kiln.toml") -Value @('cursor_blink = false', '[window]', 'open = "last"')
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = (Resolve-Path $Kiln).Path
+    foreach ($arg in @("--fresh", "--cols", "90", "--rows", "24")) { $psi.ArgumentList.Add($arg) }
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardError = $true
+    $psi.Environment["APPDATA"] = $appdata
+    $psi.Environment["RUST_LOG"] = "kiln=info,kiln_term=info"
+    $psi.Environment["KILN_TEST_SKIP_SHELLS"] = "pwsh.exe"
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $stderr = $proc.StandardError.ReadToEndAsync()
+    $hwnd = [IntPtr]::Zero
+    for ($i = 0; $i -lt 30 -and $hwnd -eq [IntPtr]::Zero; $i++) { Start-Sleep 1; $proc.Refresh(); $hwnd = $proc.MainWindowHandle }
+    Start-Sleep 6
+    [KilnInput.Win]::SetForegroundWindow($hwnd) | Out-Null
+    $scale = [KilnInput.Win]::GetDpiForWindow($hwnd) / 96.0
+    & $at 500 200; & $click 0x0002 0x0004
+    Start-Sleep 1; & $shot "windows-resize-0-normal"
+    foreach ($step in @(@{ n = 1; cmd = 3; name = "maximised" }, @{ n = 2; cmd = 9; name = "restored" }, @{ n = 3; cmd = 3; name = "maximised-again" })) {
+        [KilnShow.Win]::ShowWindow($hwnd, $step.cmd) | Out-Null
+        Start-Sleep 3
+        & $shot "windows-resize-$($step.n)-$($step.name)"
+    }
+    $proc.Kill()
+    $proc.WaitForExit(10000) | Out-Null
+    $stderr.Result | Set-Content $log
+    Get-Content $log | Select-String -Pattern 'prompt: ' | ForEach-Object { "maximise: " + ($_.Line -replace '^\[[^\]]*\] ', '') }
+}
