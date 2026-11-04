@@ -127,12 +127,28 @@ fn main() {
         cx.on_action(|_: &Quit, cx| cx.quit());
         let new_window_args = args.clone();
         cx.on_action(move |_: &NewWindow, cx| {
+            // Beside the window in front, at its size.
+            let place = cx
+                .active_window()
+                .and_then(|w| {
+                    w.update(cx, |_, window, cx| {
+                        (
+                            window.window_bounds().get_bounds(),
+                            window.display(cx).map(|d| d.id()),
+                        )
+                    })
+                    .ok()
+                })
+                .map_or(Place::Launch, |(bounds, display)| {
+                    Place::Beside(bounds, display)
+                });
             open_window(
                 Args {
                     bench_startup: false,
                     restore: false,
                     ..new_window_args.clone()
                 },
+                place,
                 Instant::now(),
                 cx,
             )
@@ -200,7 +216,7 @@ fn main() {
             },
         ]);
 
-        open_window(args.clone(), started, cx);
+        open_window(args.clone(), Place::Launch, started, cx);
         if !args.bench_startup {
             update::start(cx);
         }
@@ -214,7 +230,14 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(kiln::keymap::bindings(kiln::keymap::KeyStyle::current()));
 }
 
-fn open_window(args: Args, started: Instant, cx: &mut App) {
+/// Where a window opens: the first one as the setting and the last window say, a new one
+/// beside the window in front.
+enum Place {
+    Launch,
+    Beside(Bounds<gpui::Pixels>, Option<gpui::DisplayId>),
+}
+
+fn open_window(args: Args, place: Place, started: Instant, cx: &mut App) {
     let config = config::current();
     let columns = args.columns.unwrap_or(config.window.columns);
     let lines = args.lines.unwrap_or(config.window.rows);
@@ -236,10 +259,45 @@ fn open_window(args: Args, started: Instant, cx: &mut App) {
             line_h * lines as f32 + px(PADDING_TOP + PADDING_BOTTOM) + TITLEBAR_HEIGHT,
         )
     };
-    let bounds = Bounds::centered(None, window_size(cell_w, line_h), cx);
+    // A size asked for on the command line, or a benchmark: exactly that, centred.
+    let exact = args.columns.is_some() || args.lines.is_some() || args.bench_startup;
+    let open = config.window.open;
+    let (window_bounds, display_id, sized_by_grid) = if exact {
+        let bounds = Bounds::centered(None, window_size(cell_w, line_h), cx);
+        (WindowBounds::Windowed(bounds), None, true)
+    } else {
+        match place {
+            Place::Launch => {
+                // The main display first.
+                let mut displays = cx.displays();
+                if let Some(main) = cx.primary_display() {
+                    displays.sort_by_key(|d| d.id() != main.id());
+                }
+                let screens: Vec<placement::Screen> = displays
+                    .iter()
+                    .map(|d| placement::Screen {
+                        uuid: d.uuid().ok().map(|u| u.to_string()),
+                        bounds: d.visible_bounds(),
+                    })
+                    .collect();
+                let saved = state::current().window.and_then(|w| w.placement);
+                let (bounds, screen) =
+                    placement::initial(saved.as_ref(), open, &screens, window_size(cell_w, line_h));
+                let windowed_fresh = saved.is_none() && matches!(bounds, WindowBounds::Windowed(_));
+                (bounds, displays.get(screen).map(|d| d.id()), windowed_fresh)
+            }
+            Place::Beside(current, display) => {
+                let area = display
+                    .and_then(|id| cx.find_display(id))
+                    .map(|d| d.visible_bounds());
+                (placement::beside(current, open, area), display, false)
+            }
+        }
+    };
 
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_bounds: Some(window_bounds),
+        display_id,
         titlebar: Some(TitlebarOptions {
             title: Some("Kiln".into()),
             appears_transparent: true,
@@ -259,9 +317,30 @@ fn open_window(args: Args, started: Instant, cx: &mut App) {
 
     let result = cx.open_window(options, move |window, cx| {
         let metrics = CellMetrics::measure(font_size, window);
-        // Cells snap to device pixels; size the window for the snapped cell so the requested
-        // columns and rows fit exactly.
-        window.resize(window_size(metrics.cell_width, metrics.line_height));
+        // Cells snap to device pixels; size a window opened for a number of columns and rows
+        // for the snapped cell so they fit exactly. Restored windows keep their size.
+        if sized_by_grid {
+            window.resize(window_size(metrics.cell_width, metrics.line_height));
+        }
+        // macOS can pass over a full-screen request at launch (seen when Kiln opens again just
+        // after a full-screen Space closed): ask once more when the window is still not there.
+        if cfg!(target_os = "macos") && matches!(window_bounds, WindowBounds::Fullscreen(_)) {
+            window
+                .spawn(cx, async |cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(1500))
+                        .await;
+                    let _ = cx.update(|window, _| {
+                        if !window.is_fullscreen() {
+                            log::info!(
+                                "window: full screen again (the first request was passed over)"
+                            );
+                            window.toggle_fullscreen();
+                        }
+                    });
+                })
+                .detach();
+        }
         cx.new(|cx| {
             Workspace::new(
                 args.shell.clone(),

@@ -955,7 +955,7 @@ fn settings(s: &mut Shots) {
     std::fs::copy(&path, s.out.join("s04-kiln-after.toml")).unwrap();
     // "Open files in": Space opens its list, the arrows choose ($EDITOR, the IDEs here, the
     // default app).
-    s.keystroke("tab tab space");
+    s.keystroke("tab tab tab space");
     s.pump(Duration::from_millis(300));
     s.scroll(590., 500., -400.);
     s.shot("s04b-open-files-in");
@@ -964,6 +964,11 @@ fn settings(s: &mut Shots) {
     assert!(written.contains("editor = \""), "{written}");
     s.shot("s04c-open-files-chosen");
     s.keystroke("escape");
+    // "Open windows", two rows up: the arrows choose, written as window.open.
+    s.keystroke("up up right");
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("open = \"full-screen\""), "{written}");
+    s.shot("s04d-open-windows");
     s.keystroke("escape");
     assert!(!open(s), "Esc closes Settings");
 

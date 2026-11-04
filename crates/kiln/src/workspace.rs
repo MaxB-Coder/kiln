@@ -120,6 +120,15 @@ impl Render for Tooltip {
     }
 }
 
+/// The window's placement as GPUI reports it, with its display's UUID.
+fn placement_of(window: &Window, cx: &App) -> crate::placement::Placement {
+    let display = window
+        .display(cx)
+        .and_then(|d| d.uuid().ok())
+        .map(|u| u.to_string());
+    crate::placement::Placement::of(window.window_bounds(), display)
+}
+
 /// What the sidebar's inline editor renames.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenameTarget {
@@ -282,6 +291,8 @@ pub struct Workspace {
     start_error: Option<String>,
     _config_watch: Task<()>,
     _state_watch: Task<()>,
+    /// The window's size, place, display and mode, kept as it changes (saved with the sessions).
+    placement: Option<crate::placement::Placement>,
 }
 
 impl Workspace {
@@ -327,6 +338,7 @@ impl Workspace {
             start_error: None,
             _config_watch: Task::ready(()),
             _state_watch: Task::ready(()),
+            placement: None,
         };
         this._config_watch = this.watch_config(window, cx);
         crate::app_icon::apply(&config.app_icon(), window, true);
@@ -341,6 +353,12 @@ impl Workspace {
             {
                 cx.notify();
             }
+        })
+        .detach();
+        // Where the window is, for the next launch: on each resize, move and full-screen change.
+        this.placement = Some(placement_of(window, cx));
+        cx.observe_window_bounds(window, |this, window, cx| {
+            this.placement = Some(placement_of(window, cx));
         })
         .detach();
         let saved = restore.then(|| state::current().window).flatten();
@@ -2250,6 +2268,7 @@ impl Workspace {
             tabs,
             sidebar_width: Some(self.sidebar_width),
             rail_width: Some(self.rail_width),
+            placement: self.placement.clone(),
         }
     }
 

@@ -23,6 +23,7 @@ pub mod naming;
 pub mod palette;
 pub mod panels;
 pub mod pills;
+pub mod placement;
 pub mod rail;
 pub mod remote;
 pub mod search;

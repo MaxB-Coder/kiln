@@ -310,6 +310,8 @@ pub struct WindowConfig {
     pub sidebar: bool,
     /// Reopen the last window's sessions (folders and splits) at launch.
     pub restore: bool,
+    /// How windows open: like the last one, full screen, or filling the screen.
+    pub open: crate::placement::OpenMode,
 }
 
 /// The theme: a built-in one by name, or "custom" from `[theme.custom]`. Colour keys right in
@@ -464,6 +466,7 @@ impl Default for WindowConfig {
             rows: 36,
             sidebar: true,
             restore: true,
+            open: Default::default(),
         }
     }
 }
@@ -627,11 +630,16 @@ editor = "auto"
 prompt = "kiln"
 
 [window]
+# The size of the very first window (columns × rows); after that, windows open as the setting
+# below says.
 columns = 120
 rows = 36
 sidebar = true
 # Reopen the last window's sessions (their folders and splits) at launch.
 restore = true
+# How windows open: "last" (as the last one was: size, place, maximised or full screen),
+# "full-screen", or "fill" (the whole screen, without a Space of its own on macOS).
+open = "last"
 
 [tints]
 # Panes running ssh or mosh to another machine get a blue tint.

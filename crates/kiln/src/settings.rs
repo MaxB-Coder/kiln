@@ -53,6 +53,8 @@ pub enum Change {
     Sidebar(bool),
     Prompt(PromptStyle),
     Restore(bool),
+    /// How windows open (`window.open`).
+    WindowOpen(crate::placement::OpenMode),
     NotifyAfter(u64),
     TintRemote(bool),
     OptionAsAlt(bool),
@@ -203,6 +205,7 @@ impl Change {
             Change::Prompt(PromptStyle::Kiln) => (&["shell", "prompt"], "kiln".into()),
             Change::Prompt(PromptStyle::Shell) => (&["shell", "prompt"], "shell".into()),
             Change::Restore(on) => (&["window", "restore"], on.into()),
+            Change::WindowOpen(open) => (&["window", "open"], open.key().into()),
             Change::NotifyAfter(secs) => (&["notify_after_secs"], (secs as i64).into()),
             Change::TintRemote(on) => (&["tints", "remote"], on.into()),
             Change::OptionAsAlt(on) => (&["option_as_alt"], on.into()),
@@ -259,6 +262,7 @@ enum Control {
     Sidebar,
     Prompt,
     Restore,
+    WindowOpen,
     NotifyAfter,
     Editor,
     TintRemote,
@@ -550,6 +554,7 @@ impl SettingsView {
             Control::Sidebar,
             Control::Prompt,
             Control::Restore,
+            Control::WindowOpen,
             Control::NotifyAfter,
             Control::Editor,
             Control::TintRemote,
@@ -644,6 +649,17 @@ impl SettingsView {
             Control::CursorBlink if flip => Change::CursorBlink(!c.cursor_blink),
             Control::Sidebar if flip => Change::Sidebar(!c.window.sidebar),
             Control::Restore if flip => Change::Restore(!c.window.restore),
+            // Space or the arrows move through the three.
+            Control::WindowOpen => {
+                use crate::placement::OpenMode;
+                let at = OpenMode::ALL
+                    .iter()
+                    .position(|m| *m == c.window.open)
+                    .unwrap_or(0) as i32;
+                let next =
+                    (at + if flip { 1 } else { step }).rem_euclid(OpenMode::ALL.len() as i32);
+                Change::WindowOpen(OpenMode::ALL[next as usize])
+            }
             Control::TintRemote if flip => Change::TintRemote(!c.tints.remote),
             Control::OptionAsAlt if flip => Change::OptionAsAlt(!c.option_as_alt),
             Control::UpdatesCheck if flip => Change::UpdatesCheck(!c.updates.check),
@@ -958,6 +974,40 @@ impl SettingsView {
             .bg(theme::hsla(p.bg))
             .child(option(0, "Kiln flame", PromptStyle::Kiln))
             .child(option(1, "Shell's own", PromptStyle::Shell))
+    }
+
+    /// "Open windows": like last time, full screen, or filling the screen.
+    fn open_choices(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        use crate::placement::OpenMode;
+        let p = palette();
+        let current = self.config.window.open;
+        div()
+            .flex()
+            .flex_row()
+            .gap(px(2.))
+            .p(px(2.))
+            .rounded(px(7.))
+            .bg(theme::hsla(p.bg))
+            .children(OpenMode::ALL.iter().enumerate().map(|(i, mode)| {
+                let (on, mode) = (current == *mode, *mode);
+                div()
+                    .id(("window-open", i))
+                    .px(px(9.))
+                    .py(px(2.))
+                    .rounded(px(5.))
+                    .text_size(px(11.))
+                    .cursor_pointer()
+                    .text_color(theme::hsla(if on {
+                        p.fg
+                    } else {
+                        theme::blend(p.bg3, p.muted, 0.5)
+                    }))
+                    .when(on, |d| d.bg(theme::hsla(p.bg1)))
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.set(Change::WindowOpen(mode), cx)),
+                    )
+                    .child(mode.label())
+            }))
     }
 
     /// Opens the system's file picker for a custom icon.
@@ -1821,6 +1871,12 @@ impl Render for SettingsView {
                     Change::Restore(!c.window.restore),
                     cx,
                 ),
+            ))
+            .child(self.row(
+                Control::WindowOpen,
+                "Open windows",
+                None,
+                self.open_choices(cx),
             ))
             .child(self.row(
                 Control::NotifyAfter,

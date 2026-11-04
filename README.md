@@ -119,6 +119,7 @@ beehive = "slate"               # terracotta, black, white, ember, slate, sage o
 
 [window]
 restore = true                  # reopen the last sessions at launch
+open = "last"                   # windows open like the last one, "full-screen", or "fill" (maximised)
 
 [tints]
 production = ["*prod*"]         # ssh hosts that get the red tint

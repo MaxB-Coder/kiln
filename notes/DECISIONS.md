@@ -568,3 +568,21 @@ Newest at the bottom.
   The release and dist profiles are unchanged. The 72 GB that prompted this came from
   build files piling up over time, so `scripts/package.sh` ends with `cargo sweep --time 14`
   when cargo-sweep is installed, and otherwise prints how to get it. It never fails the build.
+- **Windows open like the last one.** Kiln always opened a centred 120 × 36 window. Now the
+  window's placement goes into the state file with its sessions: its windowed bounds (what it
+  returns to from maximised or full screen), its display's UUID, and its mode. It is kept
+  current through GPUI's window-bounds observer (resize, move, full screen in and out) and
+  saved with the sessions every two seconds and at quit. At launch (`placement::initial`) the
+  display is the saved one by UUID, else the one under the old window's middle, else the main
+  display; the rect is moved and if need be shrunk onto that display's visible area; the mode
+  comes from `window.open` in Settings ("Open windows"): Like last time (default), Full screen
+  (native, its own Space on macOS) or Fill the screen (maximised). `window.columns` and `rows`
+  now size only the very first window; `--cols`/`--rows` and benchmarks still get exactly that
+  size, centred (the smoke runs depend on it). ⌘N opens beside the window in front at its
+  windowed size, 28 px down and right (back to the top left past the display's edge), on the
+  same display, full screen or maximised only when the setting says so.
+  GPUI applies full screen and maximised at open on macOS, Windows, X11 and Wayland. Two
+  gaps: X11 reports a full-screen window as maximised, so there it comes back maximised (and
+  X11 needs a window manager for either); and macOS once passed over the request when Kiln
+  opened two seconds after its full-screen Space closed (five other launches went full screen),
+  so on macOS a window still not full screen 1.5 s after asking asks once more.

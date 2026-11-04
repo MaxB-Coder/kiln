@@ -34,6 +34,9 @@ pub struct WindowState {
     pub sidebar_width: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rail_width: Option<f32>,
+    /// Its size, position, display and mode, for the next launch (`placement`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement: Option<crate::placement::Placement>,
 }
 
 /// A session: its panes' folders, left to right, and the name it was given, if any.
