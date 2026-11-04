@@ -57,7 +57,21 @@ pub struct LiveState {
     pub input_start: Option<(usize, usize)>,
     /// Language runtimes on the shell's PATH (name, path), as the integration reports them.
     pub tools: Vec<(String, String)>,
+    /// Just after a resize at a prompt: where the prompt and the input are from the cursor,
+    /// held for a moment while the console redraws (see `follow_redraw`).
+    after_resize: Option<AfterResize>,
 }
+
+/// The prompt's and the input's places relative to the cursor, taken right after a resize.
+#[derive(Clone, Debug)]
+struct AfterResize {
+    until: std::time::Instant,
+    prompt: Option<Anchor>,
+    input: Option<Anchor>,
+}
+
+/// How long after a resize the console may still redraw the screen.
+const REDRAW_WINDOW: Duration = Duration::from_millis(1500);
 
 /// One finished command.
 #[derive(Clone, Debug)]
@@ -150,6 +164,8 @@ impl BlockRecorder {
         live: &mut LiveState,
     ) -> Option<Block> {
         let (abs, column) = cursor_abs(term);
+        // A mark says where things are itself.
+        live.after_resize = None;
         match mark {
             Mark::PromptStart => {
                 if let Some(kiln) = live.next_kiln_prompt.take() {
@@ -427,6 +443,36 @@ pub(crate) fn resize_keeping_marks(
     live.prompt_top = prompt.map(|a| resolve(term, a).0);
     live.output_top = output.map(|a| resolve(term, a).0);
     live.input_start = input.map(|a| resolve(term, a));
+    // At a prompt, the console (ConPTY on Windows) then redraws the screen at the new size
+    // with its own wrapping, which can move the prompt's line. Its place relative to the cursor
+    // is kept for a moment and applied again after each redraw (`follow_redraw`).
+    live.after_resize = (live.phase == Phase::Prompt).then(|| AfterResize {
+        until: std::time::Instant::now() + REDRAW_WINDOW,
+        prompt: live
+            .prompt_top
+            .map(|row| anchor(term, row, live.prompt_column)),
+        input: live
+            .input_start
+            .map(|(row, column)| anchor(term, row, column)),
+    });
+}
+
+/// After output that followed a resize at a prompt: the prompt's and the input's rows found
+/// again from the cursor, wherever the console's redraw left it.
+pub(crate) fn follow_redraw(term: &EngineTerm, live: &mut LiveState) {
+    let Some(after) = live.after_resize.as_ref() else {
+        return;
+    };
+    if std::time::Instant::now() > after.until || live.phase != Phase::Prompt {
+        live.after_resize = None;
+        return;
+    }
+    if let Some(anchor) = after.prompt {
+        live.prompt_top = Some(resolve(term, anchor).0);
+    }
+    if let Some(anchor) = after.input {
+        live.input_start = Some(resolve(term, anchor));
+    }
 }
 
 fn cursor_abs(term: &EngineTerm) -> (usize, usize) {
@@ -527,6 +573,52 @@ mod tests {
         // A redraw of the same prompt (no new report) keeps it.
         mark(Mark::PromptStart, &mut live);
         assert_eq!(live.kiln_prompt, Some(false));
+    }
+
+    #[test]
+    fn the_prompt_follows_the_consoles_redraw_after_a_resize() {
+        let size = GridSize {
+            columns: 20,
+            lines: 10,
+            cell_width: 8,
+            cell_height: 16,
+        };
+        let mut term = Term::new(Config::default(), &size, EventProxy::for_test());
+        let mut parser: Processor<StdSyncHandler> = Processor::new();
+        // Output, then Kiln's prompt (two blank cells) on row 3.
+        parser.advance(&mut term, b"a\r\nb\r\nc\r\n  ");
+        let mut live = LiveState {
+            phase: Phase::Prompt,
+            prompt_top: Some(3),
+            input_start: Some((3, 2)),
+            ..Default::default()
+        };
+        resize_keeping_marks(
+            &mut term,
+            &mut live,
+            GridSize {
+                columns: 30,
+                ..size
+            },
+        );
+        assert_eq!(live.prompt_top, Some(3));
+        // The console redraws: the screen cleared and the prompt's line printed at the top,
+        // the cursor after its two cells.
+        parser.advance(&mut term, b"\x1b[2J\x1b[H  ");
+        follow_redraw(&term, &mut live);
+        let (cursor, column) = cursor_abs(&term);
+        assert_eq!((cursor, column), (live.prompt_top.unwrap(), 2));
+        assert_eq!(live.input_start, Some((cursor, 2)));
+        // Outside a prompt nothing moves.
+        let mut running = LiveState {
+            phase: Phase::Running,
+            prompt_top: Some(9),
+            ..Default::default()
+        };
+        resize_keeping_marks(&mut term, &mut running, size);
+        parser.advance(&mut term, b"x");
+        follow_redraw(&term, &mut running);
+        assert!(running.after_resize.is_none());
     }
 
     #[test]

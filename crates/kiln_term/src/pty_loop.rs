@@ -180,6 +180,10 @@ impl PtyLoop {
                 }
                 chunk = &chunk[consumed..];
             }
+            {
+                let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
+                crate::blocks::follow_redraw(terminal, &mut live);
+            }
 
             processed += unprocessed;
             unprocessed = 0;
