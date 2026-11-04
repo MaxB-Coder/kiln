@@ -268,7 +268,7 @@ if (-not $Wsl) {
     $scale = [KilnInput.Win]::GetDpiForWindow($hwnd) / 96.0
     & $at 500 200; & $click 0x0002 0x0004
     # Long lines above the prompt, wrapped at this width: maximising unwraps them.
-    [System.Windows.Forms.SendKeys]::SendWait("1..12 | % {{}'x' * 150{}}{ENTER}")
+    [System.Windows.Forms.SendKeys]::SendWait("1..12 {|} {%} {{}'x' * 150{}}{ENTER}")
     Start-Sleep 3
     Start-Sleep 1; & $shot "windows-resize-0-normal"
     foreach ($step in @(@{ n = 1; cmd = 3; name = "maximised" }, @{ n = 2; cmd = 9; name = "restored" }, @{ n = 3; cmd = 3; name = "maximised-again" })) {
