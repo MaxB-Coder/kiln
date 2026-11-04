@@ -1,6 +1,7 @@
-//! Where a window opens: like the last one (its size, position, display, and whether it was
-//! maximised or full screen), full screen, or filling the screen (`window.open`). The last
-//! window's placement is kept in the state file with its sessions.
+//! Where a window opens: filling the screen (maximised: the menu bar and Dock stay, no Space of
+//! its own), or like the last one, its size, position and display (`window.open`). Never in
+//! native full screen, even after quitting in it. The last window's placement is kept in the
+//! state file with its sessions.
 
 use gpui::{Bounds, Pixels, Size, WindowBounds, point, px, size};
 use serde::{Deserialize, Serialize};
@@ -9,31 +10,29 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OpenMode {
-    /// Like the last window when Kiln quit.
+    /// Maximised: the screen less the menu bar and Dock. ("full-screen", which an earlier
+    /// build offered, means this too.)
     #[default]
-    Last,
-    /// Native full screen (its own Space on macOS).
-    FullScreen,
-    /// Maximised: the screen less the menu bar and Dock, not a Space of its own.
+    #[serde(alias = "full-screen")]
     Fill,
+    /// The last window's size and position, as a window.
+    Last,
 }
 
 impl OpenMode {
-    pub const ALL: [OpenMode; 3] = [OpenMode::Last, OpenMode::FullScreen, OpenMode::Fill];
+    pub const ALL: [OpenMode; 2] = [OpenMode::Fill, OpenMode::Last];
 
     pub fn key(self) -> &'static str {
         match self {
-            OpenMode::Last => "last",
-            OpenMode::FullScreen => "full-screen",
             OpenMode::Fill => "fill",
+            OpenMode::Last => "last",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            OpenMode::Last => "Like last time",
-            OpenMode::FullScreen => "Full screen",
             OpenMode::Fill => "Fill the screen",
+            OpenMode::Last => "Like last time",
         }
     }
 }
@@ -125,12 +124,7 @@ pub fn initial(
         ),
         (None, None) => Bounds::new(point(px(0.), px(0.)), fresh),
     };
-    let mode = match open {
-        OpenMode::FullScreen => Mode::FullScreen,
-        OpenMode::Fill => Mode::Maximized,
-        OpenMode::Last => saved.map_or(Mode::Windowed, |p| p.mode),
-    };
-    (with_mode(rect, mode), screen)
+    (with_mode(rect, open), screen)
 }
 
 /// A new window beside `current` (the window in front): its windowed size, a little down and to
@@ -151,19 +145,14 @@ pub fn beside(
         }
         rect = clamp(rect, area);
     }
-    let mode = match open {
-        OpenMode::FullScreen => Mode::FullScreen,
-        OpenMode::Fill => Mode::Maximized,
-        OpenMode::Last => Mode::Windowed,
-    };
-    with_mode(rect, mode)
+    with_mode(rect, open)
 }
 
-fn with_mode(rect: Bounds<Pixels>, mode: Mode) -> WindowBounds {
-    match mode {
-        Mode::Windowed => WindowBounds::Windowed(rect),
-        Mode::Maximized => WindowBounds::Maximized(rect),
-        Mode::FullScreen => WindowBounds::Fullscreen(rect),
+/// Filled (with `rect` to return to) or as a window; never full screen.
+fn with_mode(rect: Bounds<Pixels>, open: OpenMode) -> WindowBounds {
+    match open {
+        OpenMode::Fill => WindowBounds::Maximized(rect),
+        OpenMode::Last => WindowBounds::Windowed(rect),
     }
 }
 
@@ -217,32 +206,47 @@ mod tests {
     };
 
     #[test]
-    fn a_saved_window_comes_back_as_it_was() {
-        let p = saved(1600., 100., 900., 700., Mode::Windowed, Some("side"));
-        let (bounds, screen) = initial(Some(&p), OpenMode::Last, &screens(), FRESH);
-        assert_eq!(screen, 1);
+    fn windows_fill_the_screen_by_default_never_full_screen() {
+        // Quit in full screen: back filled, on the same display, returning to its window size.
+        let full = saved(1600., 100., 900., 700., Mode::FullScreen, Some("side"));
         assert_eq!(
-            bounds,
-            WindowBounds::Windowed(rect(1600., 100., 900., 700.))
+            initial(Some(&full), OpenMode::default(), &screens(), FRESH),
+            (WindowBounds::Maximized(rect(1600., 100., 900., 700.)), 1)
         );
-        let full = saved(100., 100., 900., 700., Mode::FullScreen, Some("main"));
+        // "Like last time": its size and place, as a window, whatever its mode was.
         assert_eq!(
             initial(Some(&full), OpenMode::Last, &screens(), FRESH),
-            (WindowBounds::Fullscreen(rect(100., 100., 900., 700.)), 0)
+            (WindowBounds::Windowed(rect(1600., 100., 900., 700.)), 1)
         );
-        let max = saved(100., 100., 900., 700., Mode::Maximized, Some("main"));
-        assert!(matches!(
-            initial(Some(&max), OpenMode::Last, &screens(), FRESH).0,
-            WindowBounds::Maximized(_)
-        ));
+        // A first launch: filled, returning to a centred window of the first size.
+        assert_eq!(
+            initial(None, OpenMode::Fill, &screens(), FRESH),
+            (WindowBounds::Maximized(rect(256., 185., 1000., 600.)), 0)
+        );
+        assert_eq!(
+            initial(None, OpenMode::Last, &screens(), FRESH),
+            (WindowBounds::Windowed(rect(256., 185., 1000., 600.)), 0)
+        );
         // Placement round trip through what GPUI reports.
         assert_eq!(
             Placement::of(
-                WindowBounds::Fullscreen(rect(100., 100., 900., 700.)),
-                Some("main".into())
+                WindowBounds::Fullscreen(rect(1600., 100., 900., 700.)),
+                Some("side".into())
             ),
             full
         );
+    }
+
+    #[test]
+    fn the_setting_reads_both_words_and_the_old_one() {
+        #[derive(Deserialize)]
+        struct W {
+            open: OpenMode,
+        }
+        let read = |s: &str| toml::from_str::<W>(s).unwrap().open;
+        assert_eq!(read("open = \"fill\""), OpenMode::Fill);
+        assert_eq!(read("open = \"last\""), OpenMode::Last);
+        assert_eq!(read("open = \"full-screen\""), OpenMode::Fill);
     }
 
     #[test]
@@ -262,26 +266,13 @@ mod tests {
     }
 
     #[test]
-    fn the_setting_wins_and_a_first_launch_is_centred() {
-        let p = saved(100., 100., 900., 700., Mode::Windowed, Some("main"));
-        assert!(matches!(
-            initial(Some(&p), OpenMode::FullScreen, &screens(), FRESH).0,
-            WindowBounds::Fullscreen(_)
-        ));
-        assert!(matches!(
-            initial(Some(&p), OpenMode::Fill, &screens(), FRESH).0,
-            WindowBounds::Maximized(_)
-        ));
-        assert_eq!(
-            initial(None, OpenMode::Last, &screens(), FRESH),
-            (WindowBounds::Windowed(rect(256., 185., 1000., 600.)), 0)
-        );
-    }
-
-    #[test]
-    fn new_windows_open_beside_the_current_one() {
+    fn new_windows_fill_too_or_open_beside_the_current_one() {
         let area = rect(0., 25., 1512., 920.);
         let current = rect(100., 100., 900., 600.);
+        assert!(matches!(
+            beside(current, OpenMode::Fill, Some(area)),
+            WindowBounds::Maximized(_)
+        ));
         assert_eq!(
             beside(current, OpenMode::Last, Some(area)),
             WindowBounds::Windowed(rect(128., 128., 900., 600.))
@@ -292,9 +283,5 @@ mod tests {
             beside(low, OpenMode::Last, Some(area)),
             WindowBounds::Windowed(rect(28., 53., 900., 600.))
         );
-        assert!(matches!(
-            beside(current, OpenMode::FullScreen, Some(area)),
-            WindowBounds::Fullscreen(_)
-        ));
     }
 }

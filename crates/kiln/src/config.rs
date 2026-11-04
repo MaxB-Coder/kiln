@@ -310,7 +310,7 @@ pub struct WindowConfig {
     pub sidebar: bool,
     /// Reopen the last window's sessions (folders and splits) at launch.
     pub restore: bool,
-    /// How windows open: like the last one, full screen, or filling the screen.
+    /// How windows open: filling the screen, or like the last one.
     pub open: crate::placement::OpenMode,
 }
 
@@ -637,9 +637,9 @@ rows = 36
 sidebar = true
 # Reopen the last window's sessions (their folders and splits) at launch.
 restore = true
-# How windows open: "last" (as the last one was: size, place, maximised or full screen),
-# "full-screen", or "fill" (the whole screen, without a Space of its own on macOS).
-open = "last"
+# How windows open: "fill" (the screen, with the menu bar and Dock still there) or "last" (the
+# last window's size and place). Never in a full-screen Space of their own.
+open = "fill"
 
 [tints]
 # Panes running ssh or mosh to another machine get a blue tint.

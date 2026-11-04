@@ -649,7 +649,7 @@ impl SettingsView {
             Control::CursorBlink if flip => Change::CursorBlink(!c.cursor_blink),
             Control::Sidebar if flip => Change::Sidebar(!c.window.sidebar),
             Control::Restore if flip => Change::Restore(!c.window.restore),
-            // Space or the arrows move through the three.
+            // Space or the arrows switch between the two.
             Control::WindowOpen => {
                 use crate::placement::OpenMode;
                 let at = OpenMode::ALL

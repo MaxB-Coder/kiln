@@ -322,25 +322,6 @@ fn open_window(args: Args, place: Place, started: Instant, cx: &mut App) {
         if sized_by_grid {
             window.resize(window_size(metrics.cell_width, metrics.line_height));
         }
-        // macOS can pass over a full-screen request at launch (seen when Kiln opens again just
-        // after a full-screen Space closed): ask once more when the window is still not there.
-        if cfg!(target_os = "macos") && matches!(window_bounds, WindowBounds::Fullscreen(_)) {
-            window
-                .spawn(cx, async |cx| {
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_millis(1500))
-                        .await;
-                    let _ = cx.update(|window, _| {
-                        if !window.is_fullscreen() {
-                            log::info!(
-                                "window: full screen again (the first request was passed over)"
-                            );
-                            window.toggle_fullscreen();
-                        }
-                    });
-                })
-                .detach();
-        }
         cx.new(|cx| {
             Workspace::new(
                 args.shell.clone(),

@@ -967,7 +967,7 @@ fn settings(s: &mut Shots) {
     // "Open windows", two rows up: the arrows choose, written as window.open.
     s.keystroke("up up right");
     let written = std::fs::read_to_string(&path).unwrap();
-    assert!(written.contains("open = \"full-screen\""), "{written}");
+    assert!(written.contains("open = \"last\""), "{written}");
     s.shot("s04d-open-windows");
     s.keystroke("escape");
     assert!(!open(s), "Esc closes Settings");
@@ -1915,14 +1915,25 @@ fn diff_viewer(s: &mut Shots) {
     let mut text = std::fs::read_to_string(&routes).unwrap();
     text.push_str("// later\n");
     std::fs::write(&routes, &text).unwrap();
-    s.pump(Duration::from_millis(3500));
+    for _ in 0..20 {
+        s.pump(Duration::from_millis(500));
+        if file(s).unwrap().2 == before + 1 {
+            break;
+        }
+    }
     assert_eq!(
         file(s).unwrap().2,
         before + 1,
         "the open diff follows the file"
     );
     std::fs::write(&routes, text.trim_end_matches("// later\n")).unwrap();
-    s.pump(Duration::from_millis(3500));
+    // It follows within a refresh or two (longer on a busy machine).
+    for _ in 0..20 {
+        if file(s).unwrap().2 == before {
+            break;
+        }
+        s.pump(Duration::from_millis(500));
+    }
     assert_eq!(file(s).unwrap().2, before);
     s.cx.update(|cx| view.update(cx, |v, cx| v.set_mode(Mode::Split, cx)));
     s.pump(Duration::from_millis(300));
@@ -2098,6 +2109,95 @@ fn diff_viewer(s: &mut Shots) {
     s.keystroke("escape");
     staged_shots(s, &demo, "light");
     image_shots(s, &demo);
+    rail_many_changes(s, &demo);
+}
+
+/// The rail with more changed files than fit: it scrolls as a whole (the wheel), and the
+/// keyboard's choice scrolls into view; Enter opens a file far down the list.
+fn rail_many_changes(s: &mut Shots, demo: &Path) {
+    // Committed, then all changed: git lists each (a new folder would be one entry).
+    std::fs::create_dir_all(demo.join("many")).unwrap();
+    for i in 0..64 {
+        std::fs::write(demo.join(format!("many/file-{i:02}.txt")), format!("{i}\n")).unwrap();
+    }
+    for args in [
+        &["add", "many"][..],
+        &[
+            "-c",
+            "user.name=K",
+            "-c",
+            "user.email=k@k",
+            "commit",
+            "-qm",
+            "Many",
+            "--",
+            "many",
+        ],
+    ] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(demo)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    for i in 0..64 {
+        std::fs::write(
+            demo.join(format!("many/file-{i:02}.txt")),
+            format!("{i} changed\n"),
+        )
+        .unwrap();
+    }
+    s.keystroke("cmd-i");
+    s.pump(Duration::from_millis(3000));
+    let (_, chosen) = s
+        .workspace(|w| w.rail_keyboard_files())
+        .expect("the rail is open");
+    assert!(chosen >= 64, "every changed file is listed ({chosen})");
+    // The wheel over the rail, all the way down.
+    s.scroll(1060., 400., -6000.);
+    s.pump(Duration::from_millis(400));
+    s.shot("rl1-rail-scrolled-to-bottom");
+    let in_view = |s: &mut Shots| s.workspace(|w| w.rail_chosen_in_view());
+    s.keystroke("cmd-shift-i");
+    s.keystroke("home");
+    s.pump(Duration::from_millis(400));
+    assert_eq!(
+        in_view(s),
+        Some(true),
+        "Home scrolls the first file into view"
+    );
+    s.keystroke("end");
+    s.pump(Duration::from_millis(400));
+    assert_eq!(
+        in_view(s),
+        Some(true),
+        "End scrolls the last file into view"
+    );
+    s.shot("rl2-rail-keyboard-last");
+    let rail_keys = |s: &mut Shots| {
+        let window = s.window;
+        s.cx.update(|cx| window.update(cx, |w, window, _| w.rail_keyboard(window)))
+            .unwrap()
+    };
+    let last = rail_keys(s).and_then(|(_, chosen)| chosen).unwrap();
+    s.keystroke("enter");
+    s.pump(Duration::from_millis(1500));
+    let view = s
+        .workspace(|w| w.diff_view())
+        .expect("Enter opens the viewer");
+    assert_eq!(
+        s.cx.update(|cx| view.read(cx).file().map(|f| f.path.clone())),
+        Some(last),
+        "the last file, far past the first screen"
+    );
+    s.keystroke("escape");
+    s.keystroke("escape");
+    s.keystroke("cmd-i");
+    let _ = std::fs::remove_dir_all(demo.join("many"));
 }
 
 /// Changed images: modified (before and after), new, deleted, and one too large to show.
@@ -2241,7 +2341,13 @@ fn staged_shots(s: &mut Shots, demo: &Path, theme: &str) {
     let text = std::fs::read_to_string(&routes).unwrap();
     git(&["add", "src/routes.js"]);
     std::fs::write(&routes, format!("{text}module.exports.later = true;\n")).unwrap();
-    s.pump(Duration::from_millis(3000));
+    for _ in 0..24 {
+        s.pump(Duration::from_millis(500));
+        let (_, changed, staged) = file(s).unwrap();
+        if staged > 0 && staged == changed - 1 {
+            break;
+        }
+    }
     let (_, changed, staged) = file(s).unwrap();
     assert_eq!(staged, changed - 1, "all but the later line staged");
     s.shot(&format!("d15-staged-part-{theme}"));

@@ -3,14 +3,16 @@
 //! ⌘⇧I takes the keyboard there and back: ↑↓ (or j/k) choose a changed file, Enter opens it in
 //! the diff viewer (Esc there comes back to the rail), Esc goes back to the terminal.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, Context, Div, EntityId, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, PromptLevel, SharedString, StatefulInteractiveElement, Styled,
-    Task, Window, WindowControlArea, div, px,
+    AnyElement, Bounds, Context, Div, EntityId, FocusHandle, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, ParentElement, Pixels, PromptLevel, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Task, Window, WindowControlArea, canvas, div, px,
 };
 use kiln_term::process::{ProcessReport, ProcessWatcher};
 
@@ -21,7 +23,6 @@ use crate::theme::{self, palette};
 use crate::workspace::{Chrome, TITLEBAR_HEIGHT, Workspace, chrome, window_controls};
 
 const POLL: Duration = Duration::from_secs(2);
-const MAX_FILES: usize = 14;
 const MAX_PROCESSES: usize = 12;
 
 /// What the rail last read, and for which pane.
@@ -47,6 +48,10 @@ pub struct Rail {
     selected: Option<String>,
     /// The diff viewer was opened from here with the keyboard: closing it comes back here.
     pub(crate) return_here: bool,
+    /// The rail scrolls as a whole; each changed file's row as last painted, so the keyboard's
+    /// choice can be scrolled into view.
+    scroll: ScrollHandle,
+    file_rows: Rc<RefCell<Vec<Bounds<Pixels>>>>,
     _poll: Task<()>,
 }
 
@@ -72,6 +77,8 @@ impl Workspace {
             session_hover: false,
             session_open: false,
             focus: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
+            file_rows: Rc::default(),
             selected: None,
             return_here: false,
             watcher: Arc::new(Mutex::new(ProcessWatcher::new())),
@@ -155,10 +162,7 @@ impl Workspace {
         };
         let fresh = self.focused_view().map(|v| v.entity_id()) == rail.data.pane;
         match rail.data.git.as_ref().filter(|_| fresh) {
-            Some(status) => (
-                Some(status.root.clone()),
-                status.files.iter().take(MAX_FILES).cloned().collect(),
-            ),
+            Some(status) => (Some(status.root.clone()), status.files.clone()),
             None => (None, Vec::new()),
         }
     }
@@ -175,6 +179,24 @@ impl Workspace {
                 .and_then(|path| files.iter().position(|f| f.path == path))
                 .unwrap_or(0),
         )
+    }
+
+    /// How many changed files the rail lists (the snapshots check it): whether the keyboard is
+    /// there, and the count.
+    pub fn rail_keyboard_files(&self) -> Option<(bool, usize)> {
+        let rail = self.rail.as_ref()?;
+        let _ = rail;
+        Some((false, self.rail_files().1.len()))
+    }
+
+    /// Whether the chosen file's row is in view (the snapshots check it).
+    pub fn rail_chosen_in_view(&self) -> Option<bool> {
+        let rail = self.rail.as_ref()?;
+        let (_, files) = self.rail_files();
+        let i = self.rail_selected(&files)?;
+        let row = *rail.file_rows.borrow().get(i)?;
+        let view = rail.scroll.bounds();
+        Some(row.top() >= view.top() && row.bottom() <= view.bottom())
     }
 
     /// Whether the keyboard is in the rail, and the file chosen there (the snapshots check it).
@@ -219,6 +241,10 @@ impl Workspace {
         };
         if let (Some(i), Some(rail)) = (to, self.rail.as_mut()) {
             rail.selected = Some(files[i].path.clone());
+            let row = rail.file_rows.borrow().get(i).copied();
+            if let Some(row) = row {
+                reveal(&rail.scroll, row);
+            }
         }
         cx.stop_propagation();
         cx.notify();
@@ -348,6 +374,7 @@ impl Workspace {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&rail.scroll)
             .child(body);
         Some(
             div()
@@ -465,7 +492,15 @@ impl Workspace {
             aside.push_str(&format!(" ↓{}", status.behind));
         }
         let mut section = section("Changes", Some(aside));
-        for (i, file) in status.files.iter().take(MAX_FILES).enumerate() {
+        let rows = self
+            .rail
+            .as_ref()
+            .map(|r| r.file_rows.clone())
+            .unwrap_or_default();
+        rows.borrow_mut()
+            .resize(status.files.len(), Bounds::default());
+        for (i, file) in status.files.iter().enumerate() {
+            let rows = rows.clone();
             let color = match file.kind {
                 'A' => p.ok,
                 'D' | 'U' => p.failed,
@@ -478,7 +513,22 @@ impl Workspace {
             let on = chosen == Some(i);
             section = section.child(
                 row(("rail-file", i))
+                    .relative()
                     .cursor_pointer()
+                    .child(
+                        canvas(
+                            |_, _, _| {},
+                            move |bounds, _, _, _| {
+                                if let Some(slot) = rows.borrow_mut().get_mut(i) {
+                                    *slot = bounds;
+                                }
+                            },
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    )
                     .border_1()
                     .border_color(theme::hsla(if on { p.accent } else { p.bar }))
                     .when(on, |d| d.bg(theme::hsla(p.raised)))
@@ -499,9 +549,6 @@ impl Workspace {
                         this.open_diff(root.clone(), file.clone(), window, cx)
                     })),
             );
-        }
-        if status.files.len() > MAX_FILES {
-            section = section.child(dim(format!("{} more", status.files.len() - MAX_FILES)));
         }
         if chosen.is_some() {
             section = section.child(dim("↑↓ choose · ⏎ open · esc back"));
@@ -666,6 +713,20 @@ fn dim(text: impl Into<SharedString>) -> Div {
 }
 
 /// "640 KB", "48 MB", "1.2 GB".
+/// Scrolls `scroll` the least that brings `row` (as last painted) into its view.
+fn reveal(scroll: &ScrollHandle, row: Bounds<Pixels>) {
+    let view = scroll.bounds();
+    let mut offset = scroll.offset();
+    if row.top() < view.top() {
+        offset.y += view.top() - row.top();
+    } else if row.bottom() > view.bottom() {
+        offset.y -= row.bottom() - view.bottom();
+    } else {
+        return;
+    }
+    scroll.set_offset(offset);
+}
+
 pub fn bytes_label(bytes: u64) -> String {
     const KB: f64 = 1024.;
     let b = bytes as f64;
