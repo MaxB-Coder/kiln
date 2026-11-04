@@ -21,6 +21,7 @@ use crate::git::FileChange;
 use crate::grid_paint::{CellMetrics, FONT_FAMILY};
 use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
+use crate::ui_scale::ui;
 
 /// Split is offered from this many columns.
 pub const SPLIT_FROM_COLUMNS: f32 = 120.;
@@ -993,7 +994,7 @@ impl DiffView {
         let message = |text: String| {
             div()
                 .flex_1()
-                .p(px(PAD + 4.))
+                .p(ui(PAD + 4.))
                 .text_color(theme::hsla(p.muted))
                 .child(text)
                 .into_any_element()
@@ -1031,8 +1032,8 @@ impl DiffView {
             .flex_row()
             .items_center()
             .justify_center()
-            .gap(px(32.))
-            .p(px(PAD + 4.));
+            .gap(ui(32.))
+            .p(ui(PAD + 4.));
         for (side, picture, label, alone) in sides {
             let Some(side) = side else { continue };
             let label = match status {
@@ -1047,8 +1048,8 @@ impl DiffView {
                     let (w, h) = (pic.width as f32 * scale, pic.height as f32 * scale);
                     div()
                         .relative()
-                        .w(px(w))
-                        .h(px(h))
+                        .w(ui(w))
+                        .h(ui(h))
                         .border_1()
                         .border_color(theme::hsla(p.bg1))
                         .child(
@@ -1068,10 +1069,10 @@ impl DiffView {
                                         let mut x = if row % 2 == 0 { 0. } else { SQUARE };
                                         while x < bw {
                                             let square = gpui::Bounds::new(
-                                                bounds.origin + point(px(x), px(y)),
+                                                bounds.origin + point(ui(x), ui(y)),
                                                 size(
-                                                    px(SQUARE.min(bw - x)),
-                                                    px(SQUARE.min(bh - y)),
+                                                    ui(SQUARE.min(bw - x)),
+                                                    ui(SQUARE.min(bh - y)),
                                                 ),
                                             );
                                             window.paint_quad(fill(square, theme::hsla(dark)));
@@ -1091,8 +1092,8 @@ impl DiffView {
                         .into_any_element()
                 }
                 _ => div()
-                    .w(px(BOX / 2.))
-                    .h(px(BOX / 2.))
+                    .w(ui(BOX / 2.))
+                    .h(ui(BOX / 2.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1107,7 +1108,7 @@ impl DiffView {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(ui(8.))
                     .child(div().text_color(theme::hsla(p.fg_dim)).child(label))
                     .child(frame)
                     .child(
@@ -1172,9 +1173,9 @@ impl Render for DiffView {
             let on = self.mode == mode;
             div()
                 .id(label)
-                .px(px(8.))
-                .py(px(2.))
-                .rounded(px(5.))
+                .px(ui(8.))
+                .py(ui(2.))
+                .rounded(ui(5.))
                 .cursor_pointer()
                 .when(on, |d| d.bg(theme::hsla(p.bg1)))
                 .text_color(theme::hsla(if on { p.fg } else { p.muted }))
@@ -1187,9 +1188,9 @@ impl Render for DiffView {
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(10.))
-                .px(px(PAD + 4.))
-                .py(px(10.))
+                .gap(ui(10.))
+                .px(ui(PAD + 4.))
+                .py(ui(10.))
                 .border_b_1()
                 .border_color(theme::hsla(p.bg1))
                 .child(div().flex_none().text_color(theme::hsla(kind_color)).child(
@@ -1215,7 +1216,7 @@ impl Render for DiffView {
                             .flex_none()
                             .flex()
                             .flex_row()
-                            .gap(px(6.))
+                            .gap(ui(6.))
                             .child(
                                 div()
                                     .text_color(theme::hsla(p.ok))
@@ -1243,8 +1244,8 @@ impl Render for DiffView {
                             .flex_none()
                             .flex()
                             .flex_row()
-                            .p(px(2.))
-                            .rounded(px(7.))
+                            .p(ui(2.))
+                            .rounded(ui(7.))
                             .bg(theme::hsla(p.bg))
                             .child(toggle("Unified", Mode::Unified, cx))
                             .child(toggle("Split", Mode::Split, cx)),
@@ -1264,9 +1265,9 @@ impl Render for DiffView {
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(8.))
-                .px(px(PAD + 4.))
-                .py(px(6.))
+                .gap(ui(8.))
+                .px(ui(PAD + 4.))
+                .py(ui(6.))
                 .border_b_1()
                 .border_color(theme::hsla(p.bg1))
                 .child(div().text_color(theme::hsla(p.accent)).child("❯"))
@@ -1274,7 +1275,7 @@ impl Render for DiffView {
                 .child(
                     div()
                         .text_color(theme::hsla(p.muted))
-                        .text_size(px(11.))
+                        .text_size(ui(11.))
                         .child(crate::workspace::find_status(find.current, n)),
                 )
         });
@@ -1283,7 +1284,7 @@ impl Render for DiffView {
         let body = if !loaded {
             div()
                 .flex_1()
-                .p(px(PAD + 4.))
+                .p(ui(PAD + 4.))
                 .text_color(theme::hsla(p.muted))
                 .child("Reading the diff…")
                 .into_any_element()
@@ -1292,7 +1293,7 @@ impl Render for DiffView {
         } else if self.rows.is_empty() {
             div()
                 .flex_1()
-                .p(px(PAD + 4.))
+                .p(ui(PAD + 4.))
                 .text_color(theme::hsla(p.muted))
                 .child("No changes against HEAD")
                 .into_any_element()
@@ -1340,12 +1341,12 @@ impl Render for DiffView {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(14.))
-            .px(px(PAD + 4.))
-            .py(px(8.))
+            .gap(ui(14.))
+            .px(ui(PAD + 4.))
+            .py(ui(8.))
             .border_t_1()
             .border_color(theme::hsla(p.bg1))
-            .text_size(px(11.))
+            .text_size(ui(11.))
             .child(
                 div()
                     .flex_1()
@@ -1391,21 +1392,21 @@ impl Render for DiffView {
             .h(relative(0.9))
             .flex()
             .flex_col()
-            .rounded(px(12.))
+            .rounded(ui(12.))
             .bg(theme::hsla(p.bar))
             .shadow(vec![
                 BoxShadow {
                     color: theme::hsla(p.bg1),
-                    offset: point(px(0.), px(0.)),
-                    blur_radius: px(0.),
-                    spread_radius: px(1.),
+                    offset: point(ui(0.), ui(0.)),
+                    blur_radius: ui(0.),
+                    spread_radius: ui(1.),
                     inset: false,
                 },
                 BoxShadow {
                     color: p.shadow(),
-                    offset: point(px(0.), px(12.)),
-                    blur_radius: px(32.),
-                    spread_radius: px(0.),
+                    offset: point(ui(0.), ui(12.)),
+                    blur_radius: ui(32.),
+                    spread_radius: ui(0.),
                     inset: false,
                 },
             ])

@@ -1,10 +1,11 @@
 //! The Theme section of Settings: the colour keys and their labels, the small previews drawn
 //! from each theme's own palette, and the colour arithmetic behind the picker.
 
-use gpui::{Bounds, PathBuilder, Pixels, Window, point, px};
+use gpui::{Bounds, PathBuilder, Pixels, Window, point};
 
 use crate::config::ThemeColours;
 use crate::theme::{self, Palette};
+use crate::ui_scale::ui;
 
 /// The interface colours, as kiln.toml names them, with their labels in Settings.
 pub const COLOURS: [(&str, &str); 13] = [
@@ -166,7 +167,7 @@ fn fill(shape: &Shape, color: u32, origin: gpui::Point<Pixels>, window: &mut Win
     }
     let mut path = PathBuilder::fill();
     for (i, (x, y)) in shape.iter().enumerate() {
-        let at = point(origin.x + px(*x), origin.y + px(*y));
+        let at = point(origin.x + ui(*x), origin.y + ui(*y));
         if i == 0 {
             path.move_to(at);
         } else {
@@ -207,8 +208,8 @@ fn paint_preview(p: &Palette, origin: gpui::Point<Pixels>, half: bool, window: &
     }
     if !half {
         let bounds = Bounds::new(
-            point(origin.x + px(29.), origin.y + px(8.)),
-            gpui::size(px(6.6), px(8.8)),
+            point(origin.x + ui(29.), origin.y + ui(8.)),
+            gpui::size(ui(6.6), ui(8.8)),
         );
         crate::flame::paint_in(p, 0, false, 1., bounds, window);
     }

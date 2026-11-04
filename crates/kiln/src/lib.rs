@@ -34,6 +34,7 @@ pub mod state;
 pub mod terminal_view;
 pub mod text_input;
 pub mod theme;
+pub mod ui_scale;
 pub mod update;
 pub mod workspace;
 
@@ -72,6 +73,8 @@ actions!(
         RenameProject,
         ProjectColour,
         ShowChanges,
+        BiggerInterface,
+        SmallerInterface,
         ZoomIn,
         ZoomOut,
         ZoomReset,

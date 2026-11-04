@@ -9,11 +9,12 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, Bounds, ClipboardItem, Context, ElementInputHandler, EntityInputHandler, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Pixels,
-    Point, Render, SharedString, Styled, UTF16Selection, Window, canvas, div, px,
+    Point, Render, SharedString, Styled, UTF16Selection, Window, canvas, div,
 };
 
 use crate::grid_paint::FONT_FAMILY;
 use crate::theme::{self, palette};
+use crate::ui_scale::ui;
 
 pub enum TextInputEvent {
     Changed,
@@ -43,7 +44,7 @@ impl TextInput {
             cursor: 0,
             marked: None,
             placeholder: placeholder.into(),
-            size: px(13.),
+            size: ui(13.),
         }
     }
 
@@ -239,11 +240,11 @@ impl Render for TextInput {
             .child(input_handler)
             .when(empty, |d| {
                 d.when(focused, |d| {
-                    d.child(div().w(px(2.)).h(caret).bg(theme::hsla(p.accent)))
+                    d.child(div().w(ui(2.)).h(caret).bg(theme::hsla(p.accent)))
                 })
                 .child(
                     div()
-                        .pl(px(2.))
+                        .pl(ui(2.))
                         .text_color(theme::hsla(p.muted))
                         .child(self.placeholder.clone()),
                 )
@@ -259,7 +260,7 @@ impl Render for TextInput {
                         )
                     })
                     .when(focused, |d| {
-                        d.child(div().w(px(2.)).h(caret).bg(theme::hsla(p.accent)))
+                        d.child(div().w(ui(2.)).h(caret).bg(theme::hsla(p.accent)))
                     })
                     .child(after.to_string())
             })

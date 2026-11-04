@@ -21,6 +21,8 @@ pub struct Config {
     pub icon_path: Option<PathBuf>,
     /// Font size in points.
     pub font_size: f32,
+    /// The size of everything outside the terminal's text (`ui_scale`).
+    pub interface_size: crate::ui_scale::InterfaceSize,
     /// Lines of scrollback per running command.
     pub scrollback: usize,
     pub cursor_blink: bool,
@@ -444,6 +446,7 @@ impl Default for Config {
             icon_colours: IconColours::default(),
             icon_path: None,
             font_size: 13.,
+            interface_size: Default::default(),
             scrollback: 10_000,
             cursor_blink: true,
             option_as_alt: false,
@@ -594,6 +597,7 @@ pub fn current() -> Config {
 
 pub fn set_current(config: Config) {
     crate::theme::set_palette(config.palette());
+    crate::ui_scale::set(config.interface_size);
     *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = Some(config);
 }
 
@@ -608,6 +612,9 @@ icon = "kiln"
 # [icon_colours]
 # kiln = "terracotta"
 font_size = 13
+# The sidebar, rail, pop-ups and other text outside the terminal: "smaller", "default",
+# "larger" or "largest". The terminal's text keeps font_size.
+interface_size = "default"
 scrollback = 10000
 cursor_blink = true
 # macOS only: Option sends Esc+key instead of composing characters like é.

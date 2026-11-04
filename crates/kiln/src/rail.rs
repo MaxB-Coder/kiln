@@ -20,6 +20,7 @@ use crate::git::{self, FileChange, GitStatus};
 use crate::grid_paint::FONT_FAMILY;
 use crate::terminal_view::SessionInfo;
 use crate::theme::{self, palette};
+use crate::ui_scale::ui;
 use crate::workspace::{Chrome, TITLEBAR_HEIGHT, Workspace, chrome, window_controls};
 
 const POLL: Duration = Duration::from_secs(2);
@@ -315,10 +316,10 @@ impl Workspace {
         let mut body = div()
             .flex()
             .flex_col()
-            .gap(px(16.))
-            .pt(px(8.))
-            .px(px(14.))
-            .pb(px(14.));
+            .gap(ui(16.))
+            .pt(ui(8.))
+            .px(ui(14.))
+            .pb(ui(14.));
         // Sections with nothing in them stay out (Processes always shows, "Nothing running"
         // included).
         let keyboard = rail.focus.is_focused(window);
@@ -356,7 +357,7 @@ impl Workspace {
             .justify_end()
             .map(|d| {
                 if mac {
-                    d.absolute().top_0().left_0().w_full().h(px(24.))
+                    d.absolute().top_0().left_0().w_full().h(ui(24.))
                 } else {
                     d.h(TITLEBAR_HEIGHT).child(window_controls(window))
                 }
@@ -392,7 +393,7 @@ impl Workspace {
                 .flex_col()
                 .bg(theme::hsla(p.bar))
                 .font_family(FONT_FAMILY)
-                .text_size(px(12.))
+                .text_size(ui(12.))
                 .map(|d| {
                     if mac {
                         d.child(body).child(strip)
@@ -421,9 +422,9 @@ impl Workspace {
             .id("rail-session")
             .flex()
             .flex_row()
-            .gap(px(6.))
-            .px(px(6.))
-            .text_size(px(11.))
+            .gap(ui(6.))
+            .px(ui(6.))
+            .text_size(ui(11.))
             .text_color(theme::hsla(p.muted))
             .cursor_pointer()
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
@@ -449,7 +450,7 @@ impl Workspace {
         div()
             .flex()
             .flex_col()
-            .gap(px(2.))
+            .gap(ui(2.))
             .child(line)
             .when(open, |d| {
                 d.child(key_value(
@@ -536,7 +537,7 @@ impl Workspace {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(12.))
+                            .w(ui(12.))
                             .text_color(theme::hsla(color))
                             .child(file.kind.to_string()),
                     )
@@ -577,7 +578,7 @@ impl Workspace {
                     .child(
                         div()
                             .flex_none()
-                            .text_size(px(11.))
+                            .text_size(ui(11.))
                             .text_color(theme::hsla(p.accent))
                             .invisible()
                             .group_hover(group, |s| s.visible())
@@ -607,15 +608,15 @@ fn render_processes(report: Option<&ProcessReport>) -> Div {
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(8.))
-                .h(px(22.))
-                .pl(px(6. + 12. * process.depth.min(6) as f32))
-                .pr(px(6.))
+                .gap(ui(8.))
+                .h(ui(22.))
+                .pl(ui(6. + 12. * process.depth.min(6) as f32))
+                .pr(ui(6.))
                 .child(ellipsis(process.name.clone()).text_color(theme::hsla(p.fg_dim)))
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(11.))
+                        .text_size(ui(11.))
                         .text_color(theme::hsla(p.muted))
                         .child(format!(
                             "{:.0}%  {}",
@@ -641,10 +642,10 @@ fn section(title: &str, aside: Option<String>) -> Div {
             .flex()
             .flex_row()
             .justify_between()
-            .gap(px(8.))
-            .px(px(6.))
-            .pb(px(4.))
-            .text_size(px(11.))
+            .gap(ui(8.))
+            .px(ui(6.))
+            .pb(ui(4.))
+            .text_size(ui(11.))
             .text_color(theme::hsla(p.muted))
             .child(div().flex_none().child(title.to_string()))
             .when_some(aside, |d, aside| {
@@ -666,10 +667,10 @@ fn row(id: impl Into<gpui::ElementId>) -> gpui::Stateful<Div> {
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(8.))
-        .h(px(22.))
-        .px(px(6.))
-        .rounded(px(5.))
+        .gap(ui(8.))
+        .h(ui(22.))
+        .px(ui(6.))
+        .rounded(ui(5.))
 }
 
 fn key_value(key: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
@@ -678,14 +679,14 @@ fn key_value(key: impl Into<SharedString>, value: impl Into<SharedString>) -> Di
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(8.))
-        .h(px(22.))
-        .px(px(6.))
+        .gap(ui(8.))
+        .h(ui(22.))
+        .px(ui(6.))
         .text_color(theme::hsla(p.fg_dim))
         .child(
             div()
                 .flex_none()
-                .w(px(72.))
+                .w(ui(72.))
                 .text_color(theme::hsla(p.muted))
                 .child(key.into()),
         )
@@ -704,8 +705,8 @@ fn ellipsis(text: impl Into<SharedString>) -> Div {
 
 fn dim(text: impl Into<SharedString>) -> Div {
     div()
-        .px(px(6.))
-        .h(px(22.))
+        .px(ui(6.))
+        .h(ui(22.))
         .flex()
         .items_center()
         .text_color(theme::hsla(palette().muted))

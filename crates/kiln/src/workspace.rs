@@ -31,6 +31,7 @@ use crate::state::{self, TabState, WindowState};
 use crate::terminal_view::{PaneEvent, PaneStatus, TerminalView};
 use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
+use crate::ui_scale::{self, ui};
 use crate::{
     ClosePane, CloseWindow, CommandPaletteToggle, CopyLastOutput, CopyLastOutputRaw, EditConfig,
     Find, FocusNextPane, FocusPrevPane, FocusRail, InstallUpdate, NewSession, NewWindow,
@@ -107,14 +108,14 @@ impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let p = palette();
         div()
-            .px(px(8.))
-            .py(px(4.))
-            .rounded(px(6.))
+            .px(ui(8.))
+            .py(ui(4.))
+            .rounded(ui(6.))
             .bg(theme::hsla(p.raised))
             .border_1()
             .border_color(theme::hsla(p.bg1))
             .font_family(FONT_FAMILY)
-            .text_size(px(11.))
+            .text_size(ui(11.))
             .text_color(theme::hsla(p.fg))
             .child(self.0.clone())
     }
@@ -957,6 +958,8 @@ impl Workspace {
         action("Copy last output (fenced)", Box::new(CopyLastOutput));
         action("Copy last output (raw)", Box::new(CopyLastOutputRaw));
         action("Keyboard shortcuts", Box::new(ToggleShortcuts));
+        action("Bigger interface", Box::new(crate::BiggerInterface));
+        action("Smaller interface", Box::new(crate::SmallerInterface));
         action("Rename session", Box::new(RenameSession));
         action("Rename project", Box::new(RenameProject));
         action("Project colour", Box::new(ProjectColour));
@@ -1308,6 +1311,21 @@ impl Workspace {
         cx.notify();
     }
 
+    /// "Bigger interface" / "Smaller interface" in the palette: one step, written to kiln.toml.
+    fn step_interface(&mut self, bigger: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let next = config::current().interface_size.step(bigger);
+        let Some(path) = config::config_path() else {
+            return;
+        };
+        match crate::config_write::write_edits(
+            &path,
+            &[(&["interface_size"], Some(next.key().into()))],
+        ) {
+            Ok(config) => self.apply_config(config, window, cx),
+            Err(err) => log::warn!("could not change the interface size: {err:?}"),
+        }
+    }
+
     /// Closes the diff viewer; the keyboard goes back where it came from (the rail, when the
     /// viewer was opened from it with the keyboard focus there).
     fn close_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1491,15 +1509,17 @@ impl Workspace {
             self.end_panel_drag(window, cx);
             return;
         }
-        let dx = f32::from(event.position.x) - drag.from_x;
+        // In widths at the default interface size, as kept (see `render`).
+        let s = ui_scale::scale();
+        let dx = (f32::from(event.position.x) - drag.from_x) / s;
         let wanted = match drag.panel {
-            Panel::Sidebar => drag.from_width + dx,
-            Panel::Rail => drag.from_width - dx,
+            Panel::Sidebar => drag.from_width / s + dx,
+            Panel::Rail => drag.from_width / s - dx,
         };
         // Held where the terminal would get too narrow, so the width kept is the one shown.
-        let window_w = f32::from(window.viewport_size().width);
-        let terminal = panels::terminal_min(f32::from(self.metrics.cell_width));
-        let shown = self.shown_widths;
+        let window_w = f32::from(window.viewport_size().width) / s;
+        let terminal = panels::terminal_min(f32::from(self.metrics.cell_width)) / s;
+        let shown = (self.shown_widths.0 / s, self.shown_widths.1 / s);
         let (sidebar, rail) = match drag.panel {
             Panel::Sidebar => panels::widths(
                 window_w,
@@ -1836,15 +1856,15 @@ impl Workspace {
         let ring = |i: usize, swatch: gpui::Div| {
             let ring = div().rounded_full().child(swatch);
             if i == menu.current {
-                ring.p(px(2.))
+                ring.p(ui(2.))
                     .border_2()
                     .border_color(theme::hsla(p.accent))
             } else if focused(i) {
-                ring.p(px(3.))
+                ring.p(ui(3.))
                     .border_1()
                     .border_color(theme::hsla(p.fg_dim))
             } else {
-                ring.p(px(2.))
+                ring.p(ui(2.))
                     .border_2()
                     .border_color(gpui::transparent_black())
             }
@@ -1854,9 +1874,9 @@ impl Workspace {
             .flex()
             .flex_row()
             .justify_between()
-            .px(px(2.))
-            .mb(px(6.))
-            .text_size(px(10.))
+            .px(ui(2.))
+            .mb(ui(6.))
+            .text_size(ui(10.))
             .child(
                 div()
                     .min_w_0()
@@ -1872,23 +1892,23 @@ impl Workspace {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(6.))
-            .mb(px(4.))
+            .gap(ui(6.))
+            .mb(ui(4.))
             .cursor_pointer()
-            .text_size(px(10.5))
+            .text_size(ui(10.5))
             .text_color(theme::hsla(if menu.current == 0 { p.fg } else { p.fg_dim }))
             .on_click(cx.listener(|this, _, window, cx| this.pick_colour(0, window, cx)))
             .child(ring(
                 0,
                 div()
-                    .size(px(14.))
+                    .size(ui(14.))
                     .rounded_full()
                     .border_1()
                     .border_dashed()
                     .border_color(theme::hsla(p.muted)),
             ))
             .child("Auto");
-        let mut grid = div().flex().flex_col().gap(px(2.));
+        let mut grid = div().flex().flex_col().gap(ui(2.));
         for row in 0..2 {
             let mut line = div().flex().flex_row();
             for column in 0..COLOUR_COLUMNS {
@@ -1916,7 +1936,7 @@ impl Workspace {
                         )
                         .child(ring(
                             i,
-                            div().size(px(14.)).rounded_full().bg(theme::hsla(color)),
+                            div().size(ui(14.)).rounded_full().bg(theme::hsla(color)),
                         )),
                 );
             }
@@ -1939,9 +1959,9 @@ impl Workspace {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(6.))
-            .mt(px(6.))
-            .text_size(px(10.5))
+            .gap(ui(6.))
+            .mt(ui(6.))
+            .text_size(ui(10.5))
             .child(
                 div()
                     .flex_none()
@@ -1952,9 +1972,9 @@ impl Workspace {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .px(px(5.))
-                    .py(px(1.))
-                    .rounded(px(5.))
+                    .px(ui(5.))
+                    .py(ui(1.))
+                    .rounded(ui(5.))
                     .bg(theme::hsla(p.bg))
                     .border_1()
                     .border_color(theme::hsla(if at_custom {
@@ -1969,12 +1989,12 @@ impl Workspace {
             .child(match typed {
                 Some(color) => div()
                     .flex_none()
-                    .size(px(14.))
+                    .size(ui(14.))
                     .rounded_full()
                     .bg(theme::hsla(color)),
                 None => div()
                     .flex_none()
-                    .size(px(14.))
+                    .size(ui(14.))
                     .rounded_full()
                     .border_1()
                     .border_dashed()
@@ -1988,12 +2008,12 @@ impl Workspace {
                 this.colour_menu = None;
                 cx.notify();
             }))
-            .mx(px(2.))
-            .mt(px(2.))
-            .mb(px(4.))
-            .px(px(8.))
-            .py(px(8.))
-            .rounded(px(10.))
+            .mx(ui(2.))
+            .mt(ui(2.))
+            .mb(ui(4.))
+            .px(ui(8.))
+            .py(ui(8.))
+            .rounded(ui(10.))
             .bg(theme::hsla(p.raised))
             .border_1()
             .border_color(theme::hsla(p.bg1))
@@ -2002,10 +2022,10 @@ impl Workspace {
             .child(grid)
             .child(
                 div()
-                    .mt(px(4.))
+                    .mt(ui(4.))
                     .flex()
                     .justify_center()
-                    .text_size(px(10.))
+                    .text_size(ui(10.))
                     .text_color(theme::hsla(p.fg_dim))
                     .child(SharedString::from(caption)),
             )
@@ -2019,9 +2039,9 @@ impl Workspace {
         div()
             .flex_1()
             .min_w_0()
-            .px(px(6.))
-            .py(px(2.))
-            .rounded(px(5.))
+            .px(ui(6.))
+            .py(ui(2.))
+            .rounded(ui(5.))
             .bg(theme::hsla(p.bg))
             .border_1()
             .border_color(theme::hsla(p.accent))
@@ -2099,9 +2119,9 @@ impl Workspace {
         let item = |i: usize, id: &'static str, label: &'static str| {
             div()
                 .id(id)
-                .px(px(10.))
-                .py(px(5.))
-                .rounded(px(5.))
+                .px(ui(10.))
+                .py(ui(5.))
+                .rounded(ui(5.))
                 .text_color(theme::hsla(p.fg))
                 .when(i == selected, |d| d.bg(theme::hsla(p.bg1)))
                 .hover(|s| s.bg(theme::hsla(p.bg1)))
@@ -2120,21 +2140,21 @@ impl Workspace {
                     .id("sidebar-menu")
                     .track_focus(&menu.focus)
                     .on_key_down(cx.listener(Self::sidebar_menu_key))
-                    .min_w(px(140.))
-                    .p(px(4.))
-                    .rounded(px(8.))
+                    .min_w(ui(140.))
+                    .p(ui(4.))
+                    .rounded(ui(8.))
                     .bg(theme::hsla(p.raised))
                     .border_1()
                     .border_color(theme::hsla(p.bg1))
                     .shadow(vec![gpui::BoxShadow {
                         color: p.shadow(),
-                        offset: gpui::point(px(0.), px(8.)),
-                        blur_radius: px(24.),
-                        spread_radius: px(0.),
+                        offset: gpui::point(ui(0.), ui(8.)),
+                        blur_radius: ui(24.),
+                        spread_radius: ui(0.),
                         inset: false,
                     }])
                     .font_family(FONT_FAMILY)
-                    .text_size(px(12.))
+                    .text_size(ui(12.))
                     .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
                         log::info!(
                             "sidebar menu: closed by a {:?} click outside at {:?}",
@@ -2326,7 +2346,7 @@ impl Workspace {
             }
         }
 
-        let mut list = div().flex().flex_col().gap(px(2.));
+        let mut list = div().flex().flex_col().gap(ui(2.));
         for (group_index, (root, tabs)) in groups.into_iter().enumerate() {
             // The repository or folder name (or the one given it); "~" for home; "other" when
             // no folder is known yet (a shell without integration, or one still starting).
@@ -2377,20 +2397,20 @@ impl Workspace {
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(8.))
-                .text_size(px(11.))
+                .gap(ui(8.))
+                .text_size(ui(11.))
                 .map(|d| match chosen {
                     // On its card: the name bold, in the colour mixed with the text.
                     Some(color) => d
-                        .pt(px(6.))
-                        .pb(px(3.))
-                        .px(px(7.))
+                        .pt(ui(6.))
+                        .pb(ui(3.))
+                        .px(ui(7.))
                         .font_weight(gpui::FontWeight::BOLD)
                         .text_color(theme::hsla(theme::blend(color, p.fg, 0.4))),
                     None => d
-                        .pt(px(12.))
-                        .pb(px(4.))
-                        .px(px(10.))
+                        .pt(ui(12.))
+                        .pb(ui(4.))
+                        .px(ui(10.))
                         .text_color(theme::hsla(p.muted)),
                 })
                 .map(|d| match editing {
@@ -2400,9 +2420,9 @@ impl Workspace {
             let mut group = div()
                 .flex()
                 .flex_col()
-                .gap(px(2.))
+                .gap(ui(2.))
                 .when_some(card, |d, card| {
-                    d.mt(px(8.)).p(px(3.)).rounded(px(9.)).bg(theme::hsla(card))
+                    d.mt(ui(8.)).p(ui(3.)).rounded(ui(9.)).bg(theme::hsla(card))
                 })
                 .child(header)
                 .children(colour_menu);
@@ -2440,7 +2460,7 @@ impl Workspace {
             .flex_col()
             .bg(theme::hsla(p.bar))
             .font_family(FONT_FAMILY)
-            .text_size(px(12.))
+            .text_size(ui(12.))
             // The traffic lights sit over the sidebar on macOS.
             .child(
                 div()
@@ -2450,7 +2470,7 @@ impl Workspace {
                     .flex_row()
                     .items_center()
                     .justify_end()
-                    .px(px(10.))
+                    .px(ui(10.))
                     .when(chrome() != Chrome::Mac || fullscreen, |d| {
                         d.justify_between().child(app_mark())
                     })
@@ -2465,8 +2485,8 @@ impl Workspace {
                     .child(
                         div()
                             .id("new-session")
-                            .px(px(6.))
-                            .text_size(px(14.))
+                            .px(ui(6.))
+                            .text_size(ui(14.))
                             .text_color(theme::hsla(p.muted))
                             .invisible()
                             .group_hover("sidebar", |s| s.visible())
@@ -2485,7 +2505,7 @@ impl Workspace {
                     .id("sessions")
                     .flex_1()
                     .overflow_y_scroll()
-                    .px(px(6.))
+                    .px(ui(6.))
                     .child(list),
             )
             .when_some(crate::update::state(cx).label(), |d, label| {
@@ -2494,14 +2514,14 @@ impl Workspace {
                     div()
                         .id("update")
                         .flex_none()
-                        .m(px(6.))
-                        .h(px(28.))
-                        .px(px(10.))
+                        .m(ui(6.))
+                        .h(ui(28.))
+                        .px(ui(10.))
                         .flex()
                         .flex_row()
                         .items_center()
-                        .gap(px(8.))
-                        .rounded(px(6.))
+                        .gap(ui(8.))
+                        .rounded(ui(6.))
                         .text_color(theme::hsla(p.fg_dim))
                         .hover(|s| s.bg(theme::hsla(p.raised)))
                         .cursor_pointer()
@@ -2511,7 +2531,7 @@ impl Workspace {
                         .child(
                             div()
                                 .flex_none()
-                                .size(px(6.))
+                                .size(ui(6.))
                                 .rounded_full()
                                 .bg(theme::hsla(p.accent)),
                         )
@@ -2521,15 +2541,15 @@ impl Workspace {
             .child(
                 // The way to every key, for anyone who has not learnt them yet: the shortcuts
                 // binding as the keymap has it ("⌘/", "Ctrl+Shift+/").
-                div().flex_none().px(px(14.)).pt(px(4.)).pb(px(10.)).child(
+                div().flex_none().px(ui(14.)).pt(ui(4.)).pb(ui(10.)).child(
                     div()
                         .id("shortcuts-hint")
                         .relative()
                         .child(record_row(cx.entity(), RowAt::Hint))
                         .flex()
                         .flex_row()
-                        .gap(px(6.))
-                        .text_size(px(10.5))
+                        .gap(ui(6.))
+                        .text_size(ui(10.5))
                         .text_color(theme::hsla(p.bg3))
                         .hover(|s| s.text_color(theme::hsla(p.fg_dim)))
                         .cursor_pointer()
@@ -2590,10 +2610,10 @@ impl Workspace {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(8.))
-            .h(px(28.))
-            .px(px(10.))
-            .rounded(px(6.))
+            .gap(ui(8.))
+            .h(ui(28.))
+            .px(ui(10.))
+            .rounded(ui(6.))
             // On a card, the highlight is the card a little darker.
             .when(active, |d| {
                 d.bg(theme::hsla(match card {
@@ -2626,7 +2646,7 @@ impl Workspace {
             .child(
                 div()
                     .flex_none()
-                    .size(px(6.))
+                    .size(ui(6.))
                     .rounded_full()
                     .when_some(dot, |d, color| d.bg(theme::hsla(color))),
             )
@@ -2646,7 +2666,7 @@ impl Workspace {
             .when(tab.panes.len() > 1, |d| {
                 d.child(
                     div()
-                        .text_size(px(10.))
+                        .text_size(ui(10.))
                         .text_color(theme::hsla(p.muted))
                         .child(format!("{}", tab.panes.len())),
                 )
@@ -2654,7 +2674,7 @@ impl Workspace {
             .child(
                 div()
                     .id(("close-session", tab.id as usize))
-                    .px(px(4.))
+                    .px(ui(4.))
                     .text_color(theme::hsla(p.muted))
                     .invisible()
                     .group_hover(group, |s| s.visible())
@@ -2701,13 +2721,13 @@ impl Workspace {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(10.))
-            .pl(px(lead))
-            .pr(px(trail))
+            .gap(ui(10.))
+            .pl(ui(lead))
+            .pr(ui(trail))
             .window_control_area(WindowControlArea::Drag)
             .on_mouse_down(MouseButton::Left, start_window_drag)
             .font_family(FONT_FAMILY)
-            .text_size(px(11.))
+            .text_size(ui(11.))
             .child(div().flex_1().min_w_0())
             .when_some(running, |d, running| {
                 d.child(
@@ -2716,10 +2736,10 @@ impl Workspace {
                         .flex()
                         .flex_row()
                         .items_center()
-                        .gap(px(6.))
-                        .text_size(px(10.5))
+                        .gap(ui(6.))
+                        .text_size(ui(10.5))
                         .text_color(theme::hsla(p.bg3))
-                        .child(div().size(px(5.)).rounded_full().bg(theme::hsla(p.ok)))
+                        .child(div().size(ui(5.)).rounded_full().bg(theme::hsla(p.ok)))
                         .child(format!("{running} running")),
                 )
             })
@@ -2774,16 +2794,16 @@ impl Workspace {
         Some(
             div()
                 .absolute()
-                .top(px(crate::terminal_view::FIND_BAR_TOP))
-                .left(px(inset))
-                .right(px(inset))
-                .h(px(crate::terminal_view::FIND_BAR_HEIGHT))
+                .top(ui(crate::terminal_view::FIND_BAR_TOP))
+                .left(ui(inset))
+                .right(ui(inset))
+                .h(ui(crate::terminal_view::FIND_BAR_HEIGHT))
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(10.))
-                .px(px(11.))
-                .rounded(px(8.))
+                .gap(ui(10.))
+                .px(ui(11.))
+                .rounded(ui(8.))
                 .bg(theme::hsla(p.raised))
                 .font_family(FONT_FAMILY)
                 .child(
@@ -2796,7 +2816,7 @@ impl Workspace {
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(10.5))
+                        .text_size(ui(10.5))
                         .text_color(theme::hsla(p.bg3))
                         .child(status),
                 )
@@ -3167,16 +3187,18 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette();
         // The panels' widths this frame: as dragged, held to their ranges and to the room the
-        // terminal keeps.
+        // terminal keeps. Widths are kept at the default interface size and shown at the one in
+        // effect, so their ranges grow with it.
+        let s = ui_scale::scale();
         let (sidebar_w, rail_w) = panels::widths(
-            f32::from(window.viewport_size().width),
+            f32::from(window.viewport_size().width) / s,
             self.sidebar_visible().then_some(self.sidebar_width),
             self.rail_visible().then_some(self.rail_width),
-            panels::terminal_min(f32::from(self.metrics.cell_width)),
+            panels::terminal_min(f32::from(self.metrics.cell_width)) / s,
         );
         self.shown_widths = (
-            sidebar_w.unwrap_or(self.sidebar_width),
-            rail_w.unwrap_or(self.rail_width),
+            sidebar_w.unwrap_or(self.sidebar_width) * s,
+            rail_w.unwrap_or(self.rail_width) * s,
         );
         let sidebar = self
             .sidebar_visible()
@@ -3431,6 +3453,14 @@ impl Render for Workspace {
                     this.toggle_rail(window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &crate::BiggerInterface, window, cx| {
+                this.step_interface(true, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &crate::SmallerInterface, window, cx| {
+                    this.step_interface(false, window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &FocusRail, window, cx| {
                 this.focus_mode = false;
                 this.focus_rail(window, cx);

@@ -5,12 +5,13 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Action, App, AppContext as _, BoxShadow, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, point, px, relative,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, point, relative,
 };
 
 use crate::grid_paint::FONT_FAMILY;
 use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
+use crate::ui_scale::ui;
 
 /// What choosing an item does.
 pub enum PaletteTarget {
@@ -219,9 +220,9 @@ impl CommandPalette {
             .flex_row()
             .items_center()
             .justify_between()
-            .gap(px(12.))
-            .h(px(26.))
-            .px(px(15.))
+            .gap(ui(12.))
+            .h(ui(26.))
+            .px(ui(15.))
             .when(selected, |d| d.bg(theme::hsla(p.bg)))
             .hover(|s| s.bg(theme::hsla(p.bg)))
             .cursor_pointer()
@@ -233,13 +234,13 @@ impl CommandPalette {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(9.))
+                    .gap(ui(9.))
                     .text_color(theme::hsla(if selected { p.fg } else { p.ansi[7] }))
                     .when_some(item.dot, |d, color| {
                         d.child(
                             div()
                                 .flex_none()
-                                .size(px(6.))
+                                .size(ui(6.))
                                 .rounded_full()
                                 .bg(theme::hsla(color)),
                         )
@@ -258,11 +259,11 @@ impl CommandPalette {
                 div()
                     .flex_shrink_1()
                     .min_w_0()
-                    .max_w(px(260.))
+                    .max_w(ui(260.))
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .text_size(px(10.5))
+                    .text_size(ui(10.5))
                     .text_color(theme::hsla(p.bg3))
                     .child(SharedString::from(detail)),
             )
@@ -277,10 +278,10 @@ impl Render for CommandPalette {
         for (group, rows) in &self.groups {
             body = body.child(
                 div()
-                    .px(px(15.))
-                    .pt(px(9.))
-                    .pb(px(3.))
-                    .text_size(px(10.5))
+                    .px(ui(15.))
+                    .pt(ui(9.))
+                    .pb(ui(3.))
+                    .text_size(ui(10.5))
                     .text_color(theme::hsla(p.bg3))
                     .child(group.title()),
             );
@@ -292,34 +293,34 @@ impl Render for CommandPalette {
         div()
             .id("palette")
             .w(relative(0.58))
-            .min_w(px(420.))
-            .max_w(px(820.))
+            .min_w(ui(420.))
+            .max_w(ui(820.))
             .flex()
             .flex_col()
-            .pt(px(6.))
-            .pb(px(10.))
-            .rounded(px(12.))
+            .pt(ui(6.))
+            .pb(ui(10.))
+            .rounded(ui(12.))
             .bg(theme::hsla(p.bar))
             // A ring instead of a border.
             .shadow(vec![BoxShadow {
                 color: theme::hsla(p.bg1),
-                offset: point(px(0.), px(0.)),
-                blur_radius: px(0.),
-                spread_radius: px(1.),
+                offset: point(ui(0.), ui(0.)),
+                blur_radius: ui(0.),
+                spread_radius: ui(1.),
                 inset: false,
             }])
             .font_family(FONT_FAMILY)
-            .text_size(px(12.5))
+            .text_size(ui(12.5))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(8.))
-                    .px(px(15.))
-                    .pt(px(9.))
-                    .pb(px(10.))
+                    .gap(ui(8.))
+                    .px(ui(15.))
+                    .pt(ui(9.))
+                    .pb(ui(10.))
                     .child(
                         div()
                             .flex_none()
@@ -332,8 +333,8 @@ impl Render for CommandPalette {
             .when(self.groups.is_empty(), |d| {
                 d.child(
                     div()
-                        .px(px(15.))
-                        .py(px(8.))
+                        .px(ui(15.))
+                        .py(ui(8.))
                         .text_color(theme::hsla(p.bg3))
                         .child("Nothing matches"),
                 )

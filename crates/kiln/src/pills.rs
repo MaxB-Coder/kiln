@@ -2,11 +2,12 @@
 //! WSL distribution (the runtimes are in the context rail). Kiln draws them itself, so they look the
 //! same on every system and shell.
 
-use gpui::{AnyElement, IntoElement, ParentElement, SharedString, Styled, div, px};
+use gpui::{AnyElement, IntoElement, ParentElement, SharedString, Styled, div};
 
 use crate::grid_paint::FONT_FAMILY;
 use crate::naming;
 use crate::theme::{self, palette};
+use crate::ui_scale::ui;
 
 /// What git says about a pane's folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -81,9 +82,9 @@ pub fn render(pills: &Pills) -> AnyElement {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(4.))
-            .h(px(18.))
-            .px(px(9.))
+            .gap(ui(4.))
+            .h(ui(18.))
+            .px(ui(9.))
             .rounded_full()
             .bg(theme::hsla(bg))
             .text_color(theme::hsla(fg))
@@ -93,9 +94,9 @@ pub fn render(pills: &Pills) -> AnyElement {
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(6.))
+        .gap(ui(6.))
         .font_family(FONT_FAMILY)
-        .text_size(px(10.5))
+        .text_size(ui(10.5))
         .font_weight(gpui::FontWeight::BOLD);
     if let Some(project) = &pills.project {
         let bg = pills.project_color.unwrap_or(p.accent);

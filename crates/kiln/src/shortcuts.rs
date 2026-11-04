@@ -11,6 +11,7 @@ use crate::grid_paint::FONT_FAMILY;
 use crate::keymap::{self, Group, KeyStyle, ShortcutRow};
 use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
+use crate::ui_scale::ui;
 
 /// Windows at least this wide get two columns.
 const TWO_COLUMNS_FROM: f32 = 900.;
@@ -77,11 +78,11 @@ fn key_cap(keys: &str) -> Div {
     let p = palette();
     div()
         .flex_none()
-        .px(px(6.))
-        .py(px(1.))
-        .rounded(px(4.))
+        .px(ui(6.))
+        .py(ui(1.))
+        .rounded(ui(4.))
         .bg(theme::hsla(p.raised))
-        .text_size(px(10.5))
+        .text_size(ui(10.5))
         .text_color(theme::hsla(p.fg_dim))
         .child(SharedString::from(keys.to_string()))
 }
@@ -93,8 +94,8 @@ fn row(row: &ShortcutRow) -> Div {
         .flex_row()
         .items_center()
         .justify_between()
-        .gap(px(12.))
-        .h(px(24.))
+        .gap(ui(12.))
+        .h(ui(24.))
         .child(
             div()
                 .flex_1()
@@ -110,7 +111,7 @@ fn row(row: &ShortcutRow) -> Div {
                 .flex_none()
                 .flex()
                 .flex_row()
-                .gap(px(4.))
+                .gap(ui(4.))
                 .children(row.keys.iter().map(|k| key_cap(k))),
         )
 }
@@ -120,11 +121,11 @@ fn section(group: Group, rows: &[&ShortcutRow]) -> Div {
     div()
         .flex()
         .flex_col()
-        .pb(px(10.))
+        .pb(ui(10.))
         .child(
             div()
-                .pb(px(4.))
-                .text_size(px(10.5))
+                .pb(ui(4.))
+                .text_size(ui(10.5))
                 .text_color(theme::hsla(p.bg3))
                 .child(group.title()),
         )
@@ -153,12 +154,12 @@ impl Render for ShortcutsView {
 
         let body = if sections.is_empty() {
             div()
-                .px(px(12.))
-                .pb(px(14.))
+                .px(ui(12.))
+                .pb(ui(14.))
                 .text_color(theme::hsla(p.muted))
                 .child("No shortcut matches")
         } else {
-            div().flex().flex_row().gap(px(32.)).px(px(12.)).children(
+            div().flex().flex_row().gap(ui(32.)).px(ui(12.)).children(
                 columns
                     .into_iter()
                     .filter(|c| !c.is_empty())
@@ -175,42 +176,42 @@ impl Render for ShortcutsView {
 
         div()
             .id("shortcuts")
-            .w(px(if two { 760. } else { 420. }))
+            .w(ui(if two { 760. } else { 420. }))
             .max_w_full()
             .max_h(px(max_h))
             .flex()
             .flex_col()
-            .p(px(8.))
-            .rounded(px(12.))
+            .p(ui(8.))
+            .rounded(ui(12.))
             .bg(theme::hsla(p.bar))
             // A ring and a soft drop shadow instead of a border.
             .shadow(vec![
                 BoxShadow {
                     color: theme::hsla(p.bg1),
-                    offset: point(px(0.), px(0.)),
-                    blur_radius: px(0.),
-                    spread_radius: px(1.),
+                    offset: point(ui(0.), ui(0.)),
+                    blur_radius: ui(0.),
+                    spread_radius: ui(1.),
                     inset: false,
                 },
                 BoxShadow {
                     color: p.shadow(),
-                    offset: point(px(0.), px(12.)),
-                    blur_radius: px(32.),
-                    spread_radius: px(0.),
+                    offset: point(ui(0.), ui(12.)),
+                    blur_radius: ui(32.),
+                    spread_radius: ui(0.),
                     inset: false,
                 },
             ])
             .font_family(FONT_FAMILY)
-            .text_size(px(13.))
+            .text_size(ui(13.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(8.))
-                    .px(px(12.))
-                    .py(px(10.))
+                    .gap(ui(8.))
+                    .px(ui(12.))
+                    .py(ui(10.))
                     .child(
                         div()
                             .flex_none()
@@ -225,7 +226,7 @@ impl Render for ShortcutsView {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .pt(px(4.))
+                    .pt(ui(4.))
                     .child(body),
             )
     }

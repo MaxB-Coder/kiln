@@ -427,6 +427,13 @@ fn main() {
         println!("done");
         return;
     }
+    if scenario == "interface" {
+        interface_sizes(&mut s);
+        let _ = std::fs::remove_file(&state_file);
+        let _ = std::fs::remove_dir_all(&config_home);
+        println!("done");
+        return;
+    }
     if scenario == "diff" {
         diff_viewer(&mut s);
         let _ = std::fs::remove_file(&state_file);
@@ -2354,6 +2361,37 @@ fn staged_shots(s: &mut Shots, demo: &Path, theme: &str) {
     std::fs::write(&routes, text).unwrap();
     git(&["reset", "-q", "src/routes.js"]);
     s.keystroke("escape");
+}
+
+/// The four interface sizes: the sidebar, the rail and Settings at each (the terminal's text
+/// stays the same size).
+fn interface_sizes(s: &mut Shots) {
+    let path = kiln::config::config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let demo = demo_project();
+    s.run(&format!("cd {}", demo.display()), Duration::from_secs(5));
+    s.keystroke("cmd-i");
+    for (i, size) in kiln::ui_scale::InterfaceSize::ALL.iter().enumerate() {
+        std::fs::write(
+            &path,
+            format!(
+                "cursor_blink = false\ninterface_size = \"{}\"\n",
+                size.key()
+            ),
+        )
+        .unwrap();
+        s.pump(Duration::from_millis(2500));
+        assert_eq!(kiln::ui_scale::scale(), size.factor(), "applied live");
+        s.shot(&format!("ui{i}-{}-sidebar-rail", size.key()));
+        s.keystroke("cmd-,");
+        s.pump(Duration::from_millis(600));
+        s.shot(&format!("ui{i}-{}-settings", size.key()));
+        // Down to the Appearance rows (Interface size under Font size).
+        s.scroll(590., 400., -260.);
+        s.pump(Duration::from_millis(300));
+        s.shot(&format!("ui{i}-{}-settings-rows", size.key()));
+        s.keystroke("escape");
+    }
 }
 
 fn demo_project() -> PathBuf {

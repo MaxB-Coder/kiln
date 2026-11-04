@@ -22,6 +22,7 @@ use crate::grid_paint::FONT_FAMILY;
 use crate::settings_theme::{self as themes, CARDS, COLOURS};
 use crate::text_input::{TextInput, TextInputEvent};
 use crate::theme::{self, palette};
+use crate::ui_scale::ui;
 
 pub enum SettingsEvent {
     /// A setting was written; the config the file now holds.
@@ -49,6 +50,8 @@ pub enum Change {
     /// Back to the Kiln design, forgetting the image.
     RemoveCustomIcon,
     FontSize(f32),
+    /// The size of everything outside the terminal's text.
+    InterfaceSize(crate::ui_scale::InterfaceSize),
     CursorBlink(bool),
     Sidebar(bool),
     Prompt(PromptStyle),
@@ -199,6 +202,7 @@ impl Change {
         match self {
             Change::Icon(design) => (&["icon"], design.key().into()),
             Change::FontSize(size) if size.fract() == 0. => (&["font_size"], (size as i64).into()),
+            Change::InterfaceSize(size) => (&["interface_size"], size.key().into()),
             Change::FontSize(size) => (&["font_size"], f64::from(size).into()),
             Change::CursorBlink(on) => (&["cursor_blink"], on.into()),
             Change::Sidebar(on) => (&["window", "sidebar"], on.into()),
@@ -258,6 +262,7 @@ enum Control {
     Icon,
     Theme,
     FontSize,
+    InterfaceSize,
     CursorBlink,
     Sidebar,
     Prompt,
@@ -346,7 +351,7 @@ impl SettingsView {
         let mut hex = Vec::new();
         let mut hex_events = Vec::new();
         for i in 0..COLOURS.len() {
-            let input = cx.new(|cx| TextInput::new("#rrggbb", cx).with_size(px(10.5)));
+            let input = cx.new(|cx| TextInput::new("#rrggbb", cx).with_size(ui(10.5)));
             hex_events.push(cx.subscribe_in(
                 &input,
                 window,
@@ -550,6 +555,7 @@ impl SettingsView {
             Control::Icon,
             Control::Theme,
             Control::FontSize,
+            Control::InterfaceSize,
             Control::CursorBlink,
             Control::Sidebar,
             Control::Prompt,
@@ -639,6 +645,14 @@ impl SettingsView {
                 }
             }
             Control::FontSize if !flip => Change::FontSize(step_font_size(c.font_size, step > 0)),
+            // The arrows step through the four; Space goes one bigger, round to the smallest.
+            Control::InterfaceSize => {
+                use crate::ui_scale::InterfaceSize;
+                let all = InterfaceSize::ALL;
+                let at = all.iter().position(|s| *s == c.interface_size).unwrap_or(1) as i32;
+                let next = (at + if flip { 1 } else { step }).rem_euclid(all.len() as i32);
+                Change::InterfaceSize(all[next as usize])
+            }
             Control::NotifyAfter if !flip => {
                 Change::NotifyAfter(step_notify(c.notify_after_secs, step > 0))
             }
@@ -754,10 +768,10 @@ impl Focusable for SettingsView {
 fn section(title: &'static str) -> Div {
     let p = palette();
     div()
-        .px(px(18.))
-        .pt(px(11.))
-        .pb(px(4.))
-        .text_size(px(10.5))
+        .px(ui(18.))
+        .pt(ui(11.))
+        .pb(ui(4.))
+        .text_size(ui(10.5))
         .text_color(theme::hsla(p.bg3))
         .child(title)
 }
@@ -767,16 +781,16 @@ fn toggle(on: bool) -> Div {
     div()
         .relative()
         .flex_none()
-        .w(px(30.))
-        .h(px(17.))
+        .w(ui(30.))
+        .h(ui(17.))
         .rounded_full()
         .bg(theme::hsla(if on { p.accent } else { p.bg1 }))
         .child(
             div()
                 .absolute()
-                .top(px(2.))
-                .left(px(if on { 15. } else { 2. }))
-                .size(px(13.))
+                .top(ui(2.))
+                .left(ui(if on { 15. } else { 2. }))
+                .size(ui(13.))
                 .rounded_full()
                 .bg(theme::hsla(if on { p.bar } else { p.ansi[7] })),
         )
@@ -797,9 +811,9 @@ impl SettingsView {
             .flex_row()
             .items_center()
             .justify_between()
-            .gap(px(12.))
-            .px(px(18.))
-            .py(px(5.))
+            .gap(ui(12.))
+            .px(ui(18.))
+            .py(ui(5.))
             .text_color(theme::hsla(p.fg_dim))
             .when(self.lit(control), |d| d.bg(theme::hsla(p.bg)))
             .child(
@@ -810,8 +824,8 @@ impl SettingsView {
                     .when_some(sub, |d, sub| {
                         d.child(
                             div()
-                                .mt(px(2.))
-                                .text_size(px(10.5))
+                                .mt(ui(2.))
+                                .text_size(ui(10.5))
                                 .text_color(theme::hsla(p.bg3))
                                 .child(sub),
                         )
@@ -840,13 +854,13 @@ impl SettingsView {
         let label = crate::editor::label(&self.config.editor, self.env_editor.as_deref());
         div()
             .id("editor")
-            .px(px(8.))
-            .py(px(2.))
-            .rounded(px(6.))
+            .px(ui(8.))
+            .py(ui(2.))
+            .rounded(ui(6.))
             .bg(theme::hsla(p.bar))
             .border_1()
             .border_color(theme::hsla(p.bg1))
-            .text_size(px(11.))
+            .text_size(ui(11.))
             .text_color(theme::hsla(p.fg))
             .cursor_pointer()
             .on_click(cx.listener(|this, _, _, cx| {
@@ -870,11 +884,11 @@ impl SettingsView {
             .flex()
             .flex_col()
             .ml_auto()
-            .mr(px(18.))
-            .mb(px(4.))
-            .w(px(220.))
-            .p(px(4.))
-            .rounded(px(6.))
+            .mr(ui(18.))
+            .mb(ui(4.))
+            .w(ui(220.))
+            .p(ui(4.))
+            .rounded(ui(6.))
             .bg(theme::hsla(p.bar))
             .border_1()
             .border_color(theme::hsla(p.bg1))
@@ -883,11 +897,11 @@ impl SettingsView {
                 let choice = *choice;
                 div()
                     .id(("editor-choice", i))
-                    .px(px(8.))
-                    .py(px(3.))
-                    .rounded(px(4.))
+                    .px(ui(8.))
+                    .py(ui(3.))
+                    .rounded(ui(4.))
                     .cursor_pointer()
-                    .text_size(px(11.))
+                    .text_size(ui(11.))
                     .text_color(theme::hsla(if chosen { p.fg } else { p.fg_dim }))
                     .when(chosen, |d| d.bg(theme::hsla(p.bg1)))
                     .hover(|s| s.bg(theme::hsla(p.bg1)))
@@ -915,11 +929,11 @@ impl SettingsView {
         let button = |id: (&'static str, usize), glyph: &'static str, change: Change| {
             div()
                 .id(id)
-                .size(px(20.))
+                .size(ui(20.))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(6.))
+                .rounded(ui(6.))
                 .bg(theme::hsla(p.bg))
                 .text_color(theme::hsla(p.ansi[7]))
                 .cursor_pointer()
@@ -931,12 +945,12 @@ impl SettingsView {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(8.))
+            .gap(ui(8.))
             .text_color(theme::hsla(p.fg))
             .child(button((id, 0), "−", down))
             .child(
                 div()
-                    .min_w(px(40.))
+                    .min_w(ui(40.))
                     .flex()
                     .justify_center()
                     .child(SharedString::from(value)),
@@ -951,10 +965,10 @@ impl SettingsView {
             let on = current == style;
             div()
                 .id(("prompt", i))
-                .px(px(9.))
-                .py(px(2.))
-                .rounded(px(5.))
-                .text_size(px(11.))
+                .px(ui(9.))
+                .py(ui(2.))
+                .rounded(ui(5.))
+                .text_size(ui(11.))
                 .cursor_pointer()
                 .text_color(theme::hsla(if on {
                     p.fg
@@ -968,12 +982,48 @@ impl SettingsView {
         div()
             .flex()
             .flex_row()
-            .gap(px(2.))
-            .p(px(2.))
-            .rounded(px(7.))
+            .gap(ui(2.))
+            .p(ui(2.))
+            .rounded(ui(7.))
             .bg(theme::hsla(p.bg))
             .child(option(0, "Kiln flame", PromptStyle::Kiln))
             .child(option(1, "Shell's own", PromptStyle::Shell))
+    }
+
+    /// "Interface size": the four steps.
+    fn interface_choices(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        use crate::ui_scale::InterfaceSize;
+        let p = palette();
+        let current = self.config.interface_size;
+        div()
+            .flex()
+            .flex_row()
+            .gap(ui(2.))
+            .p(ui(2.))
+            .rounded(ui(7.))
+            .bg(theme::hsla(p.bg))
+            .children(InterfaceSize::ALL.iter().enumerate().map(|(i, size)| {
+                let (on, size) = (current == *size, *size);
+                div()
+                    .id(("interface-size", i))
+                    .px(ui(9.))
+                    .py(ui(2.))
+                    .rounded(ui(5.))
+                    .text_size(ui(11.))
+                    .cursor_pointer()
+                    .text_color(theme::hsla(if on {
+                        p.fg
+                    } else {
+                        theme::blend(p.bg3, p.muted, 0.5)
+                    }))
+                    .when(on, |d| d.bg(theme::hsla(p.bg1)))
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            this.set(Change::InterfaceSize(size), cx)
+                        }),
+                    )
+                    .child(size.label())
+            }))
     }
 
     /// "Open windows": like last time, full screen, or filling the screen.
@@ -984,18 +1034,18 @@ impl SettingsView {
         div()
             .flex()
             .flex_row()
-            .gap(px(2.))
-            .p(px(2.))
-            .rounded(px(7.))
+            .gap(ui(2.))
+            .p(ui(2.))
+            .rounded(ui(7.))
             .bg(theme::hsla(p.bg))
             .children(OpenMode::ALL.iter().enumerate().map(|(i, mode)| {
                 let (on, mode) = (current == *mode, *mode);
                 div()
                     .id(("window-open", i))
-                    .px(px(9.))
-                    .py(px(2.))
-                    .rounded(px(5.))
-                    .text_size(px(11.))
+                    .px(ui(9.))
+                    .py(ui(2.))
+                    .rounded(ui(5.))
+                    .text_size(ui(11.))
                     .cursor_pointer()
                     .text_color(theme::hsla(if on {
                         p.fg
@@ -1135,8 +1185,8 @@ impl SettingsView {
         let ring = |on: bool, tile: AnyElement| {
             div()
                 .relative()
-                .p(px(3.))
-                .rounded(px(17.))
+                .p(ui(3.))
+                .rounded(ui(17.))
                 .border_2()
                 .border_color(if on {
                     theme::hsla(p.accent)
@@ -1149,8 +1199,8 @@ impl SettingsView {
             .flex()
             .flex_row()
             .justify_between()
-            .px(px(18.))
-            .py(px(4.));
+            .px(ui(18.))
+            .py(ui(4.));
         for (i, design) in IconDesign::DRAWN.into_iter().enumerate() {
             let on = selected == design;
             let colour = self.config.icon_colour(design);
@@ -1162,9 +1212,9 @@ impl SettingsView {
             let (top, bottom) = colour.swatch();
             let badge = div()
                 .absolute()
-                .right(px(-5.))
-                .bottom(px(-5.))
-                .size(px(18.))
+                .right(ui(-5.))
+                .bottom(ui(-5.))
+                .size(ui(18.))
                 .rounded_full()
                 .bg(theme::hsla(p.raised))
                 .flex()
@@ -1172,7 +1222,7 @@ impl SettingsView {
                 .justify_center()
                 .child(
                     div()
-                        .size(px(12.))
+                        .size(ui(12.))
                         .rounded_full()
                         .border_1()
                         .border_color(gpui::white().opacity(0.25))
@@ -1184,19 +1234,19 @@ impl SettingsView {
                 );
             let tile = div()
                 .relative()
-                .child(img(image).size(px(TILE)).rounded(px(14.)))
+                .child(img(image).size(ui(TILE)).rounded(ui(14.)))
                 .when(on, |d| d.child(badge))
                 .into_any_element();
             row = row.child(
                 div()
                     .id(("icon", i))
-                    .w(px(76.))
+                    .w(ui(76.))
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(6.))
+                    .gap(ui(6.))
                     .cursor_pointer()
-                    .text_size(px(10.5))
+                    .text_size(ui(10.5))
                     .text_color(theme::hsla(label(on)))
                     .on_click(cx.listener(move |this, _, _, cx| this.click_icon(design, cx)))
                     .child(ring(on, tile))
@@ -1211,19 +1261,19 @@ impl SettingsView {
         let on = selected == IconDesign::Custom;
         let tile = match &custom {
             Some((image, _)) => img(image.clone())
-                .size(px(TILE))
-                .rounded(px(14.))
+                .size(ui(TILE))
+                .rounded(ui(14.))
                 .into_any_element(),
             None => div()
-                .size(px(TILE))
-                .rounded(px(14.))
+                .size(ui(TILE))
+                .rounded(ui(14.))
                 .border_2()
                 .border_dashed()
                 .border_color(theme::hsla(p.bg2))
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(22.))
+                .text_size(ui(22.))
                 .text_color(theme::hsla(label(false)))
                 .child("+")
                 .into_any_element(),
@@ -1231,13 +1281,13 @@ impl SettingsView {
         row = row.child(
             div()
                 .id(("icon", IconDesign::DRAWN.len()))
-                .w(px(76.))
+                .w(ui(76.))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(6.))
+                .gap(ui(6.))
                 .cursor_pointer()
-                .text_size(px(10.5))
+                .text_size(ui(10.5))
                 .text_color(theme::hsla(label(on)))
                 .on_click(cx.listener(|this, _, _, cx| this.click_icon(IconDesign::Custom, cx)))
                 .child(ring(on, tile))
@@ -1255,20 +1305,20 @@ impl SettingsView {
             let left = (at as f32 * 95. - 2.).clamp(4., PANEL_W - width - 4.);
             div()
                 .id("icon-colours")
-                .ml(px(left))
-                .mt(px(8.))
-                .w(px(width))
-                .px(px(12.))
-                .py(px(10.))
-                .rounded(px(10.))
+                .ml(ui(left))
+                .mt(ui(8.))
+                .w(ui(width))
+                .px(ui(12.))
+                .py(ui(10.))
+                .rounded(ui(10.))
                 .bg(theme::hsla(p.raised))
                 .border_1()
                 .border_color(theme::hsla(p.bg1))
                 .shadow(vec![gpui::BoxShadow {
                     color: p.shadow(),
-                    offset: gpui::point(px(0.), px(10.)),
-                    blur_radius: px(30.),
-                    spread_radius: px(0.),
+                    offset: gpui::point(ui(0.), ui(10.)),
+                    blur_radius: ui(30.),
+                    spread_radius: ui(0.),
                     inset: false,
                 }])
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
@@ -1277,8 +1327,8 @@ impl SettingsView {
                 }))
                 .child(
                     div()
-                        .mb(px(8.))
-                        .text_size(px(10.))
+                        .mb(ui(8.))
+                        .text_size(ui(10.))
                         .text_color(theme::hsla(p.muted))
                         .child("Colour"),
                 )
@@ -1289,20 +1339,20 @@ impl SettingsView {
                         // Equal columns, the swatch centred and its name below.
                         div()
                             .id(("icon-colour", i))
-                            .w(px(58.))
+                            .w(ui(58.))
                             .flex()
                             .flex_col()
                             .items_center()
-                            .gap(px(5.))
+                            .gap(ui(5.))
                             .cursor_pointer()
-                            .text_size(px(9.5))
+                            .text_size(ui(9.5))
                             .text_color(theme::hsla(if on { p.fg } else { p.fg_dim }))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set(Change::IconColour(selected, colour), cx)
                             }))
                             .child(
                                 div()
-                                    .p(px(2.))
+                                    .p(ui(2.))
                                     .rounded_full()
                                     .border_2()
                                     .border_color(if on {
@@ -1310,7 +1360,7 @@ impl SettingsView {
                                     } else {
                                         gpui::transparent_black()
                                     })
-                                    .child(div().size(px(24.)).rounded_full().bg(linear_gradient(
+                                    .child(div().size(ui(24.)).rounded_full().bg(linear_gradient(
                                         180.,
                                         linear_color_stop(theme::hsla(top), 0.),
                                         linear_color_stop(theme::hsla(bottom), 1.),
@@ -1330,12 +1380,12 @@ impl SettingsView {
                 .child(text)
         };
         let note = div()
-            .px(px(18.))
-            .pt(px(8.))
+            .px(ui(18.))
+            .pt(ui(8.))
             .flex()
             .flex_row()
-            .gap(px(10.))
-            .text_size(px(10.5))
+            .gap(ui(10.))
+            .text_size(ui(10.5))
             .text_color(theme::hsla(p.bg3));
         let note = if let Some(error) = &self.icon_error {
             note.child(div().text_color(theme::hsla(p.failed)).child(error.clone()))
@@ -1364,7 +1414,7 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .pb(px(4.))
+            .pb(ui(4.))
             .when(lit, |d| d.bg(theme::hsla(p.bg)))
             .child(row)
             .children(menu)
@@ -1387,21 +1437,21 @@ impl SettingsView {
             let on = current == id;
             div()
                 .id(("theme", i))
-                .w(px(themes::CARD_W))
+                .w(ui(themes::CARD_W))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(6.))
+                .gap(ui(6.))
                 .cursor_pointer()
-                .text_size(px(10.))
+                .text_size(ui(10.))
                 .text_color(theme::hsla(if on { p.fg } else { p.muted }))
                 .whitespace_nowrap()
                 .on_click(cx.listener(move |this, _, _, cx| this.choose_theme(id, cx)))
                 .child(
                     div()
                         .relative()
-                        .w(px(themes::CARD_W))
-                        .h(px(themes::CARD_H))
+                        .w(ui(themes::CARD_W))
+                        .h(ui(themes::CARD_H))
                         .child(
                             canvas(
                                 |_, _, _| {},
@@ -1415,7 +1465,7 @@ impl SettingsView {
                             div()
                                 .absolute()
                                 .inset_0()
-                                .rounded(px(8.))
+                                .rounded(ui(8.))
                                 .border_1()
                                 .border_color(theme::hsla(p.bg1)),
                         )
@@ -1424,11 +1474,11 @@ impl SettingsView {
                             d.child(
                                 div()
                                     .absolute()
-                                    .top(px(-5.))
-                                    .left(px(-5.))
-                                    .right(px(-5.))
-                                    .bottom(px(-5.))
-                                    .rounded(px(13.))
+                                    .top(ui(-5.))
+                                    .left(ui(-5.))
+                                    .right(ui(-5.))
+                                    .bottom(ui(-5.))
+                                    .rounded(ui(13.))
                                     .border_2()
                                     .border_color(theme::hsla(p.accent)),
                             )
@@ -1439,13 +1489,13 @@ impl SettingsView {
         let mut rows = div()
             .flex()
             .flex_col()
-            .gap(px(12.))
-            .px(px(18.))
-            .pt(px(6.))
-            .pb(px(6.))
+            .gap(ui(12.))
+            .px(ui(18.))
+            .pt(ui(6.))
+            .pb(ui(6.))
             .when(lit, |d| d.bg(theme::hsla(p.bg)));
         for (r, chunk) in CARDS.chunks(4).enumerate() {
-            let mut row = div().flex().flex_row().gap(px(10.));
+            let mut row = div().flex().flex_row().gap(ui(10.));
             for (k, (id, title)) in chunk.iter().enumerate() {
                 row = row.child(card(r * 4 + k, id, title, cx));
             }
@@ -1466,7 +1516,7 @@ impl SettingsView {
         div()
             .id(id)
             .flex_none()
-            .rounded(px(5.))
+            .rounded(ui(5.))
             .bg(theme::hsla(color))
             .border_1()
             .border_color(theme::hsla(if open { p.accent } else { p.bg2 }))
@@ -1486,12 +1536,12 @@ impl SettingsView {
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(7.))
-                .text_size(px(10.5))
+                .gap(ui(7.))
+                .text_size(ui(10.5))
                 .text_color(theme::hsla(p.fg_dim))
                 .child(
                     this.swatch(("colour", i), themes::slot(&c, i), Target::Colour(i), cx)
-                        .size(px(18.)),
+                        .size(ui(18.)),
                 )
                 .child(
                     div()
@@ -1505,21 +1555,21 @@ impl SettingsView {
                 .child(
                     div()
                         .flex_none()
-                        .w(px(64.))
-                        .px(px(5.))
-                        .rounded(px(5.))
+                        .w(ui(64.))
+                        .px(ui(5.))
+                        .rounded(ui(5.))
                         .bg(theme::hsla(p.bar))
                         .border_1()
                         .border_color(theme::hsla(p.bg1))
                         .child(this.hex[i].clone()),
                 )
         };
-        let mut grid = div().flex().flex_col().gap(px(6.));
+        let mut grid = div().flex().flex_col().gap(ui(6.));
         for r in 0..COLOURS.len().div_ceil(2) {
             let mut row = div()
                 .flex()
                 .flex_row()
-                .gap(px(14.))
+                .gap(ui(14.))
                 .child(field(2 * r, self, cx));
             row = if 2 * r + 1 < COLOURS.len() {
                 row.child(field(2 * r + 1, self, cx))
@@ -1529,11 +1579,11 @@ impl SettingsView {
             grid = grid.child(row);
         }
         let ansi_row = |label: &'static str, from: usize, this: &Self, cx: &mut Context<Self>| {
-            let mut row = div().flex().flex_row().items_center().gap(px(6.)).child(
+            let mut row = div().flex().flex_row().items_center().gap(ui(6.)).child(
                 div()
-                    .w(px(44.))
+                    .w(ui(44.))
                     .flex_none()
-                    .text_size(px(10.))
+                    .text_size(ui(10.))
                     .text_color(theme::hsla(p.bg3))
                     .child(label),
             );
@@ -1541,7 +1591,7 @@ impl SettingsView {
                 row = row.child(
                     this.swatch(("ansi", i), c.ansi[i], Target::Ansi(i), cx)
                         .flex_1()
-                        .h(px(20.)),
+                        .h(ui(20.)),
                 );
             }
             row
@@ -1550,9 +1600,9 @@ impl SettingsView {
             div()
                 .flex()
                 .flex_col()
-                .mb(px(8.))
-                .p(px(4.))
-                .rounded(px(6.))
+                .mb(ui(8.))
+                .p(ui(4.))
+                .rounded(ui(6.))
                 .bg(theme::hsla(p.bar))
                 .border_1()
                 .border_color(theme::hsla(p.bg1))
@@ -1560,11 +1610,11 @@ impl SettingsView {
                     let id = preset.id;
                     div()
                         .id(("base", i))
-                        .px(px(8.))
-                        .py(px(3.))
-                        .rounded(px(4.))
+                        .px(ui(8.))
+                        .py(ui(3.))
+                        .rounded(ui(4.))
                         .cursor_pointer()
-                        .text_size(px(11.))
+                        .text_size(ui(11.))
                         .text_color(theme::hsla(if id == base { p.fg } else { p.fg_dim }))
                         .hover(|s| s.bg(theme::hsla(p.bg1)))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1577,12 +1627,12 @@ impl SettingsView {
         let picker = self.picker.map(|picker| self.picker_view(picker, cx));
         let reset_base = theme::preset_by_id(&base).map_or("kiln-dark", |p| p.id);
         div()
-            .mx(px(18.))
-            .my(px(4.))
-            .px(px(12.))
-            .pt(px(10.))
-            .pb(px(12.))
-            .rounded(px(10.))
+            .mx(ui(18.))
+            .my(ui(4.))
+            .px(ui(12.))
+            .pt(ui(10.))
+            .pb(ui(12.))
+            .rounded(ui(10.))
             .bg(theme::hsla(p.bg))
             .border_1()
             .border_color(theme::hsla(p.bg1))
@@ -1594,8 +1644,8 @@ impl SettingsView {
                     .flex_row()
                     .justify_between()
                     .items_center()
-                    .mb(px(8.))
-                    .text_size(px(11.))
+                    .mb(ui(8.))
+                    .text_size(ui(11.))
                     .text_color(theme::hsla(p.fg_dim))
                     .child("Custom colours")
                     .child(
@@ -1603,14 +1653,14 @@ impl SettingsView {
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(6.))
+                            .gap(ui(6.))
                             .child("Start from")
                             .child(
                                 div()
                                     .id("start-from")
-                                    .px(px(6.))
-                                    .py(px(1.))
-                                    .rounded(px(6.))
+                                    .px(ui(6.))
+                                    .py(ui(1.))
+                                    .rounded(ui(6.))
                                     .bg(theme::hsla(p.bar))
                                     .border_1()
                                     .border_color(theme::hsla(p.bg1))
@@ -1631,8 +1681,8 @@ impl SettingsView {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(6.))
-                    .mt(px(10.))
+                    .gap(ui(6.))
+                    .mt(ui(10.))
                     .child(ansi_row("normal", 0, self, cx))
                     .child(ansi_row("bright", 8, self, cx)),
             )
@@ -1641,8 +1691,8 @@ impl SettingsView {
                     .flex()
                     .flex_row()
                     .justify_between()
-                    .mt(px(10.))
-                    .text_size(px(10.))
+                    .mt(ui(10.))
+                    .text_size(ui(10.))
                     .text_color(theme::hsla(p.bg3))
                     .child("Saved to kiln.toml as you edit")
                     .child(
@@ -1674,9 +1724,9 @@ impl SettingsView {
         let square = div()
             .id("picker-square")
             .relative()
-            .w(px(w))
-            .h(px(h))
-            .rounded(px(6.))
+            .w(ui(w))
+            .h(ui(h))
+            .rounded(ui(6.))
             .overflow_hidden()
             .bg(theme::hsla(pure))
             .cursor_crosshair()
@@ -1693,9 +1743,9 @@ impl SettingsView {
             .child(
                 div()
                     .absolute()
-                    .left(px(sat * w - 5.))
-                    .top(px((1. - val) * h - 5.))
-                    .size(px(10.))
+                    .left(ui(sat * w - 5.))
+                    .top(ui((1. - val) * h - 5.))
+                    .size(ui(10.))
                     .rounded_full()
                     .border_2()
                     .border_color(white),
@@ -1724,10 +1774,10 @@ impl SettingsView {
         let strip = div()
             .id("picker-strip")
             .relative()
-            .mt(px(8.))
-            .w(px(w))
-            .h(px(12.))
-            .rounded(px(6.))
+            .mt(ui(8.))
+            .w(ui(w))
+            .h(ui(12.))
+            .rounded(ui(6.))
             .overflow_hidden()
             .flex()
             .flex_row()
@@ -1742,11 +1792,11 @@ impl SettingsView {
             .child(
                 div()
                     .absolute()
-                    .left(px(hue / 360. * w - 2.))
+                    .left(ui(hue / 360. * w - 2.))
                     .top_0()
-                    .w(px(4.))
+                    .w(ui(4.))
                     .h_full()
-                    .rounded(px(2.))
+                    .rounded(ui(2.))
                     .border_1()
                     .border_color(white),
             )
@@ -1771,22 +1821,22 @@ impl SettingsView {
                 }),
             );
         div()
-            .mt(px(10.))
+            .mt(ui(10.))
             .flex()
             .flex_row()
-            .gap(px(12.))
+            .gap(ui(12.))
             .child(div().flex().flex_col().child(square).child(strip))
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(6.))
-                    .text_size(px(10.5))
+                    .gap(ui(6.))
+                    .text_size(ui(10.5))
                     .text_color(theme::hsla(p.fg_dim))
                     .child(
                         div()
-                            .size(px(28.))
-                            .rounded(px(6.))
+                            .size(ui(28.))
+                            .rounded(ui(6.))
                             .bg(theme::hsla(color))
                             .border_1()
                             .border_color(theme::hsla(p.bg2)),
@@ -1836,6 +1886,12 @@ impl Render for SettingsView {
                     Change::FontSize(step_font_size(c.font_size, true)),
                     cx,
                 ),
+            ))
+            .child(self.row(
+                Control::InterfaceSize,
+                "Interface size",
+                None,
+                self.interface_choices(cx),
             ))
             .child(self.row(
                 Control::CursorBlink,
@@ -1939,25 +1995,25 @@ impl Render for SettingsView {
             .id("settings")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
-            .w(px(PANEL_W))
+            .w(ui(PANEL_W))
             .max_w_full()
             .max_h(px(max_h))
             .flex()
             .flex_col()
-            .pt(px(14.))
-            .pb(px(10.))
-            .rounded(px(12.))
+            .pt(ui(14.))
+            .pb(ui(10.))
+            .rounded(ui(12.))
             .bg(theme::hsla(p.bar))
             // A ring instead of a border.
             .shadow(vec![gpui::BoxShadow {
                 color: theme::hsla(p.bg1),
-                offset: gpui::point(px(0.), px(0.)),
-                blur_radius: px(0.),
-                spread_radius: px(1.),
+                offset: gpui::point(ui(0.), ui(0.)),
+                blur_radius: ui(0.),
+                spread_radius: ui(1.),
                 inset: false,
             }])
             .font_family(FONT_FAMILY)
-            .text_size(px(12.))
+            .text_size(ui(12.))
             // About a browser's normal line height, as in the mockup.
             .line_height(relative(1.3))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1979,18 +2035,18 @@ impl Render for SettingsView {
                     .flex_row()
                     .justify_between()
                     .items_center()
-                    .px(px(18.))
-                    .pb(px(6.))
+                    .px(ui(18.))
+                    .pb(ui(6.))
                     .child(
                         div()
-                            .text_size(px(12.5))
+                            .text_size(ui(12.5))
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(theme::hsla(p.fg))
                             .child("Settings"),
                     )
                     .child(
                         div()
-                            .text_size(px(10.5))
+                            .text_size(ui(10.5))
                             .text_color(theme::hsla(p.bg3))
                             .child("esc"),
                     ),
@@ -1998,15 +2054,15 @@ impl Render for SettingsView {
             .when_some(self.broken.clone(), |d, error| {
                 d.child(
                     div()
-                        .mx(px(18.))
-                        .my(px(6.))
-                        .px(px(10.))
-                        .py(px(8.))
-                        .rounded(px(8.))
+                        .mx(ui(18.))
+                        .my(ui(6.))
+                        .px(ui(10.))
+                        .py(ui(8.))
+                        .rounded(ui(8.))
                         .bg(theme::hsla(p.bg))
                         .flex()
                         .flex_col()
-                        .gap(px(4.))
+                        .gap(ui(4.))
                         .child(
                             div()
                                 .text_color(theme::hsla(p.failed))
@@ -2014,7 +2070,7 @@ impl Render for SettingsView {
                         )
                         .child(
                             div()
-                                .text_size(px(10.5))
+                                .text_size(ui(10.5))
                                 .text_color(theme::hsla(p.fg_dim))
                                 .child(SharedString::from(error)),
                         ),
@@ -2035,11 +2091,11 @@ impl Render for SettingsView {
                     .flex_row()
                     .justify_between()
                     .items_center()
-                    .px(px(18.))
-                    .pt(px(10.))
-                    .pb(px(2.))
-                    .mt(px(4.))
-                    .text_size(px(10.5))
+                    .px(ui(18.))
+                    .pt(ui(10.))
+                    .pb(ui(2.))
+                    .mt(ui(4.))
+                    .text_size(ui(10.5))
                     .text_color(theme::hsla(p.bg3))
                     .child(
                         div()
@@ -2055,9 +2111,9 @@ impl Render for SettingsView {
             .when_some(self.failed.clone(), |d, error| {
                 d.child(
                     div()
-                        .px(px(18.))
-                        .pt(px(4.))
-                        .text_size(px(10.5))
+                        .px(ui(18.))
+                        .pt(ui(4.))
+                        .text_size(ui(10.5))
                         .text_color(theme::hsla(p.failed))
                         .child(SharedString::from(format!("Not saved: {error}"))),
                 )
